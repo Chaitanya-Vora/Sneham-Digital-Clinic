@@ -180,10 +180,14 @@ function DesktopShell() {
   return (
     <div className="min-h-screen bg-canvas">
       <div className="sticky top-0 z-[90] flex items-center justify-between gap-4 border-b border-border/70 bg-canvas/85 px-5 py-2.5 backdrop-blur">
-        <div className="flex items-center gap-2.5">
-          <SnehamMark size={28} />
-          <span className="font-display text-[13px] font-semibold text-ink">Sneham Digital Clinic</span>
-        </div>
+        {/* WebApp's own sidebar already shows the Sneham mark — showing it
+            here too, directly above it, was pure duplication. */}
+        {surface === 'web' ? <div /> : (
+          <div className="flex items-center gap-2.5">
+            <SnehamMark size={28} />
+            <span className="font-display text-[13px] font-semibold text-ink">Sneham Digital Clinic</span>
+          </div>
+        )}
         {!FIXED_SURFACE && (
           <div className="inline-flex rounded-pill bg-screen p-1">
             {surfaces.map((s) => (

@@ -125,7 +125,7 @@ interface ClinicState {
   markNoShow: (appointmentId: string) => void
   scheduleFollowUp: (input: { patientId: string; practitionerId: string; time: string; date: string; type: 'In person' | 'Video'; reason: string }) => void
   updateAppointmentStatus: (id: string, status: Appointment['status']) => void
-  rescheduleAppointment: (id: string, time: string) => void
+  rescheduleAppointment: (id: string, time: string, date?: string) => void
   addTimeBlock: (input: Omit<TimeBlock, 'id'>) => void
   removeTimeBlock: (id: string) => void
   submitCheckIn: (input: { patientId: string; prescriptionId: string; marked: CheckIn['marked']; improvementPct: number; changeChips: string[]; freeText: string }) => void
@@ -659,11 +659,11 @@ export const useClinic = create<ClinicState>()(
         writeThrough(updateAppointmentDb(id, { status }), 'Status change may not have saved.')
       },
 
-      rescheduleAppointment: (id, time) => {
+      rescheduleAppointment: (id, time, date) => {
         set((s) => ({
-          appointments: s.appointments.map((a) => (a.id === id ? { ...a, time } : a)),
+          appointments: s.appointments.map((a) => (a.id === id ? { ...a, time, ...(date ? { date } : {}) } : a)),
         }))
-        writeThrough(updateAppointmentDb(id, { time }), 'Reschedule may not have saved.')
+        writeThrough(updateAppointmentDb(id, { time, ...(date ? { day_label: date } : {}) }), 'Reschedule may not have saved.')
       },
 
       addTimeBlock: (input) => {
@@ -695,7 +695,7 @@ export const useClinic = create<ClinicState>()(
           surface: 'web' as Surface,
           kind: 'check-in' as const,
           title: `Check-in: ${patient?.name ?? 'Patient'}`,
-          message: `${patient?.name ?? 'A patient'} reported ${label} (${input.improvementPct}% improvement).${input.freeText ? ` "${input.freeText}"` : ''}`,
+          message: `${patient?.name ?? 'A patient'} reported ${label}.${input.freeText ? ` "${input.freeText}"` : ''}`,
           time: 'Just now',
           read: false,
           severity: input.marked === 'worse' ? 'warn' as const : 'info' as const,
@@ -706,7 +706,7 @@ export const useClinic = create<ClinicState>()(
           surface: 'practitioner' as Surface,
           kind: 'check-in' as const,
           title: `${patient?.name ?? 'Patient'} checked in`,
-          message: `Reported ${label} · ${input.improvementPct}%`,
+          message: `Reported ${label}`,
           time: 'Just now',
           read: false,
           severity: input.marked === 'worse' ? 'warn' as const : 'info' as const,

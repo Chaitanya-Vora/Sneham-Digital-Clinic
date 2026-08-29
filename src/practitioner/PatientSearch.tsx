@@ -392,7 +392,6 @@ export function PatientDetailScreen({
                   <Badge tone={latestCheckIn.marked === 'better' ? 'green' : latestCheckIn.marked === 'worse' ? 'amber' : 'neutral'}>
                     {latestCheckIn.marked === 'better' ? 'Feeling better' : latestCheckIn.marked === 'worse' ? 'Feeling worse' : 'No change'}
                   </Badge>
-                  <span className="text-[12px] text-muted">{latestCheckIn.improvementPct}% improvement</span>
                 </div>
                 {latestCheckIn.changeChips.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1.5">

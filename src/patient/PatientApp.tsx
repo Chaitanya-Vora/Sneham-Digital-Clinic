@@ -1,6 +1,7 @@
 import { Capacitor } from '@capacitor/core'
 import { Browser } from '@capacitor/browser'
-import { formatDayLabel, todayISO, isPastISO } from '../core/day'
+import { Share } from '@capacitor/share'
+import { formatDayLabel, todayISO, isPastISO, addDaysISO } from '../core/day'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
@@ -57,6 +58,13 @@ function openJitsi(appointmentId: string) {
   const url = jitsiUrl(appointmentId)
   if (Capacitor.isNativePlatform()) Browser.open({ url }).catch(() => {})
   else window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+function timeOfDayGreeting(): string {
+  const h = new Date().getHours()
+  if (h < 12) return 'Good morning'
+  if (h < 17) return 'Good afternoon'
+  return 'Good evening'
 }
 
 type PushedScreen = null | 'doses' | 'personal' | 'medical' | 'notifications' | 'privacy' | 'checkin' | 'documents' | 'messages'
@@ -381,7 +389,8 @@ function NotifBanner({ n, onClose }: { n: AppNotification; onClose: () => void }
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: -24, scale: 0.97 }}
       transition={spring}
-      className="absolute inset-x-3 top-[50px] z-40 flex items-start gap-3 rounded-[20px] border border-green-border bg-surface/95 px-4 py-3 shadow-modal backdrop-blur"
+      className="absolute inset-x-3 z-40 flex items-start gap-3 rounded-[20px] border border-green-border bg-surface/95 px-4 py-3 shadow-modal backdrop-blur"
+      style={{ top: 'calc(var(--app-top) + 8px)' }}
     >
       <div className="mt-0.5 text-accent"><RxIcon size={20} weight="fill" /></div>
       <div className="min-w-0 flex-1">
@@ -428,10 +437,14 @@ function NotificationListPanel({ notifs, markRead, onClose }: { notifs: AppNotif
 function HomeScreen({ patient, doses, onToggleDose, go, openDoses, onRefresh, notifs, markRead, onPush, patientId }: any) {
   const toast = useToast()
   const practitioners = useClinic((s) => s.practitioners)
+  const allAppointments = useClinic((s) => s.appointments)
   const nextAppt = useClinic((s) => s.appointments.filter((a) => a.patientId === patientId && a.status !== 'Seen' && a.status !== 'Cancelled' && !isPastISO(a.date)).sort((a, b) => a.date.localeCompare(b.date))[0])
   const doctorName = useClinic((s) => s.practitioners.find((p) => p.id === (nextAppt?.practitionerId ?? s.practitioners[0]?.id))?.name ?? 'your doctor')
   const reschedule = useClinic((s) => s.rescheduleAppointment)
   const [notifOpen, setNotifOpen] = useState(false)
+  const [rescheduleCustom, setRescheduleCustom] = useState(false)
+  const [customDate, setCustomDate] = useState(todayISO())
+  const [customSlot, setCustomSlot] = useState<string | null>(null)
   const [rescheduleOpen, setRescheduleOpen] = useState(false)
 
   const header = (
@@ -439,7 +452,7 @@ function HomeScreen({ patient, doses, onToggleDose, go, openDoses, onRefresh, no
       <Pressable ariaLabel="profile" hap="tick" onClick={() => go('profile')} className="flex items-center gap-3">
         <Avatar initials={patient.initials} size={44} />
         <div>
-          <div className="text-[12px] text-faint">Welcome back</div>
+          <div className="text-[12px] text-faint">{timeOfDayGreeting()}</div>
           <div className="font-display text-[19px] font-bold text-ink">{patient.name}</div>
         </div>
       </Pressable>
@@ -462,35 +475,105 @@ function HomeScreen({ patient, doses, onToggleDose, go, openDoses, onRefresh, no
       {notifOpen && <NotificationListPanel notifs={notifs} markRead={markRead} onClose={() => setNotifOpen(false)} />}
 
       {/* reschedule bottom sheet */}
-      <BottomSheet open={rescheduleOpen} onClose={() => setRescheduleOpen(false)}>
-        <h2 className="font-display text-[18px] font-bold text-ink">Reschedule appointment</h2>
-        <div className="mt-4 space-y-2.5">
-          {[
-            { label: 'Tomorrow same time', sub: nextAppt ? `Tomorrow at ${nextAppt.time}` : 'No appointment to move' },
-            { label: 'Next available slot', sub: `Checks ${doctorName}'s calendar` },
-            { label: 'Choose date & time', sub: 'Pick from available slots' },
-          ].map((opt) => (
-            <Pressable
-              key={opt.label}
-              as="div"
-              hap="success"
-              scale={0.98}
-              onClick={() => {
-                if (!nextAppt) { toast({ title: 'No upcoming appointment to reschedule' }); setRescheduleOpen(false); return }
-                reschedule(nextAppt.id, nextAppt.time)
-                setRescheduleOpen(false)
-                toast({ title: 'Appointment rescheduled', message: opt.label })
-              }}
-              className="flex cursor-pointer items-center justify-between rounded-[16px] border border-border bg-surface px-4 py-3.5"
-            >
-              <div>
-                <div className="text-[14px] font-semibold text-ink">{opt.label}</div>
-                <div className="text-[12px] text-muted">{opt.sub}</div>
-              </div>
-              <span className="text-faint">&rsaquo;</span>
-            </Pressable>
-          ))}
-        </div>
+      <BottomSheet open={rescheduleOpen} onClose={() => { setRescheduleOpen(false); setRescheduleCustom(false); setCustomSlot(null) }}>
+        {!rescheduleCustom ? (
+          <>
+            <h2 className="font-display text-[18px] font-bold text-ink">Reschedule appointment</h2>
+            <div className="mt-4 space-y-2.5">
+              {[
+                { label: 'Tomorrow same time', sub: nextAppt ? `Tomorrow at ${nextAppt.time}` : 'No appointment to move' },
+                { label: 'Next available slot', sub: `Checks ${doctorName}'s calendar` },
+                { label: 'Choose date & time', sub: 'Pick from available slots' },
+              ].map((opt) => (
+                <Pressable
+                  key={opt.label}
+                  as="div"
+                  hap="success"
+                  scale={0.98}
+                  onClick={() => {
+                    if (!nextAppt) { toast({ title: 'No upcoming appointment to reschedule' }); setRescheduleOpen(false); return }
+                    if (opt.label === 'Choose date & time') {
+                      setCustomDate(nextAppt.date)
+                      setCustomSlot(nextAppt.time)
+                      setRescheduleCustom(true)
+                      return
+                    }
+                    if (opt.label === 'Tomorrow same time') {
+                      const date = addDaysISO(todayISO(), 1)
+                      reschedule(nextAppt.id, nextAppt.time, date)
+                      setRescheduleOpen(false)
+                      toast({ title: 'Appointment rescheduled', message: `Tomorrow at ${nextAppt.time}` })
+                      return
+                    }
+                    const { date, time } = findNextAvailableSlot(allAppointments, nextAppt.practitionerId, todayISO())
+                    reschedule(nextAppt.id, time, date)
+                    setRescheduleOpen(false)
+                    toast({ title: 'Appointment rescheduled', message: `${formatDayLabel(date)} at ${time}` })
+                  }}
+                  className="flex cursor-pointer items-center justify-between rounded-[16px] border border-border bg-surface px-4 py-3.5"
+                >
+                  <div>
+                    <div className="text-[14px] font-semibold text-ink">{opt.label}</div>
+                    <div className="text-[12px] text-muted">{opt.sub}</div>
+                  </div>
+                  <span className="text-faint">&rsaquo;</span>
+                </Pressable>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            <h2 className="font-display text-[18px] font-bold text-ink">Choose date &amp; time</h2>
+            <Label className="mt-4">Date</Label>
+            <input
+              type="date"
+              value={customDate}
+              min={todayISO()}
+              onChange={(e) => { setCustomDate(e.target.value); setCustomSlot(null) }}
+              className="mt-2 w-full rounded-[14px] border border-border bg-surface px-3.5 py-2.5 text-[13px] text-body outline-none focus:border-green-border"
+            />
+            <Label className="mt-4">Available slots</Label>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {(() => {
+                const taken = new Set(
+                  allAppointments
+                    .filter((a) => a.practitionerId === nextAppt?.practitionerId && a.date === customDate && a.status !== 'Cancelled' && a.id !== nextAppt?.id)
+                    .map((a) => a.time),
+                )
+                const open = CLINIC_SLOTS.filter((s) => !taken.has(s))
+                if (open.length === 0) return <p className="text-[13px] text-muted">No open slots on this date.</p>
+                return open.map((slot) => (
+                  <Pressable
+                    key={slot}
+                    hap="tick"
+                    onClick={() => setCustomSlot(slot)}
+                    className={`flex items-center gap-1.5 rounded-pill border px-3.5 py-2 text-[13px] font-semibold transition ${customSlot === slot ? 'border-green-border bg-tint text-ink' : 'border-border bg-surface text-muted'}`}
+                  >
+                    <Clock size={14} /> {slot}
+                  </Pressable>
+                ))
+              })()}
+            </div>
+            <div className="mt-5 flex gap-2">
+              <Pressable hap="tick" onClick={() => setRescheduleCustom(false)} className="flex-1 rounded-pill border border-border bg-surface py-2.5 text-center text-[14px] font-semibold text-body">
+                Back
+              </Pressable>
+              <Pressable
+                hap="success"
+                onClick={() => {
+                  if (!nextAppt || !customSlot) return
+                  reschedule(nextAppt.id, customSlot, customDate)
+                  setRescheduleOpen(false)
+                  setRescheduleCustom(false)
+                  toast({ title: 'Appointment rescheduled', message: `${formatDayLabel(customDate)} at ${customSlot}` })
+                }}
+                className={`flex-1 rounded-pill py-2.5 text-center text-[14px] font-semibold text-white ${customSlot ? 'bg-brand' : 'bg-brand/40 pointer-events-none'}`}
+              >
+                Confirm
+              </Pressable>
+            </div>
+          </>
+        )}
       </BottomSheet>
 
       <div className="space-y-4">
@@ -684,7 +767,13 @@ function RxScreen({ prescriptions, onToggleReminders, goDoses, onRefresh }: any)
                     try {
                       await exportPrescriptionPdf(rx, patient?.name ?? 'Patient', doctor?.name ?? 'Doctor')
                       toast({ title: 'PDF exported' })
-                    } catch { toast({ title: 'PDF export failed' }) }
+                    } catch (e) {
+                      // The PDF is written successfully before the native share
+                      // sheet ever opens — dismissing that sheet rejects with a
+                      // "canceled" message, which isn't a real export failure.
+                      const message = e instanceof Error ? e.message : String(e)
+                      if (!/cancel/i.test(message)) toast({ title: 'PDF export failed' })
+                    }
                   }}
                   className="flex flex-1 items-center justify-center gap-1.5 rounded-pill bg-screen py-2 text-[13px] font-semibold text-body"
                 >
@@ -697,7 +786,15 @@ function RxScreen({ prescriptions, onToggleReminders, goDoses, onRefresh }: any)
                       title: `Prescription: ${rx.remedy} ${rx.potency}`,
                       text: `My prescription from Sneham Digital Clinic: ${rx.remedy} ${rx.potency}, ${rx.repetition}`,
                     }
-                    if (navigator.share) {
+                    if (Capacitor.isNativePlatform()) {
+                      // navigator.share is undefined in a Capacitor WebView —
+                      // use the native share sheet instead.
+                      try {
+                        await Share.share(shareData)
+                      } catch {
+                        // user cancelled the native share sheet — ignore
+                      }
+                    } else if (navigator.share) {
                       try {
                         await navigator.share(shareData)
                       } catch {
@@ -747,6 +844,18 @@ function DosesScreen({ doses, onToggle, back, onRefresh }: any) {
       <h1 className="mt-1 font-display text-[24px] font-bold text-ink">Dose reminders</h1>
     </div>
   )
+  if (doses.length === 0) {
+    return (
+      <Screen header={header} onRefresh={onRefresh}>
+        <Card className="flex flex-col items-center gap-2 py-10 text-center">
+          <Flask size={28} className="text-muted" />
+          <span className="text-[14px] font-semibold text-ink">No dose reminders yet</span>
+          <span className="max-w-[220px] text-[13px] text-muted">These appear once your doctor prescribes a remedy with reminders turned on.</span>
+        </Card>
+      </Screen>
+    )
+  }
+
   return (
     <Screen header={header} onRefresh={onRefresh}>
       <div className="space-y-4">
@@ -791,7 +900,23 @@ function DosesScreen({ doses, onToggle, back, onRefresh }: any) {
 }
 
 // ── APPOINTMENTS ──
-const BOOKING_SLOTS = ['9:00 AM', '11:00 AM', '2:30 PM', '4:00 PM']
+// Typical clinic hours offered when booking — filtered per-date against
+// what's already on the calendar, so this is a starting list, not the
+// actual availability.
+const CLINIC_SLOTS = ['9:00 AM', '9:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM', '2:00 PM', '2:30 PM', '3:00 PM', '3:30 PM', '4:00 PM', '4:30 PM']
+
+/** Scans forward from `fromDate` (inclusive) for the practitioner's first
+ *  open slot, so "next available slot" reflects the real calendar instead
+ *  of always landing back on the same time. */
+function findNextAvailableSlot(appts: Appointment[], practitionerId: string, fromDate: string): { date: string; time: string } {
+  for (let i = 0; i < 30; i++) {
+    const date = addDaysISO(fromDate, i)
+    const taken = new Set(appts.filter((a) => a.practitionerId === practitionerId && a.date === date && a.status !== 'Cancelled').map((a) => a.time))
+    const slot = CLINIC_SLOTS.find((s) => !taken.has(s))
+    if (slot) return { date, time: slot }
+  }
+  return { date: fromDate, time: CLINIC_SLOTS[0] }
+}
 
 function usePastVisits(patientId: string) {
   const appointments = useClinic((s) => s.appointments.filter((a) => a.patientId === patientId && (a.status === 'Seen' || isPastISO(a.date))))
@@ -829,13 +954,28 @@ const outcomeTone = (o: string) => {
 function AppointmentsScreen({ onRefresh, patientId }: { onRefresh: () => Promise<void>; patientId: string }) {
   const toast = useToast()
   const appointments = useClinic((s) => s.appointments.filter((a) => a.patientId === patientId))
+  const allAppointments = useClinic((s) => s.appointments)
   const practitioners = useClinic((s) => s.practitioners)
   const scheduleFollowUp = useClinic((s) => s.scheduleFollowUp)
   const pastVisits = usePastVisits(patientId)
   const [bookingOpen, setBookingOpen] = useState(false)
   const [selectedPractitioner, setSelectedPractitioner] = useState(practitioners[0]?.id ?? '')
   const [selectedType, setSelectedType] = useState<'In person' | 'Video'>('In person')
-  const [selectedSlot, setSelectedSlot] = useState(BOOKING_SLOTS[0])
+  const [selectedDate, setSelectedDate] = useState(todayISO())
+  const [selectedSlot, setSelectedSlot] = useState<string | null>(null)
+
+  // Only offer slots that aren't already booked for this practitioner on
+  // this date — booking used to always target today at one of 4 fixed
+  // times regardless of what was already on the calendar.
+  const availableSlots = useMemo(() => {
+    const taken = new Set(
+      allAppointments
+        .filter((a) => a.practitionerId === selectedPractitioner && a.date === selectedDate && a.status !== 'Cancelled')
+        .map((a) => a.time),
+    )
+    return CLINIC_SLOTS.filter((slot) => !taken.has(slot))
+  }, [allAppointments, selectedPractitioner, selectedDate])
+  const effectiveSlot = selectedSlot && availableSlots.includes(selectedSlot) ? selectedSlot : availableSlots[0]
 
   const upcoming = appointments
     .filter((a) => a.status !== 'Seen' && a.status !== 'Cancelled' && !isPastISO(a.date))
@@ -894,14 +1034,26 @@ function AppointmentsScreen({ onRefresh, patientId }: { onRefresh: () => Promise
             ))}
           </div>
 
+          <Label className="mt-4">Date</Label>
+          <input
+            type="date"
+            value={selectedDate}
+            min={todayISO()}
+            onChange={(e) => { setSelectedDate(e.target.value); setSelectedSlot(null) }}
+            className="mt-2 w-full rounded-[14px] border border-border bg-surface px-3.5 py-2.5 text-[13px] text-body outline-none focus:border-green-border"
+          />
+
           <Label className="mt-4">Available slots</Label>
           <div className="mt-2 flex flex-wrap gap-2">
-            {BOOKING_SLOTS.map((slot) => (
+            {availableSlots.length === 0 && (
+              <p className="text-[13px] text-muted">No open slots on this date — try another day.</p>
+            )}
+            {availableSlots.map((slot) => (
               <Pressable
                 key={slot}
                 hap="tick"
                 onClick={() => setSelectedSlot(slot)}
-                className={`flex items-center gap-1.5 rounded-pill border px-3.5 py-2 text-[13px] font-semibold transition ${selectedSlot === slot ? 'border-green-border bg-tint text-ink' : 'border-border bg-surface text-muted'}`}
+                className={`flex items-center gap-1.5 rounded-pill border px-3.5 py-2 text-[13px] font-semibold transition ${effectiveSlot === slot ? 'border-green-border bg-tint text-ink' : 'border-border bg-surface text-muted'}`}
               >
                 <Clock size={14} /> {slot}
               </Pressable>
@@ -912,21 +1064,24 @@ function AppointmentsScreen({ onRefresh, patientId }: { onRefresh: () => Promise
             variant="accent"
             size="lg"
             className="mt-5 w-full min-h-[44px]"
+            disabled={!effectiveSlot}
             onClick={() => {
+              if (!effectiveSlot) return
               const doc = practitioners.find((p) => p.id === selectedPractitioner)
               scheduleFollowUp({
                 patientId,
                 practitionerId: selectedPractitioner,
-                time: selectedSlot,
-                date: todayISO(),
+                time: effectiveSlot,
+                date: selectedDate,
                 type: selectedType,
                 reason: selectedType === 'Video' ? 'Video consultation' : 'Consultation',
               })
               setBookingOpen(false)
+              setSelectedSlot(null)
               haptic('success')
               toast({
                 title: 'Visit booked',
-                message: `${selectedType} with ${doc?.name ?? 'Doctor'} at ${selectedSlot}`,
+                message: `${selectedType} with ${doc?.name ?? 'Doctor'} · ${formatDayLabel(selectedDate)} at ${effectiveSlot}`,
               })
             }}
           >
@@ -1151,14 +1306,33 @@ function DataPrivacyScreen({ back, onRefresh }: { back: () => void; onRefresh: (
   const doses = useClinic((s) => s.doseReminders.filter((d) => d.patientId === patient?.id))
   const messages = useClinic((s) => s.messages.filter((m) => m.patientId === patient?.id))
 
-  const handleExport = () => {
+  const handleExport = async () => {
     const data = { patient, prescriptions, appointments, doses, messages, exportedAt: new Date().toISOString() }
     const json = JSON.stringify(data, null, 2)
+    const fileName = `sneham-export-${patient?.name?.replace(/\s+/g, '-') ?? 'patient'}.json`
+
+    if (Capacitor.isNativePlatform()) {
+      // The blob + <a download> trick below is a browser-only API — it's
+      // silently a no-op inside a Capacitor WebView, so "Export my data"
+      // did nothing at all on the patient APK.
+      try {
+        const { Filesystem, Directory, Encoding } = await import('@capacitor/filesystem')
+        const written = await Filesystem.writeFile({ path: fileName, data: json, directory: Directory.Cache, encoding: Encoding.UTF8 })
+        await Share.share({ title: fileName, url: written.uri })
+        haptic('success')
+        toast({ title: 'Data exported' })
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e)
+        if (!/cancel/i.test(message)) toast({ title: 'Could not export data', message: 'Check your connection and try again.' })
+      }
+      return
+    }
+
     const blob = new Blob([json], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `sneham-export-${patient?.name?.replace(/\s+/g, '-') ?? 'patient'}.json`
+    a.download = fileName
     a.click()
     URL.revokeObjectURL(url)
     haptic('success')
@@ -1448,7 +1622,14 @@ function DocumentsScreen({ back, onRefresh, patientId }: { back: () => void; onR
                 as="div"
                 hap="tick"
                 scale={0.98}
-                onClick={() => toast({ title: `Opening ${doc.name}`, message: `${doc.format} · ${doc.size}` })}
+                onClick={() => {
+                  if (!doc.fileUrl) {
+                    toast({ title: 'Not available', message: 'This document has no file attached.' })
+                    return
+                  }
+                  if (Capacitor.isNativePlatform()) Browser.open({ url: doc.fileUrl }).catch(() => {})
+                  else window.open(doc.fileUrl, '_blank', 'noopener,noreferrer')
+                }}
                 className="flex cursor-pointer items-center gap-3 rounded-[20px] border border-border bg-surface px-4 py-3.5"
               >
                 <div className="flex h-11 w-11 items-center justify-center rounded-[12px] bg-tint">

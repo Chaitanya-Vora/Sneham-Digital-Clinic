@@ -66,7 +66,7 @@ export function TodayGrid({
   startVideo,
 }: {
   openCase: (id: string) => void
-  goRx: () => void
+  goRx: (patientId: string) => void
   startVideo?: (appointmentId: string) => void
 }) {
   const dbError = useClinic((s) => s.dbError)
@@ -263,7 +263,7 @@ export function TodayGrid({
               <Pressable hap="impact" onClick={() => startVideo(activeAppt.id)} className="flex items-center gap-1.5 rounded-pill bg-white/95 px-4 py-2 text-[13px] font-semibold text-brand"><VideoCamera size={16} weight="fill" /> Join video</Pressable>
             )}
             <Pressable hap="impact" onClick={() => openCase(activePatient.id)} className={`flex items-center gap-1.5 rounded-pill px-4 py-2 text-[13px] font-semibold ${activeAppt.type === 'Video' ? 'border border-white/40' : 'bg-white/95 text-brand'}`}><NotePencil size={16} weight="fill" /> Case sheet</Pressable>
-            <Pressable hap="tick" onClick={goRx} className="flex items-center gap-1.5 rounded-pill border border-white/40 px-4 py-2 text-[13px] font-semibold"><RxIcon size={16} weight="fill" /> Prescribe</Pressable>
+            <Pressable hap="tick" onClick={() => goRx(activePatient.id)} className="flex items-center gap-1.5 rounded-pill border border-white/40 px-4 py-2 text-[13px] font-semibold"><RxIcon size={16} weight="fill" /> Prescribe</Pressable>
             <Pressable hap="tick" onClick={() => setEndConsultSheet(activeAppt.id)} className="flex items-center gap-1.5 rounded-pill border border-white/40 px-4 py-2 text-[13px] font-semibold"><Stop size={14} weight="fill" /> End</Pressable>
           </div>
         </motion.div>

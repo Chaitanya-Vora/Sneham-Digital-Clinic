@@ -72,6 +72,7 @@ export function PractitionerApp() {
   const [switchOpen, setSwitchOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [addPatientOpen, setAddPatientOpen] = useState(false)
+  const [rxPatientId, setRxPatientId] = useState<string | null>(null)
 
   const ME = useClinic((s) => s.currentPractitionerId)
   const doctor = useClinic((s) => s.practitioners.find((p) => p.id === s.currentPractitionerId))
@@ -81,6 +82,15 @@ export function PractitionerApp() {
     if (next === tab) return
     setDir(TAB_ORDER.indexOf(next) > TAB_ORDER.indexOf(tab) ? 1 : -1)
     setTab(next)
+  }
+  // Every entry point into the Rx tab must say which patient it's for —
+  // Quick Rx used to guess (today's first appointment, or just the first
+  // patient in the list) and could publish a real prescription to the
+  // wrong person. null means "no patient chosen yet", which forces the
+  // screen to ask instead of guessing.
+  const goToRx = (patientId: string | null) => {
+    setRxPatientId(patientId)
+    goTab('rx')
   }
   const tabIdx = TAB_ORDER.indexOf(tab)
   const swipe = useHorizontalSwipe({
@@ -151,9 +161,9 @@ export function PractitionerApp() {
                 <CalendarScreen onOpenPatient={(id) => setOverlay({ kind: 'patient-detail', patientId: id })} />
               ) : (
                 <PullToRefresh onRefresh={refresh} className="h-full px-[18px] pb-[120px] pt-2">
-                  {tab === 'today' && <TodayGrid openCase={(id) => setOverlay({ kind: 'case', patientId: id })} goRx={() => goTab('rx')} startVideo={(apptId) => setOverlay({ kind: 'video', appointmentId: apptId })} />}
+                  {tab === 'today' && <TodayGrid openCase={(id) => setOverlay({ kind: 'case', patientId: id })} goRx={goToRx} startVideo={(apptId) => setOverlay({ kind: 'video', appointmentId: apptId })} />}
                   {tab === 'followups' && <FollowupsScreen openCompare={(id) => setOverlay({ kind: 'compare', patientId: id })} />}
-                  {tab === 'rx' && <QuickRxScreen />}
+                  {tab === 'rx' && <QuickRxScreen patientId={rxPatientId} onPatientPicked={setRxPatientId} />}
                   {tab === 'inbox' && <InboxScreen onOpenPatient={(id) => setOverlay({ kind: 'patient-detail', patientId: id })} onOpenChat={(id, name) => setOverlay({ kind: 'chat', patientId: id, patientName: name })} />}
                 </PullToRefresh>
               )}
@@ -162,7 +172,7 @@ export function PractitionerApp() {
         </div>
       </div>
 
-      <TabBar tab={tab} onChange={goTab} />
+      <TabBar tab={tab} onChange={(t) => (t === 'rx' ? goToRx(null) : goTab(t))} />
 
       {/* overlays: case sheet / compare / video */}
       <AnimatePresence custom={1}>
@@ -172,7 +182,7 @@ export function PractitionerApp() {
               {overlay.kind === 'video' ? (
                 <VideoConsultOverlay appointmentId={overlay.appointmentId} onClose={() => setOverlay(null)} />
               ) : overlay.kind === 'case' ? (
-                <MobileCaseSheet patientId={overlay.patientId} onBack={() => setOverlay(null)} onPrescribe={() => { setOverlay(null); goTab('rx') }} />
+                <MobileCaseSheet patientId={overlay.patientId} onBack={() => setOverlay(null)} onPrescribe={() => { setOverlay(null); goToRx(overlay.patientId) }} />
               ) : overlay.kind === 'compare' ? (
                 <MobileFollowUp patientId={overlay.patientId} onBack={() => setOverlay(null)} onDone={() => setOverlay(null)} />
               ) : overlay.kind === 'chat' ? (
@@ -183,7 +193,7 @@ export function PractitionerApp() {
                   onBack={() => setOverlay(null)}
                   onOpenCase={(id) => setOverlay({ kind: 'case', patientId: id })}
                   onOpenFollowUp={(id) => setOverlay({ kind: 'compare', patientId: id })}
-                  onPrescribe={() => { setOverlay(null); goTab('rx') }}
+                  onPrescribe={() => { setOverlay(null); goToRx(overlay.patientId) }}
                 />
               )}
             </EdgeSwipeBack>
@@ -624,30 +634,25 @@ function FollowupsScreen({ openCompare }: { openCompare: (id: string) => void })
 }
 
 // ── QUICK RX ──
-function QuickRxScreen() {
+function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | null; onPatientPicked: (id: string | null) => void }) {
   const ME = useClinic((s) => s.currentPractitionerId)
   const doctor = useClinic((s) => s.practitioners.find((p) => p.id === s.currentPractitionerId))
   const publish = useClinic((s) => s.publishPrescription)
-  const appts = useClinic((s) => s.appointments)
   const patients = useClinic((s) => s.patients)
-  const toast = useToast()
 
-  const todayAppts = useMemo(() => {
-    const today = todayISO()
-    return appts.filter((a) => a.date === today || a.status === 'In consult' || a.status === 'Waiting')
-  }, [appts])
-  const firstPatientId = todayAppts[0]?.patientId ?? patients[0]?.id ?? ''
-  const [currentPatientId, setCurrentPatientId] = useState('')
-  const effectivePatientId = currentPatientId || firstPatientId
-  const currentPatient = patients.find((p) => p.id === effectivePatientId)
-  const currentApptIndex = appts.findIndex((a) => a.patientId === effectivePatientId)
+  const [pickerQuery, setPickerQuery] = useState('')
+  const currentPatient = patients.find((p) => p.id === patientId)
 
-  const [remedy, setRemedy] = useState('Nux Vomica')
+  // Nothing pre-selected: a real remedy, patient and dose must be chosen
+  // before Publish does anything. This used to arrive pre-filled with a
+  // default remedy and an enabled Publish button, so one tap could send an
+  // invented prescription to whichever patient was guessed above.
+  const [remedy, setRemedy] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [potency, setPotency] = useState<Potency>('200C')
   const [dose, setDose] = useState(4)
   const [rep, setRep] = useState<Repetition>('Once daily · night')
-  const [prep, setPrep] = useState('Dissolve under the tongue at night, 15 minutes away from food or drink.')
+  const [prep, setPrep] = useState('')
   const [done, setDone] = useState(false)
 
   const remedyList = doctor?.remedyList ?? []
@@ -660,9 +665,21 @@ function QuickRxScreen() {
     return [...personal, ...master]
   }, [remedyList, query])
 
+  const canPublish = !!currentPatient && !!remedy
+
+  function resetForm() {
+    setRemedy(null)
+    setQuery('')
+    setPotency('200C')
+    setDose(4)
+    setRep('Once daily · night')
+    setPrep('')
+  }
+
   function onPublish() {
+    if (!canPublish || !currentPatient || !remedy) return
     publish({
-      patientId: effectivePatientId, practitionerId: ME, remedy, potency, doseGlobules: dose, repetition: rep,
+      patientId: currentPatient.id, practitionerId: ME, remedy, potency, doseGlobules: dose, repetition: rep,
       durationDays: rep === 'As needed' ? null : 14, preparation: prep,
       remindersEnabled: rep !== 'As needed', reminderTimes: rep === 'Twice daily' ? ['8:00 AM', '8:00 PM'] : ['8:00 PM'],
       sharedVia: ['Patient app', 'WhatsApp'], origin: 'practitioner',
@@ -671,23 +688,37 @@ function QuickRxScreen() {
     setDone(true)
   }
 
-  function onNextPatient() {
-    const remaining = appts.slice(currentApptIndex + 1)
-    const next = remaining.find((a) => a.status === 'Waiting' || a.status === 'Upcoming')
-    if (!next) {
-      toast({ title: 'No more patients today' })
-      setDone(false)
-      return
-    }
-    setCurrentPatientId(next.patientId)
-    setRemedy(next.tag?.split(' ').slice(0, -1).join(' ') ?? remedyList[0] ?? 'Nux Vomica')
-    setPotency((next.tag?.split(' ').pop() as Potency) ?? '200C')
-    setQuery('')
-    setDose(4)
-    setRep('Once daily · night')
-    setPrep('Dissolve under the tongue at night, 15 minutes away from food or drink.')
-    setDone(false)
-    haptic('tick')
+  // No patient chosen yet (direct tab tap, or "Change" below) — ask instead
+  // of guessing from today's appointments.
+  if (!currentPatient) {
+    const q = pickerQuery.trim().toLowerCase()
+    const matches = q ? patients.filter((p) => p.name.toLowerCase().includes(q)) : patients
+    return (
+      <div className="space-y-4">
+        <div>
+          <div className="font-display text-[20px] font-bold text-ink">Quick prescription</div>
+          <div className="text-[13px] text-muted">Choose who you're prescribing for.</div>
+        </div>
+        <div className="flex items-center gap-2 rounded-pill border border-border bg-surface px-3.5 py-2">
+          <MagnifyingGlass size={16} className="text-faint" />
+          <input value={pickerQuery} onChange={(e) => setPickerQuery(e.target.value)} placeholder="Search patients" className="w-full bg-transparent text-[13px] outline-none placeholder:text-faint" data-selectable="true" />
+        </div>
+        <div className="space-y-2">
+          {matches.map((p) => (
+            <Pressable key={p.id} as="div" hap="tick" scale={0.99} onClick={() => onPatientPicked(p.id)} className="flex cursor-pointer items-center gap-3 rounded-[16px] border border-border bg-surface px-3.5 py-3">
+              <Avatar initials={p.initials} size={38} />
+              <div className="flex-1">
+                <div className="font-display text-[14px] font-semibold text-ink">{p.name}</div>
+                <div className="text-[12px] text-muted">{p.age} &middot; #{p.wsCode}</div>
+              </div>
+            </Pressable>
+          ))}
+          {matches.length === 0 && (
+            <div className="py-10 text-center text-[13px] text-muted">No patients found</div>
+          )}
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -698,12 +729,12 @@ function QuickRxScreen() {
       </div>
 
       <Card className="flex items-center gap-3 px-4 py-3">
-        <Avatar initials={currentPatient?.initials ?? '??'} size={40} />
+        <Avatar initials={currentPatient.initials} size={40} />
         <div className="flex-1">
-          <div className="font-display text-[14px] font-semibold text-ink">{currentPatient?.name ?? 'Patient'} · {currentPatient?.age ?? ''}</div>
-          <div className="text-[12px] text-muted">#{currentPatient?.wsCode ?? ''} · {appts[currentApptIndex]?.status?.toLowerCase() ?? 'scheduled'}</div>
+          <div className="font-display text-[14px] font-semibold text-ink">{currentPatient.name} · {currentPatient.age}</div>
+          <div className="text-[12px] text-muted">#{currentPatient.wsCode}</div>
         </div>
-        <Badge tone={appts[currentApptIndex]?.status === 'In consult' ? 'green' : 'neutral'}>{appts[currentApptIndex]?.status ?? 'Scheduled'}</Badge>
+        <Pressable hap="tick" onClick={() => onPatientPicked(null)} className="text-[12px] font-semibold text-brand">Change</Pressable>
       </Card>
 
       <div>
@@ -747,10 +778,16 @@ function QuickRxScreen() {
 
       <div>
         <Label>Preparation note</Label>
-        <textarea value={prep} onChange={(e) => setPrep(e.target.value)} rows={3} data-selectable="true" className="mt-2 w-full rounded-[14px] border border-border bg-surface px-3.5 py-2.5 text-[13px] leading-relaxed text-body outline-none focus:border-green-border" />
+        <textarea value={prep} onChange={(e) => setPrep(e.target.value)} rows={3} placeholder="e.g. Dissolve under the tongue at night, 15 minutes away from food or drink." data-selectable="true" className="mt-2 w-full rounded-[14px] border border-border bg-surface px-3.5 py-2.5 text-[13px] leading-relaxed text-body outline-none focus:border-green-border" />
       </div>
 
-      <Pressable hap="none" onClick={onPublish} className="flex w-full items-center justify-center gap-2 rounded-pill bg-accent py-3 font-display text-[15px] font-semibold text-white shadow-float">
+      <Pressable
+        hap="none"
+        onClick={onPublish}
+        className={`flex w-full items-center justify-center gap-2 rounded-pill py-3 font-display text-[15px] font-semibold text-white shadow-float transition ${
+          canPublish ? 'bg-accent' : 'bg-accent/40 pointer-events-none'
+        }`}
+      >
         <RxIcon size={18} weight="fill" /> Publish &amp; share
       </Pressable>
 
@@ -760,10 +797,10 @@ function QuickRxScreen() {
             <Check size={32} weight="bold" />
           </motion.div>
           <div className="mt-3 font-display text-[19px] font-bold text-ink">Prescription published</div>
-          <div className="mt-1 px-4 text-[13px] text-muted">{remedy} {potency} &middot; {rep} &mdash; sent to {currentPatient?.name ?? 'patient'}{"'"}s app and WhatsApp.</div>
+          <div className="mt-1 px-4 text-[13px] text-muted">{remedy} {potency} &middot; {rep} &mdash; sent to {currentPatient.name}{"'"}s app and WhatsApp.</div>
           <div className="mt-5 flex w-full gap-2">
             <Pressable hap="tick" onClick={() => setDone(false)} className="flex-1 rounded-pill border border-border bg-surface py-2.5 text-center font-display text-[14px] font-semibold text-body">Done</Pressable>
-            <Pressable hap="tick" onClick={onNextPatient} className="flex-1 rounded-pill bg-brand py-2.5 text-center font-display text-[14px] font-semibold text-screen">Next patient</Pressable>
+            <Pressable hap="tick" onClick={() => { setDone(false); resetForm(); onPatientPicked(null) }} className="flex-1 rounded-pill bg-brand py-2.5 text-center font-display text-[14px] font-semibold text-screen">Next patient</Pressable>
           </div>
         </div>
       </BottomSheet>

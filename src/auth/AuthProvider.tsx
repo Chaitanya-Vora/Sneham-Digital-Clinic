@@ -11,6 +11,7 @@ interface AuthCtx {
   loading: boolean
   oauthError: string | null
   passwordRecovery: boolean
+  justConfirmedSignup: boolean
   signUp: (email: string, password: string, fullName: string) => Promise<{ error: string | null }>
   signIn: (email: string, password: string) => Promise<{ error: string | null }>
   signInWithGoogle: () => Promise<{ error: string | null }>
@@ -18,6 +19,7 @@ interface AuthCtx {
   resetPassword: (email: string) => Promise<{ error: string | null }>
   updatePassword: (newPassword: string) => Promise<{ error: string | null }>
   cancelPasswordRecovery: () => void
+  dismissSignupConfirmation: () => void
 }
 
 const AuthContext = createContext<AuthCtx | null>(null)
@@ -58,6 +60,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
   const [oauthError, setOauthError] = useState<string | null>(null)
   const [passwordRecovery, setPasswordRecovery] = useState(false)
+  // A signup confirmation link lands here the same way a recovery link does
+  // — a real, valid session, indistinguishable from any other sign-in by
+  // event type alone (unlike PASSWORD_RECOVERY, Supabase has no dedicated
+  // event for this). The URL's own `type=signup` is the only signal, and it
+  // must be read before Supabase's own URL cleanup removes it.
+  const [justConfirmedSignup, setJustConfirmedSignup] = useState(
+    () => native ? false : /type=signup/.test(window.location.hash) || /type=signup/.test(window.location.search),
+  )
   // Google's authorization code is one-time-use — if the same redirect URL
   // is ever delivered twice (some Android versions redeliver the deep-link
   // intent on activity resume), a second exchange attempt for the same code
@@ -111,6 +121,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const accessToken = params.get('access_token')
         const refreshToken = params.get('refresh_token')
         const isRecovery = params.get('type') === 'recovery'
+        const isSignupConfirm = params.get('type') === 'signup'
 
         try {
           if (code) {
@@ -126,6 +137,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             throw new Error(params.get('error_description') ?? 'Sign-in was cancelled.')
           }
           if (isRecovery) setPasswordRecovery(true)
+          if (isSignupConfirm) setJustConfirmedSignup(true)
           setOauthError(null)
         } catch (e) {
           setOauthError(e instanceof Error ? e.message : 'Could not complete sign-in.')
@@ -205,11 +217,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // mistake and already know their password.
   const cancelPasswordRecovery = () => setPasswordRecovery(false)
 
+  const dismissSignupConfirmation = () => setJustConfirmedSignup(false)
+
   return (
     <AuthContext.Provider
       value={{
-        user, session, loading, oauthError, passwordRecovery,
-        signUp, signIn, signInWithGoogle, signOut, resetPassword, updatePassword, cancelPasswordRecovery,
+        user, session, loading, oauthError, passwordRecovery, justConfirmedSignup,
+        signUp, signIn, signInWithGoogle, signOut, resetPassword, updatePassword,
+        cancelPasswordRecovery, dismissSignupConfirmation,
       }}
     >
       {children}

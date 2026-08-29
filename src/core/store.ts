@@ -183,6 +183,15 @@ export const useClinic = create<ClinicState>()(
           resetHydrateErrors()
           const data = await hydrateAll(userId, userName)
           const fetchErrors = getHydrateErrors()
+
+          if (fetchErrors > 0) {
+            // One or more tables failed to load — keep whatever is already
+            // in the store rather than replacing real clinic data with a
+            // partial or empty fetch. Just surface the warning banner.
+            set({ hydrated: true, hydrating: false, userId, dbError: true })
+            return
+          }
+
           const today = new Date().toDateString()
           const needsReset = get().lastDoseResetDate !== today
           set({
@@ -195,7 +204,7 @@ export const useClinic = create<ClinicState>()(
             userId,
             role: 'Owner',
             offline: false,
-            dbError: fetchErrors > 0,
+            dbError: false,
             lastDoseResetDate: today,
           })
           if (needsReset) {

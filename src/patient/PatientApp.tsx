@@ -439,7 +439,7 @@ function HomeScreen({ patient, doses, onToggleDose, go, openDoses, onRefresh, no
   const practitioners = useClinic((s) => s.practitioners)
   const allAppointments = useClinic((s) => s.appointments)
   const nextAppt = useClinic((s) => s.appointments.filter((a) => a.patientId === patientId && a.status !== 'Seen' && a.status !== 'Cancelled' && !isPastISO(a.date)).sort((a, b) => a.date.localeCompare(b.date))[0])
-  const doctorName = useClinic((s) => s.practitioners.find((p) => p.id === (nextAppt?.practitionerId ?? s.practitioners[0]?.id))?.name ?? 'your doctor')
+  const doctorName = useClinic((s) => s.practitioners.find((p) => p.id === (nextAppt?.practitionerId ?? patient?.owningPractitionerId ?? s.practitioners[0]?.id))?.name ?? 'your doctor')
   const reschedule = useClinic((s) => s.rescheduleAppointment)
   const [notifOpen, setNotifOpen] = useState(false)
   const [rescheduleCustom, setRescheduleCustom] = useState(false)
@@ -719,7 +719,8 @@ function RxScreen({ prescriptions, onToggleReminders, goDoses, onRefresh }: any)
   const toast = useToast()
   const patient = useMyPatient()
   const practitioners = useClinic((s) => s.practitioners)
-  const header = <BigHeader title="Prescriptions" sub={`${practitioners[0]?.name ?? 'Doctor'} · Sneham Digital Clinic`} />
+  const myDoctor = practitioners.find((p) => p.id === patient?.owningPractitionerId) ?? practitioners[0]
+  const header = <BigHeader title="Prescriptions" sub={`${myDoctor?.name ?? 'Doctor'} · Sneham Digital Clinic`} />
   return (
     <Screen header={header} onRefresh={onRefresh}>
       <motion.div variants={listContainer} initial="hidden" animate="show" className="space-y-4">
@@ -957,13 +958,19 @@ function AppointmentsScreen({ onRefresh, patientId }: { onRefresh: () => Promise
   const appointments = useClinic((s) => s.appointments.filter((a) => a.patientId === patientId))
   const allAppointments = useClinic((s) => s.appointments)
   const practitioners = useClinic((s) => s.practitioners)
+  const myPractitionerId = useClinic((s) => s.patients.find((p) => p.id === patientId)?.owningPractitionerId)
   const scheduleFollowUp = useClinic((s) => s.scheduleFollowUp)
   const pastVisits = usePastVisits(patientId)
   const [bookingOpen, setBookingOpen] = useState(false)
-  const [selectedPractitioner, setSelectedPractitioner] = useState(practitioners[0]?.id ?? '')
+  // Default to the patient's own treating practitioner, not just whoever
+  // happens to be first in the list — that previously let a booking land
+  // on the wrong doctor (or, briefly, on a stray practitioner row created
+  // by an unrelated bug) whenever the clinic had more than one on staff.
+  const [selectedPractitioner, setSelectedPractitioner] = useState('')
   const [selectedType, setSelectedType] = useState<'In person' | 'Video'>('In person')
   const [selectedDate, setSelectedDate] = useState(todayISO())
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null)
+  const bookingInFlight = useRef(false)
 
   // Only offer slots that aren't already booked for this practitioner on
   // this date — booking used to always target today at one of 4 fixed
@@ -1068,6 +1075,11 @@ function AppointmentsScreen({ onRefresh, patientId }: { onRefresh: () => Promise
             disabled={!effectiveSlot}
             onClick={() => {
               if (!effectiveSlot) return
+              // Guards against a double-tap firing two bookings before the
+              // sheet has a chance to close (this is how one bad tap once
+              // turned into several duplicate follow-ups).
+              if (bookingInFlight.current) return
+              bookingInFlight.current = true
               const doc = practitioners.find((p) => p.id === selectedPractitioner)
               scheduleFollowUp({
                 patientId,
@@ -1132,7 +1144,11 @@ function AppointmentsScreen({ onRefresh, patientId }: { onRefresh: () => Promise
 
         <Pressable
           hap="impact"
-          onClick={() => setBookingOpen(true)}
+          onClick={() => {
+            setSelectedPractitioner(myPractitionerId || practitioners[0]?.id || '')
+            bookingInFlight.current = false
+            setBookingOpen(true)
+          }}
           className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-pill bg-accent py-3 font-display text-[15px] font-semibold text-white shadow-float"
         >
           <CalendarPlus size={16} weight="fill" /> Book a visit
@@ -1412,7 +1428,10 @@ const SYMPTOM_CHIPS = [
 
 function CheckInScreen({ back, onRefresh, patientId }: { back: () => void; onRefresh: () => Promise<void>; patientId: string }) {
   const toast = useToast()
-  const doctorName = useClinic((s) => s.practitioners[0]?.name ?? 'your doctor')
+  const doctorName = useClinic((s) => {
+    const myId = s.patients.find((p) => p.id === patientId)?.owningPractitionerId
+    return s.practitioners.find((p) => p.id === myId)?.name ?? s.practitioners[0]?.name ?? 'your doctor'
+  })
   const prescriptions = useClinic((s) => s.prescriptions.filter((r) => r.patientId === patientId))
   const existingCheckIns = useClinic((s) => s.checkIns.filter((c) => c.patientId === patientId))
   const submitCheckIn = useClinic((s) => s.submitCheckIn)
@@ -1661,7 +1680,10 @@ function DocumentsScreen({ back, onRefresh, patientId }: { back: () => void; onR
 }
 
 function MessagesScreen({ back, onRefresh, patientId }: { back: () => void; onRefresh: () => Promise<void>; patientId: string }) {
-  const doctorName = useClinic((s) => s.practitioners[0]?.name ?? 'Your doctor')
+  const doctorName = useClinic((s) => {
+    const myId = s.patients.find((p) => p.id === patientId)?.owningPractitionerId
+    return s.practitioners.find((p) => p.id === myId)?.name ?? s.practitioners[0]?.name ?? 'Your doctor'
+  })
   const initials = doctorName.split(' ').filter(Boolean).map((w) => w[0]).join('').slice(0, 2).toUpperCase()
   return (
     <div className="flex h-full flex-col bg-screen">

@@ -41,9 +41,11 @@ import {
   IdentificationCard,
   GraduationCap,
   MapPin,
+  SignOut,
 } from '@phosphor-icons/react'
 import { todayISO, formatDayLabel } from '../core/day'
 import { useClinic } from '../core/store'
+import { useAuth } from '../auth/AuthProvider'
 import type { Appointment, Patient, Potency, Repetition } from '../core/types'
 import { MASTER_REMEDIES } from '../core/remedies'
 import { uploadDocument } from '../core/db'
@@ -76,6 +78,7 @@ const NAV = [
 ] as const
 
 export function WebApp() {
+  const { signOut } = useAuth()
   const [screen, setScreen] = useState<Screen>('today')
   const [patientId, setPatientId] = useState('pt-ananya')
   const [notifOpen, setNotifOpen] = useState(false)
@@ -176,7 +179,7 @@ export function WebApp() {
       : screen
 
   return (
-    <div className="relative flex" style={{ height: 'calc(100vh - 49px)' }}>
+    <div className="relative flex h-screen">
       {/* Sidebar */}
       <aside className="flex w-[236px] shrink-0 flex-col border-r border-border bg-raised px-3 py-4">
         <div className="px-2">
@@ -246,6 +249,9 @@ export function WebApp() {
             <div className="truncate text-[12.5px] font-semibold text-ink">{doctor.name}</div>
             <div className="text-[11px] text-faint">{role}</div>
           </div>
+          <button onClick={signOut} title="Sign out" className="shrink-0 text-faint transition hover:text-danger">
+            <SignOut size={16} weight="bold" />
+          </button>
         </div>
       </aside>
 

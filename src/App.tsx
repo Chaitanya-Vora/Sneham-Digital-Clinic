@@ -179,54 +179,57 @@ function DesktopShell() {
 
   return (
     <div className="min-h-screen bg-canvas">
-      <div className="sticky top-0 z-[90] flex items-center justify-between gap-4 border-b border-border/70 bg-canvas/85 px-5 py-2.5 backdrop-blur">
-        {/* WebApp's own sidebar already shows the Sneham mark — showing it
-            here too, directly above it, was pure duplication. */}
-        {surface === 'web' ? <div /> : (
+      {/* WebApp is a fully self-contained screen with its own sidebar (mark,
+          nav, sign-out) — this outer bar is only needed for the other two
+          surfaces, which have no header chrome of their own. Showing both
+          for web meant the clinic name and a lone "Sign out" pill stacked
+          into two near-empty rows. */}
+      {surface !== 'web' && (
+        <div className="sticky top-0 z-[90] flex items-center justify-between gap-4 border-b border-border/70 bg-canvas/85 px-5 py-2.5 backdrop-blur">
           <div className="flex items-center gap-2.5">
             <SnehamMark size={28} />
             <span className="font-display text-[13px] font-semibold text-ink">Sneham Digital Clinic</span>
           </div>
-        )}
-        {!FIXED_SURFACE && (
-          <div className="inline-flex rounded-pill bg-screen p-1">
-            {surfaces.map((s) => (
-              <button
-                key={s.value}
-                onClick={() => setSurface(s.value)}
-                className={`rounded-pill px-4 py-1.5 text-[13px] font-body font-semibold transition ${
-                  surface === s.value ? 'bg-brand text-screen shadow-sm' : 'text-muted hover:text-body'
-                }`}
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
-        )}
-        <div className="flex items-center gap-2">
-          {user && (
-            <span className="hidden text-[12px] text-muted lg:inline">
-              {user.user_metadata?.full_name || user.email}
-            </span>
-          )}
           {!FIXED_SURFACE && (
-            <button
-              onClick={() => setQrOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-pill border border-border bg-surface px-3 py-1.5 text-[12px] font-semibold text-muted hover:text-body"
-              title="Install on phone"
-            >
-              <QrCode size={14} weight="bold" /> Install
-            </button>
+            <div className="inline-flex rounded-pill bg-screen p-1">
+              {surfaces.map((s) => (
+                <button
+                  key={s.value}
+                  onClick={() => setSurface(s.value)}
+                  className={`rounded-pill px-4 py-1.5 text-[13px] font-body font-semibold transition ${
+                    surface === s.value ? 'bg-brand text-screen shadow-sm' : 'text-muted hover:text-body'
+                  }`}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
           )}
-          <button
-            onClick={signOut}
-            className="inline-flex items-center gap-1.5 rounded-pill border border-border bg-surface px-3 py-1.5 text-[12px] font-semibold text-muted hover:text-danger"
-            title="Sign out"
-          >
-            <SignOut size={14} weight="bold" /> Sign out
-          </button>
+          <div className="flex items-center gap-2">
+            {user && (
+              <span className="hidden text-[12px] text-muted lg:inline">
+                {user.user_metadata?.full_name || user.email}
+              </span>
+            )}
+            {!FIXED_SURFACE && (
+              <button
+                onClick={() => setQrOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-pill border border-border bg-surface px-3 py-1.5 text-[12px] font-semibold text-muted hover:text-body"
+                title="Install on phone"
+              >
+                <QrCode size={14} weight="bold" /> Install
+              </button>
+            )}
+            <button
+              onClick={signOut}
+              className="inline-flex items-center gap-1.5 rounded-pill border border-border bg-surface px-3 py-1.5 text-[12px] font-semibold text-muted hover:text-danger"
+              title="Sign out"
+            >
+              <SignOut size={14} weight="bold" /> Sign out
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       <Suspense fallback={<SurfaceFallback />}>
         {surface === 'web' ? (

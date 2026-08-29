@@ -194,22 +194,30 @@ export function Stepper({
   suffix?: string
 }) {
   return (
-    <div className="inline-flex items-center gap-3 rounded-pill border border-border bg-surface px-2 py-1.5">
+    <div className="inline-flex items-center gap-2 rounded-pill border border-border bg-surface py-1.5 pl-2 pr-3">
       <button
         onClick={() => onChange(Math.max(min, value - 1))}
-        className="flex h-8 w-8 items-center justify-center rounded-full bg-screen text-body active:scale-90 disabled:opacity-30"
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-screen text-body active:scale-90 disabled:opacity-30"
         disabled={value <= min}
         aria-label="decrease"
       >
         <Minus size={16} weight="bold" />
       </button>
-      <span className="min-w-[64px] text-center font-display font-semibold text-ink">
-        {value}
-        {suffix ? ` ${suffix}` : ''}
-      </span>
+      {/* Stepping is a shortcut, not the only way in — typing a value
+          directly (e.g. a duration well past a quick few taps) works too. */}
+      <input
+        type="number"
+        value={value}
+        onChange={(e) => {
+          const n = Math.round(Number(e.target.value))
+          if (Number.isFinite(n)) onChange(Math.min(max, Math.max(min, n)))
+        }}
+        className="w-12 border-none bg-transparent text-center font-display font-semibold text-ink outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+      />
+      {suffix && <span className="shrink-0 font-display text-[13px] font-semibold text-muted">{suffix}</span>}
       <button
         onClick={() => onChange(Math.min(max, value + 1))}
-        className="flex h-8 w-8 items-center justify-center rounded-full bg-screen text-body active:scale-90 disabled:opacity-30"
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-screen text-body active:scale-90 disabled:opacity-30"
         disabled={value >= max}
         aria-label="increase"
       >

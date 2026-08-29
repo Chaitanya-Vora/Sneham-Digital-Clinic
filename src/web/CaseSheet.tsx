@@ -144,7 +144,15 @@ export function CaseSheet({
   const practitioners = useClinic((s) => s.practitioners)
   const customTemplates = useClinic((s) => s.caseTemplates)
   const templates = allTemplates(customTemplates)
-  const [template, setTemplate] = useState<CaseTemplateName>('chronic')
+  // Scoped to the patient's own visit history rather than always opening on
+  // Chronic: a patient with no prior case visits is, by definition, being
+  // seen for the first time, so First Visit is the template that actually
+  // fits; a returning patient continues with whatever template their most
+  // recent visit used instead of restarting on the default.
+  const [template, setTemplate] = useState<CaseTemplateName>(() => {
+    const mostRecent = [...caseVisits].sort((a, b) => b.date.localeCompare(a.date))[0]
+    return mostRecent?.template ?? (caseVisits.length === 0 ? 'first-visit' : 'chronic')
+  })
   const { done, total, doneIds } = useCaseProgress(patientId, template)
   const saveStatus = useCaseSaveStatus(patientId)
   const sections = getSections(template, customTemplates)

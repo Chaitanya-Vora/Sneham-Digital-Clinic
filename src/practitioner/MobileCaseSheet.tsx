@@ -24,9 +24,15 @@ export function MobileCaseSheet({
   const addDocument = useClinic((s) => s.addDocument)
   const voiceNotes = useClinic((s) => s.documents.filter((d) => d.patientId === patientId && d.format === 'WEBM'))
   const caseState = useClinic((s) => s.caseData[patientId])
+  const caseVisits = useClinic((s) => s.caseVisits.filter((v) => v.patientId === patientId))
   const customTemplates = useClinic((s) => s.caseTemplates)
   const templates = allTemplates(customTemplates)
-  const [template, setTemplate] = useState<CaseTemplateName>('chronic')
+  // Same reasoning as the web case sheet: no prior visits means this is a
+  // first visit, so open on that template instead of always Chronic.
+  const [template, setTemplate] = useState<CaseTemplateName>(() => {
+    const mostRecent = [...caseVisits].sort((a, b) => b.date.localeCompare(a.date))[0]
+    return mostRecent?.template ?? (caseVisits.length === 0 ? 'first-visit' : 'chronic')
+  })
   const { done, total, doneIds } = useCaseProgress(patientId, template)
   const saveStatus = useCaseSaveStatus(patientId)
   const toast = useToast()

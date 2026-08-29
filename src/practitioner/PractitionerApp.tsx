@@ -33,7 +33,7 @@ import {
   Printer,
   CurrencyInr,
 } from '@phosphor-icons/react'
-import { todayISO, toISO, formatDayLabel } from '../core/day'
+import { todayISO, toISO, formatDayLabel, addDaysISO } from '../core/day'
 import { useClinic } from '../core/store'
 import { useAuth } from '../auth/AuthProvider'
 import { useShell, exitToLauncher } from '../core/shell'
@@ -355,6 +355,7 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
   const doctor = useClinic((s) => s.practitioners.find((p) => p.id === s.currentPractitionerId))
   const publish = useClinic((s) => s.publishPrescription)
   const updatePractitioner = useClinic((s) => s.updatePractitioner)
+  const scheduleFollowUp = useClinic((s) => s.scheduleFollowUp)
   const patients = useClinic((s) => s.patients)
 
   const [pickerQuery, setPickerQuery] = useState('')
@@ -372,6 +373,7 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
   const [showAllRemedies, setShowAllRemedies] = useState(false)
   const [potency, setPotency] = useState<Potency>('200C')
   const [dose, setDose] = useState(4)
+  const [duration, setDuration] = useState(14)
   const [rep, setRep] = useState<Repetition>('Once daily · night')
   const [prep, setPrep] = useState('')
   const [done, setDone] = useState(false)
@@ -394,6 +396,7 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
     setShowAllRemedies(false)
     setPotency('200C')
     setDose(4)
+    setDuration(14)
     setRep('Once daily · night')
     setPrep('')
   }
@@ -402,10 +405,22 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
     if (!canPublish || !currentPatient || !remedy.trim()) return
     publish({
       patientId: currentPatient.id, practitionerId: ME, remedy: remedy.trim(), potency, doseGlobules: dose, repetition: rep,
-      durationDays: rep === 'As needed' ? null : 14, preparation: prep,
+      durationDays: rep === 'As needed' ? null : duration, preparation: prep,
       remindersEnabled: rep !== 'As needed', reminderTimes: rep === 'Twice daily' ? ['8:00 AM', '8:00 PM'] : ['8:00 PM'],
       sharedVia: ['Patient app', 'WhatsApp'], origin: 'practitioner',
     })
+    // Publishing books the review too, same as the web console — a course
+    // that ends without anyone checking back is exactly what this closes.
+    if (rep !== 'As needed' && duration > 0) {
+      scheduleFollowUp({
+        patientId: currentPatient.id,
+        practitionerId: ME,
+        time: '10:00 AM',
+        date: addDaysISO(todayISO(), duration),
+        type: 'In person',
+        reason: 'Follow-up',
+      })
+    }
     haptic('success')
     setDone(true)
   }
@@ -493,6 +508,12 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
 
       <div>
         <Label>Potency</Label>
+        <input
+          value={potency}
+          onChange={(e) => setPotency(e.target.value)}
+          placeholder="e.g. 200C, 50M, LM1"
+          className="mt-2 w-full rounded-pill border border-border bg-surface px-3.5 py-2 text-[13px] text-ink outline-none placeholder:text-faint focus:border-green-border"
+        />
         <div className="mt-2 flex gap-2">
           {POTENCIES.map((p) => <Chip key={p} selected={p === potency} onClick={() => { haptic('select'); setPotency(p) }} className="flex-1 text-center">{p}</Chip>)}
         </div>
@@ -501,6 +522,11 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
       <div className="flex items-center justify-between">
         <Label>Dose</Label>
         <Stepper value={dose} onChange={(v) => { haptic('tick'); setDose(v) }} suffix="globules" />
+      </div>
+
+      <div className="flex items-center justify-between">
+        <Label>Duration</Label>
+        <Stepper value={duration} min={1} max={90} onChange={(v) => { haptic('tick'); setDuration(v) }} suffix="days" />
       </div>
 
       <div>
@@ -531,14 +557,17 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
             <Check size={32} weight="bold" />
           </motion.div>
           <div className="mt-3 font-display text-[19px] font-bold text-ink">Prescription published</div>
-          <div className="mt-1 px-4 text-[13px] text-muted">{remedy} {potency} &middot; {rep} &mdash; sent to {currentPatient.name}{"'"}s app and WhatsApp.</div>
+          <div className="mt-1 px-4 text-[13px] text-muted">
+            {remedy} {potency} &middot; {rep} &mdash; sent to {currentPatient.name}{"'"}s app and WhatsApp.
+            {rep !== 'As needed' && <> Follow-up auto-booked for {formatDayLabel(addDaysISO(todayISO(), duration))}.</>}
+          </div>
           <Pressable
             hap="tick"
             onClick={async () => {
               const credentials = [doctor?.qualifications, doctor?.registrationNo].filter(Boolean).join(' · ')
               const rx = {
                 id: crypto.randomUUID(), patientId: currentPatient.id, practitionerId: ME, remedy, potency,
-                doseGlobules: dose, repetition: rep, durationDays: rep === 'As needed' ? null : 14, preparation: prep,
+                doseGlobules: dose, repetition: rep, durationDays: rep === 'As needed' ? null : duration, preparation: prep,
                 publishedAt: new Date().toISOString(), sharedVia: [], remindersEnabled: false, reminderTimes: [],
               }
               await exportPrescriptionPdf(rx, currentPatient.name, doctor?.name ?? 'Doctor', undefined, credentials || undefined).catch(() => {})

@@ -15,7 +15,10 @@ export type AssignmentState =
   | 'Assigned out'
   | 'Walk-in queue'
 
-export type Potency = '6C' | '12C' | '30C' | '200C' | '1M' | '10M' | 'Q'
+// A handful of common values are offered as quick-select chips (see
+// POTENCIES in the prescription screens), but potency is free text — a
+// homeopath's own notation (50M, CM, LM1, Q...) is wider than any fixed list.
+export type Potency = string
 
 export type Repetition =
   | 'Once daily · night'

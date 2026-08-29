@@ -43,7 +43,8 @@ import {
   MapPin,
   SignOut,
 } from '@phosphor-icons/react'
-import { todayISO, formatDayLabel } from '../core/day'
+import { todayISO, formatDayLabel, addDaysISO } from '../core/day'
+import { getSections } from '../core/caseTemplate'
 import { useClinic } from '../core/store'
 import { useAuth } from '../auth/AuthProvider'
 import type { Appointment, Patient, Potency, Repetition } from '../core/types'
@@ -62,7 +63,7 @@ import { VideoConsult } from '../video/VideoConsult'
 import { ChatThread } from '../components/ChatThread'
 import { exportPrescriptionPdf, exportInvoicePdf } from '../core/pdfExport'
 
-type Screen = 'today' | 'calendar' | 'patients' | 'patient' | 'prescription' | 'casesheet' | 'followup' | 'reports' | 'settings' | 'restricted'
+type Screen = 'today' | 'calendar' | 'patients' | 'patient' | 'prescription' | 'casesheet' | 'followup' | 'reports' | 'settings' | 'restricted' | 'prescriptions-all' | 'casenotes-all' | 'followups-all'
 const POTENCIES: Potency[] = ['6C', '12C', '30C', '200C', '1M', '10M', 'Q']
 const REPS: Repetition[] = ['Once daily · night', 'Twice daily', 'Alternate day', 'Weekly', 'As needed']
 
@@ -111,6 +112,9 @@ export function WebApp() {
     setPatientId(id)
     setScreen('patient')
   }
+  const openCaseSheet = (id: string) => { setPatientId(id); setScreen('casesheet') }
+  const openPrescription = (id: string) => { setPatientId(id); setScreen('prescription') }
+  const openFollowUp = (id: string) => { setPatientId(id); setScreen('followup') }
 
   // ⌘K / Ctrl-K command palette
   useEffect(() => {
@@ -159,23 +163,17 @@ export function WebApp() {
       return
     }
     if (id === 'today' || id === 'calendar' || id === 'patients' || id === 'reports' || id === 'settings') { setScreen(id as Screen); return }
-    // Case notes, prescriptions and follow-ups are all patient-scoped screens —
-    // there's no "current patient" to open them for from the sidebar, so send
-    // the doctor to pick one first instead of opening the screen with a stale
-    // or missing patientId (that used to crash the whole app).
-    if (id === 'prescriptions' || id === 'casenotes' || id === 'followups') {
-      toast({ title: 'Select a patient first', message: 'Open a patient, then use Prescribe, Case sheet or Follow-up from their profile.' })
-      setScreen('patients')
-      return
-    }
+    if (id === 'prescriptions') { setScreen('prescriptions-all'); return }
+    if (id === 'casenotes') { setScreen('casenotes-all'); return }
+    if (id === 'followups') { setScreen('followups-all'); return }
     setScreen('today')
   }
 
   const navActive =
     screen === 'patient' ? 'patients'
-      : screen === 'prescription' ? 'prescriptions'
-      : screen === 'casesheet' ? 'casenotes'
-      : screen === 'followup' ? 'followups'
+      : screen === 'prescription' || screen === 'prescriptions-all' ? 'prescriptions'
+      : screen === 'casesheet' || screen === 'casenotes-all' ? 'casenotes'
+      : screen === 'followup' || screen === 'followups-all' ? 'followups'
       : screen
 
   return (
@@ -317,7 +315,10 @@ export function WebApp() {
                 <CaseSheet patientId={patientId} onPrescribe={() => setScreen('prescription')} onBack={() => setScreen('patient')} />
               )}
               {screen === 'followup' && <FollowUp patientId={patientId} onBack={() => setScreen('patient')} />}
-              {screen === 'reports' && <ReportsView />}
+              {screen === 'prescriptions-all' && <PrescriptionsOverview onOpenPatient={openPatient} onWriteFor={openPrescription} />}
+              {screen === 'casenotes-all' && <CaseNotesOverview onOpenCaseSheet={openCaseSheet} />}
+              {screen === 'followups-all' && <FollowUpsOverview onOpenFollowUp={openFollowUp} />}
+              {screen === 'reports' && <ReportsView onGoToPatients={() => setScreen('patients')} />}
               {screen === 'settings' && <SettingsView />}
               {screen === 'restricted' && <Restricted onBack={() => setScreen('today')} />}
             </motion.div>
@@ -878,6 +879,195 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
   )
 }
 
+// ── PRESCRIPTIONS (all) ──
+function PrescriptionsOverview({ onOpenPatient, onWriteFor }: { onOpenPatient: (id: string) => void; onWriteFor: (id: string) => void }) {
+  const prescriptions = useClinic((s) => s.prescriptions)
+  const patients = useClinic((s) => s.patients)
+  const [search, setSearch] = useState('')
+  const sorted = [...prescriptions].sort((a, b) => b.publishedAt.localeCompare(a.publishedAt))
+  const q = search.trim().toLowerCase()
+  const filtered = q
+    ? sorted.filter((r) => {
+        const pt = patients.find((p) => p.id === r.patientId)
+        return r.remedy.toLowerCase().includes(q) || pt?.name.toLowerCase().includes(q)
+      })
+    : sorted
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="font-display text-[20px] font-bold text-ink">Prescriptions</h1>
+          <div className="text-[12.5px] text-faint">{prescriptions.length.toLocaleString('en-IN')} published</div>
+        </div>
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search patient or remedy"
+          className="w-[240px] rounded-pill border border-border bg-surface px-3.5 py-2 text-[13px] text-body outline-none placeholder:text-faint focus:border-green-border"
+        />
+      </div>
+
+      <Card className="overflow-hidden p-0">
+        {filtered.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <RxIcon size={32} className="text-border-dash" />
+            <p className="mt-3 text-[13.5px] font-medium text-muted">{q ? 'No matches' : 'No prescriptions published yet'}</p>
+          </div>
+        ) : (
+          filtered.map((r) => {
+            const pt = patients.find((p) => p.id === r.patientId)
+            return (
+              <button
+                key={r.id}
+                onClick={() => (pt ? onOpenPatient(pt.id) : undefined)}
+                className="flex w-full items-center gap-4 border-b border-border px-5 py-3.5 text-left transition last:border-0 hover:bg-surface-hover"
+              >
+                <Avatar initials={pt?.initials ?? '?'} size={36} />
+                <div className="min-w-0 flex-1">
+                  <div className="font-display text-[14px] font-semibold text-ink">{pt?.name ?? 'Unknown patient'}</div>
+                  <div className="text-[12px] text-muted">{new Date(r.publishedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+                </div>
+                <div className="text-[13.5px] font-semibold text-ink">{r.remedy} {r.potency}</div>
+                <div className="w-[150px] text-[12px] text-muted">{r.repetition}</div>
+                <div className="flex flex-wrap justify-end gap-1">
+                  {r.sharedVia.map((c) => <Badge key={c} tone="neutral">{c}</Badge>)}
+                </div>
+                {pt && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onWriteFor(pt.id) }}
+                    className="shrink-0 rounded-pill border border-green-border bg-tint px-3 py-1.5 text-[12px] font-semibold text-brand transition hover:bg-accent hover:text-white"
+                  >
+                    Write again
+                  </button>
+                )}
+              </button>
+            )
+          })
+        )}
+      </Card>
+    </div>
+  )
+}
+
+// ── CASE NOTES (all) ──
+function CaseNotesOverview({ onOpenCaseSheet }: { onOpenCaseSheet: (id: string) => void }) {
+  const patients = useClinic((s) => s.patients)
+  const caseData = useClinic((s) => s.caseData)
+  const caseVisits = useClinic((s) => s.caseVisits)
+  const customTemplates = useClinic((s) => s.caseTemplates)
+  const [search, setSearch] = useState('')
+  const q = search.trim().toLowerCase()
+
+  const rows = patients
+    .map((p) => {
+      const cs = caseData[p.id]
+      const sections = getSections('chronic', customTemplates)
+      const done = cs ? sections.filter((s) => cs[s.id]?.done).length : 0
+      const lastVisit = [...caseVisits].filter((v) => v.patientId === p.id).sort((a, b) => b.date.localeCompare(a.date))[0]
+      return { patient: p, done, total: sections.length, lastVisitDate: lastVisit?.date }
+    })
+    .filter((r) => !q || r.patient.name.toLowerCase().includes(q))
+    .sort((a, b) => (b.lastVisitDate ?? '').localeCompare(a.lastVisitDate ?? ''))
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="font-display text-[20px] font-bold text-ink">Case notes</h1>
+          <div className="text-[12.5px] text-faint">{patients.length.toLocaleString('en-IN')} patients</div>
+        </div>
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search patients"
+          className="w-[240px] rounded-pill border border-border bg-surface px-3.5 py-2 text-[13px] text-body outline-none placeholder:text-faint focus:border-green-border"
+        />
+      </div>
+
+      <Card className="overflow-hidden p-0">
+        {rows.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <Notebook size={32} className="text-border-dash" />
+            <p className="mt-3 text-[13.5px] font-medium text-muted">No matches</p>
+          </div>
+        ) : (
+          rows.map(({ patient, done, total, lastVisitDate }) => (
+            <button
+              key={patient.id}
+              onClick={() => onOpenCaseSheet(patient.id)}
+              className="flex w-full items-center gap-4 border-b border-border px-5 py-3.5 text-left transition last:border-0 hover:bg-surface-hover"
+            >
+              <Avatar initials={patient.initials} size={36} />
+              <div className="min-w-0 flex-1">
+                <div className="font-display text-[14px] font-semibold text-ink">{patient.name}</div>
+                <div className="text-[12px] text-muted">{patient.chiefComplaint}</div>
+              </div>
+              <div className="w-[160px]">
+                <div className="h-1.5 overflow-hidden rounded-pill bg-tint-pale">
+                  <div className="h-full rounded-pill bg-accent" style={{ width: `${total > 0 ? Math.round((done / total) * 100) : 0}%` }} />
+                </div>
+                <div className="mt-1 text-[11px] text-faint">{done}/{total} sections</div>
+              </div>
+              <div className="w-[110px] text-right text-[12px] text-faint">
+                {lastVisitDate ? new Date(lastVisitDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : 'No visits yet'}
+              </div>
+            </button>
+          ))
+        )}
+      </Card>
+    </div>
+  )
+}
+
+// ── FOLLOW-UPS (all) ──
+function FollowUpsOverview({ onOpenFollowUp }: { onOpenFollowUp: (id: string) => void }) {
+  const appts = useClinic((s) => s.appointments)
+  const patients = useClinic((s) => s.patients)
+  const followUps = appts
+    .filter((a) => a.reason?.toLowerCase().includes('follow') && a.status !== 'Seen' && a.status !== 'Cancelled')
+    .sort((a, b) => a.date.localeCompare(b.date))
+  const today = todayISO()
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h1 className="font-display text-[20px] font-bold text-ink">Follow-ups</h1>
+        <div className="text-[12.5px] text-faint">{followUps.length.toLocaleString('en-IN')} upcoming</div>
+      </div>
+
+      <Card className="overflow-hidden p-0">
+        {followUps.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <ArrowsClockwise size={32} className="text-border-dash" />
+            <p className="mt-3 text-[13.5px] font-medium text-muted">No follow-ups scheduled</p>
+          </div>
+        ) : (
+          followUps.map((a) => {
+            const pt = patients.find((p) => p.id === a.patientId)
+            const overdue = a.date < today
+            return (
+              <button
+                key={a.id}
+                onClick={() => onOpenFollowUp(a.patientId)}
+                className="flex w-full items-center gap-4 border-b border-border px-5 py-3.5 text-left transition last:border-0 hover:bg-surface-hover"
+              >
+                <Avatar initials={pt?.initials ?? '?'} size={36} />
+                <div className="min-w-0 flex-1">
+                  <div className="font-display text-[14px] font-semibold text-ink">{pt?.name ?? 'Patient'}</div>
+                  <div className="text-[12px] text-muted">{pt?.currentRemedy ?? '—'}</div>
+                </div>
+                <div className="text-[13px] text-body">{formatDayLabel(a.date)} · {a.time}</div>
+                <Badge tone={overdue ? 'amber' : 'neutral'}>{overdue ? 'Overdue' : 'Upcoming'}</Badge>
+              </button>
+            )
+          })
+        )}
+      </Card>
+    </div>
+  )
+}
+
 // ── PATIENT DETAIL ──
 function PatientDetail({ patientId, onPrescribe, onCaseSheet, onFollowUp, onBack }: { patientId: string; onPrescribe: () => void; onCaseSheet: () => void; onFollowUp: () => void; onBack: () => void }) {
   const patient = useClinic((s) => s.patients.find((p) => p.id === patientId))
@@ -887,10 +1077,12 @@ function PatientDetail({ patientId, onPrescribe, onCaseSheet, onFollowUp, onBack
   const checkIns = useClinic((s) => s.checkIns.filter((c) => c.patientId === patientId))
   const appointments = useClinic((s) => s.appointments.filter((a) => a.patientId === patientId))
   const practitioners = useClinic((s) => s.practitioners)
+  const doctor = useClinic((s) => s.practitioners.find((p) => p.id === s.currentPractitionerId))
   const assignPatient = useClinic((s) => s.assignPatient)
   const addDocument = useClinic((s) => s.addDocument)
   const toast = useToast()
   const [assignOpen, setAssignOpen] = useState(false)
+  const [billingApptId, setBillingApptId] = useState<string | null>(null)
   const [assignPos, setAssignPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
   const assignRef = useRef<HTMLDivElement>(null)
   const assignDropRef = useRef<HTMLDivElement>(null)
@@ -922,6 +1114,32 @@ function PatientDetail({ patientId, onPrescribe, onCaseSheet, onFollowUp, onBack
     ['Last outcome', patient.lastOutcome ?? '—'],
     ['Next follow-up', (() => { const fa = appointments.filter(a => a.patientId === patient.id && a.status === 'Upcoming').sort((a, b) => a.time.localeCompare(b.time))[0]; return fa ? `${formatDayLabel(fa.date)} · ${fa.time}` : 'Not scheduled' })()],
   ]
+
+  // Invoice history — every appointment that's had a fee entered, most
+  // recent first. Separate from the "record payment" target below, which
+  // is whichever appointment most likely still needs a bill.
+  const invoices = appointments
+    .filter((a) => a.fee != null)
+    .sort((a, b) => b.date.localeCompare(a.date))
+  const billableAppt =
+    appointments.filter((a) => a.status === 'Seen' && a.paymentStatus !== 'paid' && a.paymentStatus !== 'waived').sort((a, b) => b.date.localeCompare(a.date))[0]
+    ?? appointments.filter((a) => a.status === 'Seen' || a.status === 'In consult').sort((a, b) => b.date.localeCompare(a.date))[0]
+
+  const reprintInvoice = (a: Appointment) => {
+    const credentials = [doctor?.qualifications, doctor?.registrationNo].filter(Boolean).join(' · ')
+    exportInvoicePdf({
+      id: a.id,
+      patientName: patient.name,
+      patientCode: patient.wsCode,
+      doctorName: doctor?.name ?? 'Doctor',
+      doctorCredentials: credentials || undefined,
+      date: a.paidAt ?? a.date,
+      reason: a.reason,
+      fee: a.fee ?? 0,
+      paymentMode: a.paymentMode ?? 'Cash',
+      paymentStatus: a.paymentStatus ?? 'unpaid',
+    }).catch(() => {})
+  }
 
   type TimelineEvent = { id: string; date: string; kind: 'visit' | 'prescription' | 'check-in' | 'outcome'; title: string; detail: string; tone: 'green' | 'amber' | 'neutral' }
   const timeline: TimelineEvent[] = [
@@ -1023,6 +1241,44 @@ function PatientDetail({ patientId, onPrescribe, onCaseSheet, onFollowUp, onBack
             </div>
           </Card>
 
+          <Card className="p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="font-display text-[15px] font-bold text-ink">Billing</h2>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={!billableAppt}
+                onClick={() => billableAppt && setBillingApptId(billableAppt.id)}
+                title={billableAppt ? undefined : 'No consult ready to bill yet'}
+              >
+                <CurrencyInr size={14} weight="bold" /> Record payment
+              </Button>
+            </div>
+            {invoices.length === 0 ? (
+              <p className="py-3 text-center text-[12.5px] text-faint">No invoices yet.</p>
+            ) : (
+              <div className="space-y-2.5">
+                {invoices.map((a) => (
+                  <div key={a.id} className="flex items-center gap-3 rounded-[14px] border border-border bg-surface px-4 py-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-tint text-brand">
+                      <CurrencyInr size={17} weight="bold" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="font-display text-[14px] font-semibold text-ink">₹{(a.fee ?? 0).toLocaleString('en-IN')}</div>
+                      <div className="text-[12px] text-muted">{formatDayLabel(a.date)} · {a.reason ?? 'Consultation'}{a.paymentMode ? ` · ${a.paymentMode}` : ''}</div>
+                    </div>
+                    <Badge tone={a.paymentStatus === 'paid' ? 'green' : a.paymentStatus === 'waived' ? 'neutral' : 'amber'}>
+                      {a.paymentStatus === 'paid' ? 'Paid' : a.paymentStatus === 'waived' ? 'Waived' : 'Unpaid'}
+                    </Badge>
+                    <button onClick={() => reprintInvoice(a)} title="Print / save PDF" className="text-faint hover:text-body">
+                      <Printer size={16} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+
           {/* patient timeline */}
           {timeline.length > 0 && (
             <Card className="p-5">
@@ -1088,14 +1344,17 @@ function PatientDetail({ patientId, onPrescribe, onCaseSheet, onFollowUp, onBack
               {docs.length === 0 && <div className="py-3 text-center text-[12px] text-faint">No documents yet</div>}
             </div>
           </Card>
-          <Card className="overflow-hidden">
-            <div className="border-b border-border px-5 py-3">
+          <Card className="flex h-[420px] flex-col overflow-hidden">
+            <div className="shrink-0 border-b border-border px-5 py-3">
               <h3 className="font-display text-[14px] font-bold text-ink">Messages</h3>
             </div>
-            <ChatThread patientId={patientId} viewAs="practitioner" compact />
+            <div className="min-h-0 flex-1">
+              <ChatThread patientId={patientId} viewAs="practitioner" compact />
+            </div>
           </Card>
         </div>
       </div>
+      <BillingModal apptId={billingApptId} onClose={() => setBillingApptId(null)} />
     </div>
   )
 }
@@ -1106,6 +1365,7 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
   const doctor = useClinic((s) => s.practitioners.find((p) => p.id === s.currentPractitionerId))
   const publish = useClinic((s) => s.publishPrescription)
   const updatePractitioner = useClinic((s) => s.updatePractitioner)
+  const scheduleFollowUp = useClinic((s) => s.scheduleFollowUp)
   const toast = useToast()
 
   // The remedy field is the actual value — typing always works, chips below
@@ -1151,9 +1411,27 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
       sharedVia: ['Patient app', ...channels],
       origin: 'web',
     })
+
+    // Publishing books the review too — a course that ends without anyone
+    // checking back on it is the exact gap a follow-up reminder exists to
+    // close. "As needed" has no natural end date, so it's skipped.
+    let followUpNote = ''
+    if (rep !== 'As needed' && duration > 0) {
+      const followUpDate = addDaysISO(todayISO(), duration)
+      scheduleFollowUp({
+        patientId,
+        practitionerId: doctor?.id ?? '',
+        time: '10:00 AM',
+        date: followUpDate,
+        type: 'In person',
+        reason: 'Follow-up',
+      })
+      followUpNote = ` Follow-up auto-booked for ${formatDayLabel(followUpDate)} — reschedule any time from Follow-ups.`
+    }
+
     toast({
       title: 'Prescription published',
-      message: `${remedy} ${potency} sent to ${patient.name}'s app${channels.length ? ` and ${channels.join(', ')}` : ''}.`,
+      message: `${remedy} ${potency} sent to ${patient.name}'s app${channels.length ? ` and ${channels.join(', ')}` : ''}.${followUpNote}`,
       action: { label: 'Back to patient', onClick: onDone },
     })
     onDone()
@@ -1206,7 +1484,13 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
 
           <div>
             <Label>Potency</Label>
-            <div className="mt-2 flex gap-2">
+            <input
+              value={potency}
+              onChange={(e) => setPotency(e.target.value)}
+              placeholder="e.g. 200C, 50M, LM1"
+              className="mt-2 w-full rounded-pill border border-border bg-surface px-3.5 py-2 text-[13px] text-ink outline-none placeholder:text-faint focus:border-green-border"
+            />
+            <div className="mt-2 flex flex-wrap gap-2">
               {POTENCIES.map((p) => (
                 <Chip key={p} selected={p === potency} onClick={() => setPotency(p)} className="min-w-[64px] text-center">{p}</Chip>
               ))}
@@ -1364,7 +1648,7 @@ function NotifPanel({ onClose }: { onClose: () => void }) {
 }
 
 // ── REPORTS ──
-function ReportsView() {
+function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
   const patients = useClinic((s) => s.patients)
   const appointments = useClinic((s) => s.appointments)
   const prescriptions = useClinic((s) => s.prescriptions)
@@ -1380,9 +1664,14 @@ function ReportsView() {
   const followUpRate = totalAppts > 0 ? Math.round((appointments.filter((a) => a.reason).length / totalAppts) * 100) : 0
   const paidAppts = appointments.filter((a) => a.paymentStatus === 'paid')
   const totalRevenue = paidAppts.reduce((sum, a) => sum + (a.fee ?? CONSULT_FEE), 0)
+  const newPatientsThisMonth = (() => {
+    const thisMonth = new Date().toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
+    return patients.filter((p) => p.patientSince === thisMonth).length
+  })()
 
   const stats = [
     { label: 'Total patients', num: patients.length, format: (n: number) => String(Math.round(n)), icon: UsersFour, tone: 'brand' as const },
+    { label: 'New this month', num: newPatientsThisMonth, format: (n: number) => String(Math.round(n)), icon: Plus, tone: 'brand' as const },
     { label: 'Consultations done', num: seenCount, format: (n: number) => String(Math.round(n)), icon: Stethoscope, tone: 'green' as const },
     { label: 'Prescriptions issued', num: prescriptions.length, format: (n: number) => String(Math.round(n)), icon: Pill, tone: 'amber' as const },
     { label: 'Revenue collected', num: totalRevenue, format: inr, icon: CurrencyInr, tone: 'green' as const },
@@ -1441,6 +1730,28 @@ function ReportsView() {
     return Math.round(checkIns.reduce((sum, c) => sum + c.improvementPct, 0) / checkIns.length)
   }, [checkIns])
 
+  // Visits by month, new vs. returning — the last 6 months, oldest first.
+  const visitsByMonth = useMemo(() => {
+    const months: { key: string; label: string; new: number; returning: number }[] = []
+    const now = new Date()
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      months.push({ key: `${d.getFullYear()}-${d.getMonth()}`, label: d.toLocaleDateString('en-IN', { month: 'short' }), new: 0, returning: 0 })
+    }
+    const byKey = new Map(months.map((m) => [m.key, m]))
+    appointments.forEach((a) => {
+      if (a.status !== 'Seen' && a.status !== 'In consult') return
+      if (!a.date) return
+      const d = new Date(a.date + 'T00:00:00')
+      const m = byKey.get(`${d.getFullYear()}-${d.getMonth()}`)
+      if (!m) return
+      if (a.isFirstVisit) m.new++
+      else m.returning++
+    })
+    return months
+  }, [appointments])
+  const maxMonthly = Math.max(...visitsByMonth.map((m) => m.new + m.returning), 1)
+
   return (
     <div className="space-y-5">
       <div>
@@ -1448,7 +1759,7 @@ function ReportsView() {
         <div className="text-[12.5px] text-faint">Practice analytics · live data from your clinic</div>
       </div>
 
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-5 gap-3">
         {stats.map((s) => (
           <Card key={s.label} className="px-4 py-4">
             <div className="flex items-center gap-2.5">
@@ -1516,6 +1827,38 @@ function ReportsView() {
         </Card>
       </div>
 
+      <Card className="p-5">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="font-display text-[15px] font-bold text-ink">Patient visits</h2>
+          <div className="flex items-center gap-3 text-[11.5px] text-muted">
+            <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-brand" />New</span>
+            <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-accent" />Returning</span>
+          </div>
+        </div>
+        <div className="flex items-end gap-4" style={{ height: 160 }}>
+          {visitsByMonth.map((m, i) => (
+            <div key={m.key} className="flex flex-1 flex-col items-center gap-1.5">
+              <div className="text-[11px] font-semibold text-faint">{m.new + m.returning || ''}</div>
+              <div className="flex w-full flex-col justify-end overflow-hidden rounded-t-[8px]" style={{ height: 120 }}>
+                <motion.div
+                  initial={{ height: 0 }}
+                  animate={{ height: `${(m.returning / maxMonthly) * 120}px` }}
+                  transition={{ duration: 0.7, delay: i * 0.05, ease: easeCalm }}
+                  className="w-full bg-accent"
+                />
+                <motion.div
+                  initial={{ height: 0 }}
+                  animate={{ height: `${(m.new / maxMonthly) * 120}px` }}
+                  transition={{ duration: 0.7, delay: i * 0.05, ease: easeCalm }}
+                  className="w-full rounded-t-[8px] bg-brand"
+                />
+              </div>
+              <div className="text-[12px] font-medium text-muted">{m.label}</div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
       <div className="grid grid-cols-3 gap-4">
         <Card className="col-span-2 p-5">
           <h2 className="mb-4 font-display text-[15px] font-bold text-ink">Weekly revenue</h2>
@@ -1566,7 +1909,12 @@ function ReportsView() {
       </div>
 
       <Card className="p-5">
-        <h2 className="mb-4 font-display text-[15px] font-bold text-ink">Practitioner workload</h2>
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="font-display text-[15px] font-bold text-ink">Practitioner workload</h2>
+          <Button variant="ghost" size="sm" onClick={onGoToPatients}>
+            <UsersThree size={14} /> Rebalance gently
+          </Button>
+        </div>
         <div className="grid grid-cols-4 gap-3">
           {practitionerLoad.map((p) => (
             <div key={p.name} className="rounded-[14px] border border-border bg-surface px-4 py-3.5">

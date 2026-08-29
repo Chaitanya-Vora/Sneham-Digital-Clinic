@@ -1,0 +1,11 @@
+node_modules
+dist
+.env
+.env.local
+*.local
+.vercel
+.DS_Store
+*.apk
+dist-apk/
+.audit-tmp/
+tsconfig.tsbuildinfo

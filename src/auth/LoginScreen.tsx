@@ -1,0 +1,164 @@
+import { useState } from 'react'
+import { motion } from 'framer-motion'
+import { Eye, EyeSlash, ArrowRight, Spinner, Stethoscope, User } from '@phosphor-icons/react'
+import { Capacitor } from '@capacitor/core'
+import { SnehamHero } from '../design-system/Logo'
+import { useAuth } from './AuthProvider'
+
+const SURFACE_ENV = import.meta.env.VITE_DEFAULT_SURFACE as string | undefined
+const surfaceLabel = SURFACE_ENV === 'patient' ? 'Patient' : SURFACE_ENV === 'practitioner' ? 'Practitioner' : null
+const SurfaceIcon = SURFACE_ENV === 'patient' ? User : Stethoscope
+
+interface Props {
+  onSwitch: (screen: 'signup' | 'forgot') => void
+}
+
+export function LoginScreen({ onSwitch }: Props) {
+  const { signIn, signInWithGoogle, oauthError } = useAuth()
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [showPw, setShowPw] = useState(false)
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (busy) return
+    if (!email.includes('@')) return setError('Enter the email address you signed up with.')
+    if (password.length < 6) return setError('Your password is at least 6 characters.')
+    setBusy(true)
+    setError('')
+    const { error: err } = await signIn(email, password)
+    if (err) {
+      setError(err)
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="flex min-h-[100dvh] items-center justify-center bg-canvas px-6">
+      <motion.div
+        initial={{ opacity: 0, y: 24 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+        className="w-full max-w-[380px]"
+      >
+        <SnehamHero />
+        {surfaceLabel && Capacitor.isNativePlatform() && (
+          <div className="mt-3 flex items-center justify-center gap-1.5">
+            <span className="flex items-center gap-1.5 rounded-pill border border-border bg-surface px-3 py-1 text-[12px] font-semibold text-body">
+              <SurfaceIcon size={14} weight="fill" className="text-brand" /> {surfaceLabel} App
+            </span>
+          </div>
+        )}
+
+        <button
+          onClick={async () => {
+            const { error: err } = await signInWithGoogle()
+            if (err) setError(err)
+          }}
+          className="mt-9 flex w-full items-center justify-center gap-3 rounded-[12px] border border-border bg-surface py-3.5 text-[15px] font-semibold text-ink transition hover:bg-surface-hover"
+        >
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+            <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/>
+            <path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z" fill="#34A853"/>
+            <path d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.997 8.997 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/>
+            <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 6.29C4.672 4.163 6.656 2.58 9 2.58z" fill="#EA4335"/>
+          </svg>
+          Continue with Google
+        </button>
+
+        <div className="relative mt-6">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-border" />
+          </div>
+          <div className="relative flex justify-center">
+            <span className="bg-canvas px-4 text-[12px] text-muted">or sign in with email</span>
+          </div>
+        </div>
+
+        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+          <div>
+            <label className="mb-1.5 block text-[12px] font-semibold uppercase tracking-label text-muted">
+              Email
+            </label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => { setEmail(e.target.value); setError('') }}
+              placeholder="you@clinic.com"
+              autoComplete="email"
+              className="w-full rounded-[10px] border border-border bg-surface px-4 py-3 text-[15px] text-ink outline-none transition placeholder:text-faint focus:border-accent focus:ring-2 focus:ring-accent/20"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-[12px] font-semibold uppercase tracking-label text-muted">
+              Password
+            </label>
+            <div className="relative">
+              <input
+                type={showPw ? 'text' : 'password'}
+                value={password}
+                onChange={(e) => { setPassword(e.target.value); setError('') }}
+                placeholder="Enter your password"
+                autoComplete="current-password"
+                className="w-full rounded-[10px] border border-border bg-surface px-4 py-3 pr-12 text-[15px] text-ink outline-none transition placeholder:text-faint focus:border-accent focus:ring-2 focus:ring-accent/20"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPw(!showPw)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted hover:text-body"
+              >
+                {showPw ? <EyeSlash size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
+          </div>
+
+          {(error || oauthError) && (
+            <motion.div
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="rounded-[8px] border border-danger/20 bg-danger/5 px-3 py-2.5 text-[13px] text-danger"
+            >
+              {error || oauthError}
+            </motion.div>
+          )}
+
+          <button
+            type="submit"
+            disabled={busy}
+            className="flex w-full items-center justify-center gap-2 rounded-[12px] bg-brand py-3.5 text-[15px] font-semibold text-white shadow-cta transition hover:bg-accent-deep disabled:opacity-70"
+          >
+            {busy ? (
+              <Spinner size={20} className="animate-spin" />
+            ) : (
+              <>
+                Sign in <ArrowRight size={18} weight="bold" />
+              </>
+            )}
+          </button>
+        </form>
+
+        <div className="mt-5 text-center">
+          <button
+            onClick={() => onSwitch('forgot')}
+            className="text-[13px] font-medium text-accent hover:text-brand"
+          >
+            Forgot your password?
+          </button>
+        </div>
+
+        <div className="mt-8 text-center text-[13px] text-muted">
+          Don't have an account?{' '}
+          <button
+            onClick={() => onSwitch('signup')}
+            className="font-semibold text-brand hover:text-accent-deep"
+          >
+            Create one
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  )
+}

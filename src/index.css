@@ -1,0 +1,112 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+    background: #efede4;
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    font-family: 'Source Sans 3', system-ui, sans-serif;
+    color: #232a1e;
+  }
+  * {
+    box-sizing: border-box;
+  }
+  ::selection {
+    background: #dce6d0;
+  }
+  /* native-feel touch base */
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+  /* app safe-area insets — small on a real device, overridden larger inside
+     the desktop phone-frame so content clears the drawn island. */
+  :root {
+    --app-top: calc(max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px)) + 18px);
+    --app-bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
+  }
+  body {
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    -webkit-user-select: none;
+    overscroll-behavior-y: none;
+    touch-action: manipulation;
+    -webkit-overflow-scrolling: touch;
+  }
+  /* only genuine text surfaces are selectable */
+  input,
+  textarea,
+  [data-selectable='true'] {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+  button {
+    -webkit-tap-highlight-color: transparent;
+  }
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: 'Outfit', system-ui, sans-serif;
+    letter-spacing: -0.02em;
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: 'Outfit', system-ui, sans-serif;
+  }
+  .tracking-label {
+    letter-spacing: 0.08em;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+/* soft green scrollbar to match the design */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #d8dbcb;
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@keyframes notif-ping {
+  0% { transform: scale(1); opacity: 1; }
+  60% { transform: scale(1.6); opacity: 0; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+.notif-pulse::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: #EF4444;
+  animation: notif-ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+  z-index: -1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

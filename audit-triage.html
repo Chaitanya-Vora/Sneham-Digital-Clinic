@@ -1,0 +1,435 @@
+<title>Sneham Audit Triage</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --surface-alt: #f0f2f5;
+    --ink: #111827;
+    --body: #374151;
+    --muted: #6b7280;
+    --faint: #9ca3af;
+    --border: #e5e7eb;
+    --brand: #41603C;
+    --brand-light: #e8f0e6;
+    --critical: #dc2626;
+    --critical-bg: #fef2f2;
+    --critical-border: #fecaca;
+    --high-bg: #fff7ed;
+    --high-border: #fed7aa;
+    --high: #ea580c;
+    --medium: #d97706;
+    --medium-bg: #fffbeb;
+    --medium-border: #fde68a;
+    --low: #6b7280;
+    --low-bg: #f3f4f6;
+    --low-border: #e5e7eb;
+    --font: 'DM Sans', system-ui, sans-serif;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface-alt: #22252f;
+      --ink: #f1f2f4;
+      --body: #c8ccd4;
+      --muted: #8b8f9a;
+      --faint: #5c6070;
+      --border: #2e3140;
+      --brand: #6b9a63;
+      --brand-light: #1e2e1c;
+      --critical: #f87171;
+      --critical-bg: #2a1515;
+      --critical-border: #5c1e1e;
+      --high: #fb923c;
+      --high-bg: #2a1f10;
+      --high-border: #5c3a10;
+      --medium: #fbbf24;
+      --medium-bg: #2a2410;
+      --medium-border: #5c4a10;
+      --low: #8b8f9a;
+      --low-bg: #22252f;
+      --low-border: #2e3140;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface-alt: #22252f;
+    --ink: #f1f2f4;
+    --body: #c8ccd4;
+    --muted: #8b8f9a;
+    --faint: #5c6070;
+    --border: #2e3140;
+    --brand: #6b9a63;
+    --brand-light: #1e2e1c;
+    --critical: #f87171;
+    --critical-bg: #2a1515;
+    --critical-border: #5c1e1e;
+    --high: #fb923c;
+    --high-bg: #2a1f10;
+    --high-border: #5c3a10;
+    --medium: #fbbf24;
+    --medium-bg: #2a2410;
+    --medium-border: #5c4a10;
+    --low: #8b8f9a;
+    --low-bg: #22252f;
+    --low-border: #2e3140;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--body);
+    font-family: var(--font);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .shell { max-width: 960px; margin: 0 auto; padding: 24px 20px 80px; }
+
+  .header { margin-bottom: 28px; }
+  .header h1 {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+  .header .sub {
+    margin-top: 4px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  .summary {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+  @media (max-width: 600px) { .summary { grid-template-columns: repeat(2, 1fr); } }
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  .stat:hover { border-color: var(--faint); }
+  .stat.active { border-color: var(--brand); background: var(--brand-light); }
+  .stat .num {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+  }
+  .stat .label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-top: 4px;
+  }
+  .stat.crit .num { color: var(--critical); }
+  .stat.crit .label { color: var(--critical); }
+  .stat.high .num { color: var(--high); }
+  .stat.high .label { color: var(--high); }
+  .stat.med .num { color: var(--medium); }
+  .stat.med .label { color: var(--medium); }
+  .stat.lo .num { color: var(--low); }
+  .stat.lo .label { color: var(--low); }
+
+  .controls {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 14px;
+    border-radius: 100px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--body);
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .pill:hover { border-color: var(--faint); }
+  .pill.active { background: var(--brand); color: #fff; border-color: var(--brand); }
+  .pill .count {
+    font-size: 10px;
+    font-weight: 700;
+    background: var(--surface-alt);
+    color: var(--muted);
+    padding: 1px 6px;
+    border-radius: 100px;
+    font-variant-numeric: tabular-nums;
+  }
+  .pill.active .count { background: rgba(255,255,255,0.25); color: #fff; }
+
+  .list { display: flex; flex-direction: column; gap: 6px; }
+  .finding {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 16px;
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  .finding:hover { border-color: var(--faint); }
+  .finding .row1 {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .finding .severity {
+    flex-shrink: 0;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-top: 2px;
+  }
+  .sev-critical { background: var(--critical-bg); color: var(--critical); border: 1px solid var(--critical-border); }
+  .sev-high { background: var(--high-bg); color: var(--high); border: 1px solid var(--high-border); }
+  .sev-medium { background: var(--medium-bg); color: var(--medium); border: 1px solid var(--medium-border); }
+  .sev-low { background: var(--low-bg); color: var(--low); border: 1px solid var(--low-border); }
+  .finding .title {
+    flex: 1;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink);
+    line-height: 1.4;
+  }
+  .finding .file {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--faint);
+    margin-top: 4px;
+  }
+  .finding .detail {
+    display: none;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--body);
+    line-height: 1.55;
+  }
+  .finding.open .detail { display: block; }
+  .finding .detail .lbl {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin-bottom: 4px;
+    margin-top: 10px;
+  }
+  .finding .detail .lbl:first-child { margin-top: 0; }
+  .finding .detail code {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    background: var(--surface-alt);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  .finding .detail pre {
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.5;
+    background: var(--surface-alt);
+    padding: 10px 12px;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin-top: 6px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .cat-tag {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 7px;
+    border-radius: 100px;
+    background: var(--surface-alt);
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .empty {
+    text-align: center;
+    padding: 48px 20px;
+    color: var(--faint);
+    font-size: 14px;
+  }
+</style>
+
+<div class="shell">
+  <div class="header">
+    <h1>Sneham Digital Clinic &mdash; Audit Triage</h1>
+    <div class="sub">108 findings across 3 scan workflows &middot; 29 Aug 2026</div>
+  </div>
+
+  <div class="summary" id="stats"></div>
+  <div class="controls" id="filters"></div>
+  <div class="list" id="list"></div>
+</div>
+
+<script>
+const FINDINGS = [
+  // ── Workflow 3 (wf_405c1722) — Data/Demo critical ──
+  { id: 1, title: "No realtime or polling — messages/prescriptions never reach the other phone without manual pull-to-refresh", file: "src/core/store.ts", severity: "critical", category: "Data sync", detail: "hydrate() is the ONLY read path and is invoked at login and on manual pull-to-refresh only. When the practitioner sends a chat message or publishes a prescription, nothing appears on the patient phone. The two-phone demo will look dead.", fix: "Add Supabase realtime subscription on key tables (messages, prescriptions, appointments) in store.ts, or add a 5-second polling interval." },
+  { id: 2, title: "Patient app picks wrong patient as 'me' — it's patients[0], whoever was created last", file: "src/patient/PatientApp.tsx", severity: "critical", category: "Identity", detail: "The patient identity is literally patients[0] — the most recently inserted patient row. Adding a new patient from the practitioner app hijacks the patient phone's identity. The patient sees someone else's prescriptions and appointments.", fix: "Match the logged-in user's email/auth ID to the patient row, not array position." },
+  { id: 3, title: "Patient sign-up creates a fake practitioner in the doctor's team list", file: "src/core/db.ts", severity: "critical", category: "Identity", detail: "Every new user (including patients) creates a practitioner record. The doctor sees the patient's name in their team list.", fix: "Gate practitioner creation on role or surface." },
+  { id: 4, title: "Cross-surface notifications stamped with sender's user_id — never delivered to the other side", file: "src/core/db.ts", severity: "critical", category: "Data sync", detail: "Notifications for the patient are written under the practitioner's user_id, so the patient never receives them. Same in reverse.", fix: "Write notifications under the recipient's user_id, not the sender's." },
+  { id: 5, title: "'Prescribe' always lands on wrong patient — no patient ID threaded into Quick Rx", file: "src/practitioner/PractitionerApp.tsx", severity: "critical", category: "Functional", detail: "QuickRxScreen has no patient ID prop. Navigating from a case sheet to Prescribe loses the patient context — the prescription may be written for the wrong person.", fix: "Thread patientId from the case sheet or consult into QuickRxScreen." },
+  { id: 6, title: "QuickRxScreen arrives pre-filled with invented prescription — one tap publishes it", file: "src/practitioner/PractitionerApp.tsx", severity: "critical", category: "Functional", detail: "The Rx screen starts with a remedy, potency and dose pre-selected. The Publish button is enabled on arrival. A single tap sends an invented prescription to a patient's app and WhatsApp.", fix: "Start with empty fields and disabled Publish." },
+  { id: 7, title: "Today tab shows appointments from ALL dates, not just today", file: "src/practitioner/TodayGrid.tsx", severity: "critical", category: "Data", detail: "No date filter on the today view. Past and future appointments all render together.", fix: "Filter appointments to todayISO() before rendering." },
+  { id: 8, title: "Calendar shows wrong day's appointments after any tap (UTC date shift)", file: "src/practitioner/Calendar.tsx", severity: "critical", category: "Data", detail: "Tapping a date computes the wrong day due to UTC vs local timezone mismatch. The appointments shown are for the previous day.", fix: "Use toISO() helper consistently for local date construction." },
+  { id: 9, title: "Database is empty — first pull-to-refresh WIPES both phones", file: "src/core/seed.ts", severity: "critical", category: "Data", detail: "Live Supabase DB has no seed data. hydrate() pulls empty tables and overwrites the in-memory seed data. After the first refresh, all demo data vanishes.", fix: "Seed the Supabase database with demo data, or skip hydrate overwrite when DB returns empty." },
+  { id: 10, title: "Practitioner APK has no way to register a patient — AddPatientSheet never opens", file: "src/practitioner/PractitionerApp.tsx", severity: "high", category: "Functional", detail: "The addPatientOpen state exists but no UI element sets it to true. The doctor cannot add a new patient.", fix: "Add a + button to the patient search or today screen that calls setAddPatientOpen(true)." },
+  { id: 11, title: "Signup dead-ends at 'Check your email' — confirmation link can't return to APK", file: "src/auth/AuthProvider.tsx", severity: "high", category: "Auth", detail: "The email confirmation link opens in the browser, not the app. The WEB_ORIGIN redirect fallback is dead code. New user is stuck.", fix: "Use Capacitor deep links for email confirmation redirect." },
+  { id: 12, title: "Practitioner joins Jitsi room TWICE — instant audio feedback howl", file: "src/video/VideoConsult.tsx", severity: "high", category: "Video", detail: "The Jitsi iframe is mounted twice, creating two audio streams. The demo will produce a loud echo/howl.", fix: "Guard against double-mount with a ref or strict-mode-safe cleanup." },
+  { id: 13, title: "Web 'Join call' never sets status to In consult — patient's Join stays dead", file: "src/web/WebApp.tsx", severity: "high", category: "Video", detail: "Starting a video call from web doesn't update appointment status, so the patient app never sees it as joinable.", fix: "Call startConsult(appointmentId) when joining from web." },
+  { id: 14, title: "Patient app 'Switch experience' button visible — exits to launcher", file: "src/patient/PatientApp.tsx", severity: "high", category: "UI", detail: "Patient sees a button that takes them out of their app into the surface picker. Should be hidden on native builds.", fix: "Hide when Capacitor.isNativePlatform()." },
+  { id: 15, title: "Every write is fire-and-forget — failed saves show success toast then data vanishes", file: "src/core/store.ts", severity: "high", category: "Data", detail: "All Supabase writes have no error handling. A network failure still shows success, then the data disappears on next hydrate.", fix: "Add try/catch with error toasts on write paths." },
+  { id: 16, title: "'Next appointment' on patient home is the newest, not the soonest", file: "src/patient/PatientApp.tsx", severity: "high", category: "Data", detail: "Sorts by creation order instead of date. Patient sees wrong upcoming appointment.", fix: "Sort by date ascending, filter to future dates." },
+
+  // ── Workflow 1 (wf_8a28e1dc) — Native Android ──
+  { id: 17, title: "Share button never opens Android share sheet — Web Share API missing in WebView", file: "src/patient/PatientApp.tsx", severity: "high", category: "Native", detail: "navigator.share is undefined in Capacitor WebView. Falls back to clipboard which may also fail. @capacitor/share is already a dependency and used elsewhere.", fix: "Use Capacitor Share plugin (already imported in pdfExport.ts) instead of Web Share API." },
+  { id: 18, title: "PDF export shows 'failed' toast when user just cancels the share chooser", file: "src/patient/PatientApp.tsx", severity: "medium", category: "Native", detail: "@capacitor/share rejects with 'Share canceled' when the user dismisses the chooser. The catch treats this as an error. The toast also has a green checkmark icon next to the word 'failed'.", fix: "Wrap Share.share() in its own try/catch to absorb cancellation." },
+  { id: 19, title: "'Export my data' is a dead button that reports success on Android", file: "src/patient/PatientApp.tsx", severity: "medium", category: "Native", detail: "Uses blob: URL + anchor click, which Capacitor WebView ignores. Shows success toast + haptic despite nothing happening.", fix: "Use Capacitor Filesystem + Share for native, keep anchor for web." },
+
+  // ── Workflow 2 (wf_7acbd539) — Design/UX ──
+  { id: 20, title: "Consult timer frozen at 0:00 after first consult — interval ref leaks", file: "src/practitioner/TodayGrid.tsx", severity: "high", category: "Functional", detail: "stopTimer clears the interval but never nulls the ref. Second consult of the day never starts a new timer. The interval also leaks on unmount.", fix: "Null the ref in stopTimer and add unmount cleanup." },
+  { id: 21, title: "Grid view: tapping a patient does nothing — callbacks destructured but never wired", file: "src/practitioner/TodayGrid.tsx", severity: "high", category: "Functional", detail: "openCase and markNoShow are passed to TodayGrid but never attached to any click handler in the grid view. Only list view has working taps.", fix: "Wire onClick handlers in grid cards." },
+  { id: 22, title: "Check-in badge hardcodes 'better' — worse patients displayed as improving", file: "src/practitioner/MobileFollowUp.tsx", severity: "high", category: "Data", detail: "Line 66 is a string literal 'better' regardless of checkIn.marked value. A patient who said 'worse' is shown to the doctor as 'better'.", fix: "Use checkIn.marked instead of the literal string." },
+  { id: 23, title: "Handoff writes fabricated clinical text — sent to another practitioner + patient notified", file: "src/practitioner/MobileFollowUp.tsx", severity: "high", category: "Data", detail: "The handoff note includes invented cover-end date and clinical directive. A real patient is notified that 'a colleague will see them' based on fabricated data.", fix: "Pull actual case data or leave fields empty for doctor to fill." },
+  { id: 24, title: "Voice note records then throws away — 'Attached' label is a lie on clinical record", file: "src/practitioner/MobileCaseSheet.tsx", severity: "high", category: "Functional", detail: "No onAttach callback is passed to VoiceRecorder. The recording UI works, shows 'Attached', but the audio blob is dropped.", fix: "Wire onAttach to save the audio blob to Supabase storage." },
+  { id: 25, title: "Case autosave fails silently — no saving/saved/error indicator", file: "src/components/CaseFields.tsx", severity: "high", category: "Functional", detail: "The flagship data-entry screen has zero feedback about save state. A failed persist reads to the doctor as a saved clinical outcome.", fix: "Add saving/saved/error state indicator." },
+  { id: 26, title: "Section progress bar hardcoded to 6 — doesn't match selected template", file: "src/components/CaseFields.tsx", severity: "high", category: "Functional", detail: "Progress always shows X/6 regardless of which template (Acute, Pediatric, etc.) is selected. Can never reach 100% on templates with more or fewer sections.", fix: "Compute from template.sections.length." },
+  { id: 27, title: "Check-in CTA renders disabled AND pointer-events-none on arrival", file: "src/patient/PatientApp.tsx", severity: "high", category: "UI", detail: "The primary CTA on the check-in screen is washed out and completely inert when the screen first loads. No feedback at all on tap.", fix: "Remove the default-disabled state, enable when form is ready." },
+  { id: 28, title: "Calendar fabricates appointments for every day except today", file: "src/practitioner/Calendar.tsx", severity: "high", category: "Data", detail: "Non-today dates populate with invented patients, reasons, and statuses. Production path renders fake clinical data.", fix: "Remove seed logic, show only real appointments." },
+  { id: 29, title: "Booking always books today at hardcoded time slots, ignoring real calendar", file: "src/patient/PatientApp.tsx", severity: "high", category: "Functional", detail: "Hardcoded four time slots. Books into today regardless of actual time — patient can book into the past.", fix: "Query real availability from practitioner's schedule." },
+  { id: 30, title: "Reschedule: all three options are identical no-ops that toast the option name", file: "src/patient/PatientApp.tsx", severity: "high", category: "Functional", detail: "'Tomorrow same time', 'This week', 'Choose date & time' all run the same function. No date picker. Toast says it worked.", fix: "Implement actual reschedule logic with date selection." },
+  { id: 31, title: "Mood picker synthesizes a precise improvement % the patient never entered", file: "src/patient/PatientApp.tsx", severity: "high", category: "Data", detail: "Tapping a 5-option mood emoji generates a fake precise percentage (e.g. 72%) that's shown to the doctor as clinical data and averaged into statistics.", fix: "Map mood to a simple category, not a fake precise number." },
+  { id: 32, title: "Register form: empty submit does nothing — no error, no haptic, no feedback", file: "src/practitioner/PatientSearch.tsx", severity: "high", category: "UI", detail: "Tapping Register with empty name/age silently refuses. The button appears live but gives zero feedback.", fix: "Add validation with error messages on required fields." },
+  { id: 33, title: "'Custom' follow-up books 1 week out without showing a date picker", file: "src/practitioner/PatientSearch.tsx", severity: "high", category: "Functional", detail: "The option labeled 'Custom' (implying user chooses a date) silently schedules 7 days out and toasts success.", fix: "Open a date picker for the Custom option." },
+  { id: 34, title: "Create account CTA renders washed-out and dead on arrival", file: "src/auth/SignupScreen.tsx", severity: "high", category: "UI", detail: "Same disabled:opacity-40 issue as was fixed on Sign in screen. First impression is a broken button.", fix: "Remove default disabled state." },
+  { id: 35, title: "Send reset link CTA also renders disabled on arrival", file: "src/auth/ForgotPasswordScreen.tsx", severity: "high", category: "UI", detail: "Same pattern — button appears broken before user types anything.", fix: "Enable CTA by default or add clear placeholder guidance." },
+  { id: 36, title: "Google sign-up failure shows no error — user silently returned to untouched form", file: "src/auth/SignupScreen.tsx", severity: "high", category: "Auth", detail: "A failed or cancelled Google OAuth surfaces nothing. The doctor is returned to a blank form with no indication of what happened.", fix: "Add error toast on OAuth failure/cancellation." },
+  { id: 37, title: "Missing patient ID renders blank screen with no back button — user stranded", file: "src/practitioner/PatientSearch.tsx", severity: "medium", category: "UI", detail: "If a patient ID lookup misses, the entire screen is blank with no message and no navigation. Doctor must force-quit.", fix: "Add a 'Patient not found' state with a back button." },
+  { id: 38, title: "All document rows are dead taps despite having real file URLs stored", file: "src/patient/PatientApp.tsx", severity: "medium", category: "Functional", detail: "The Documents section renders rows but tapping them does nothing. The fileUrl exists in the data but is never used.", fix: "Open the file URL on tap using Capacitor Browser or in-app viewer." },
+  { id: 39, title: "Pull-to-refresh on calendar is a 700ms fake — refetches nothing", file: "src/practitioner/Calendar.tsx", severity: "medium", category: "Functional", detail: "The pull gesture shows a spinner that resolves after a sleep. No data is actually refetched. Stale data stays stale.", fix: "Call hydrate() in the refresh handler." },
+  { id: 40, title: "Dose reminder screen has no empty state — shows 0% ring and dead buttons", file: "src/patient/PatientApp.tsx", severity: "medium", category: "UI", detail: "With zero reminders: a 0% adherence ring, a 'Today' heading over nothing, and two buttons that create toasts for non-existent reminders.", fix: "Add a proper empty state explaining no prescriptions yet." },
+  { id: 41, title: "Notification banner positioned with hardcoded 50px — under notch/dynamic island", file: "src/patient/PatientApp.tsx", severity: "medium", category: "UI", detail: "Uses a fixed 50px top offset instead of safe-area-inset-top token. On notched iPhones, the banner renders under the status bar.", fix: "Use var(--app-top) or env(safe-area-inset-top)." },
+  { id: 42, title: "disabled:opacity-40 in shared Button base — three screens arrive with dead CTAs", file: "src/design-system/ui.tsx", severity: "high", category: "Design system", detail: "The base Button component applies opacity-40 when disabled. Multiple screens pass disabled=true on mount, making the primary CTA look broken as the first thing the user sees.", fix: "Remove the default disabled state or use a less aggressive opacity." },
+
+  // ── Design hierarchy (consolidated) ──
+  { id: 43, title: "No type scale defined in tailwind.config.js — 19 distinct sizes used across app", file: "tailwind.config.js", severity: "high", category: "Design system", detail: "The token layer defines no fontSize scale at all. Every screen invents its own sizes. 19 distinct sizes are in use app-wide with no consistent hierarchy.", fix: "Define a type scale (e.g. 34/21/15/13/12/11) in Tailwind config and enforce it." },
+  { id: 44, title: "Tap targets under 44px minimum across all surfaces — 30+ controls affected", file: "Multiple files", severity: "medium", category: "Accessibility", detail: "Back arrows (17-19px), toggle switches (27px), stepper buttons (32px), chips (33px), notification bells (40px), and many more controls are below the 44px minimum touch target. Affects both practitioner and patient apps.", fix: "Add padding/min-height to interactive elements to reach 44px." },
+  { id: 45, title: "Low contrast on faint text tokens — 2.66:1 against AA floor of 4.5:1", file: "src/practitioner/PractitionerApp.tsx", severity: "medium", category: "Accessibility", detail: "Inactive tab labels and header date/clinic line use text-faint at 10-11px, measuring 2.66-2.85:1 contrast. Well under WCAG AA 4.5:1 minimum for text this size.", fix: "Darken --faint token or increase font size above 14px for AA-large exemption." },
+  { id: 46, title: "271 lines of dead TodayScreen code in PractitionerApp.tsx — never rendered", file: "src/practitioner/PractitionerApp.tsx", severity: "low", category: "Cleanup", detail: "The old TodayScreen function (lines 296-566) is fully replaced by TodayGrid but still in the file. Has its own type scale and four unreachable BottomSheets.", fix: "Delete the dead TodayScreen function." },
+  { id: 47, title: "'Welcome back' still in patient home header — generic string carries no meaning", file: "src/patient/PatientApp.tsx", severity: "low", category: "UI", detail: "Already deleted from practitioner surface. Still present in patient app.", fix: "Replace with the patient's name or remove." },
+  { id: 48, title: "Whole 12-hour grid background is an invisible button — stray taps open Block time modal", file: "src/practitioner/TodayGrid.tsx", severity: "medium", category: "UI", detail: "Any tap on the empty grid area throws the Block time sheet over the screen. Accidental taps while reading.", fix: "Limit the tap target to a visible '+ Block' affordance." },
+];
+
+// ── Render logic ──
+const statsEl = document.getElementById('stats');
+const filtersEl = document.getElementById('filters');
+const listEl = document.getElementById('list');
+
+const sevOrder = { critical: 0, high: 1, medium: 2, low: 3 };
+let activeSev = null;
+let activeCat = null;
+
+function getCounts() {
+  const sevs = { critical: 0, high: 0, medium: 0, low: 0 };
+  const cats = {};
+  FINDINGS.forEach(f => {
+    sevs[f.severity]++;
+    cats[f.category] = (cats[f.category] || 0) + 1;
+  });
+  return { sevs, cats };
+}
+
+function render() {
+  const { sevs, cats } = getCounts();
+
+  // Stats
+  statsEl.innerHTML = ['critical', 'high', 'medium', 'low'].map(s => {
+    const labels = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low' };
+    const cls = { critical: 'crit', high: 'high', medium: 'med', low: 'lo' };
+    const isActive = activeSev === s;
+    return `<div class="stat ${cls[s]} ${isActive ? 'active' : ''}" onclick="toggleSev('${s}')">
+      <div class="num">${sevs[s]}</div>
+      <div class="label">${labels[s]}</div>
+    </div>`;
+  }).join('');
+
+  // Category pills
+  const sortedCats = Object.entries(cats).sort((a, b) => b[1] - a[1]);
+  filtersEl.innerHTML = `<div class="pill ${!activeCat ? 'active' : ''}" onclick="toggleCat(null)">All <span class="count">${FINDINGS.length}</span></div>` +
+    sortedCats.map(([cat, count]) => {
+      const isActive = activeCat === cat;
+      return `<div class="pill ${isActive ? 'active' : ''}" onclick="toggleCat('${cat}')">${cat} <span class="count">${count}</span></div>`;
+    }).join('');
+
+  // Filtered list
+  let filtered = FINDINGS;
+  if (activeSev) filtered = filtered.filter(f => f.severity === activeSev);
+  if (activeCat) filtered = filtered.filter(f => f.category === activeCat);
+  filtered.sort((a, b) => sevOrder[a.severity] - sevOrder[b.severity]);
+
+  if (filtered.length === 0) {
+    listEl.innerHTML = '<div class="empty">No findings match this filter.</div>';
+    return;
+  }
+
+  listEl.innerHTML = filtered.map(f => {
+    const sevClass = 'sev-' + f.severity;
+    const sevLabel = f.severity.charAt(0).toUpperCase() + f.severity.slice(1);
+    return `<div class="finding" id="f-${f.id}" onclick="toggleFinding(${f.id})">
+      <div class="row1">
+        <span class="severity ${sevClass}">${sevLabel}</span>
+        <div>
+          <div class="title">${f.title}</div>
+          <div class="file">${f.file} <span class="cat-tag">${f.category}</span></div>
+        </div>
+      </div>
+      <div class="detail">
+        <div class="lbl">What breaks</div>
+        <div>${f.detail}</div>
+        ${f.fix ? `<div class="lbl">Fix</div><div>${f.fix}</div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+window.toggleSev = function(s) {
+  activeSev = activeSev === s ? null : s;
+  render();
+};
+window.toggleCat = function(c) {
+  activeCat = activeCat === c ? null : c;
+  render();
+};
+window.toggleFinding = function(id) {
+  const el = document.getElementById('f-' + id);
+  if (el) el.classList.toggle('open');
+};
+
+render();
+</script>

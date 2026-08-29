@@ -8,8 +8,16 @@ done and what's left.
 
 - [x] All 9 critical + 23 other audit findings from `audit-triage.html`
 - [x] Google OAuth "Unable to exchange external code" error
-- [x] Branded Supabase auth emails (confirmation + recovery templates)
+- [x] **Branded auth emails — actually live now.** Confirm-signup and reset-password
+      emails are sent via Resend custom SMTP (Supabase's default mailer doesn't allow
+      template editing at all) with the Sneham-branded HTML, not just written to a
+      file. Sender is Resend's shared address until a real domain is bought.
 - [x] Password reset flow (was auto-logging in instead of prompting for a new password)
+- [x] Signup confirmation link now shows an "email verified" screen instead of
+      silently logging in (mirrors the reset-password fix — Supabase has no
+      dedicated event for this, so it's detected via the confirmation URL's
+      own `type=signup`, same as the native deep-link handler already does
+      for `type=recovery`).
 - [x] Removed practitioner/patient/web surface toggle from production web build
 - [x] Freeform prescription + billing editing (web and practitioner mobile)
 - [x] Billing/invoice feature added to practitioner mobile (didn't exist before)
@@ -43,21 +51,51 @@ done and what's left.
       browser this round (the preview pane was reporting `document.hidden`,
       which pauses the animation the screen relies on) — worth trying
       yourself and flagging anything off.
+- [x] **Past case visits are now editable.** Amending a past visit's notes
+      stamps an `editedAt` timestamp shown next to the visit, so it's visible
+      a record was changed after the fact (per your explicit choice, having
+      weighed that this trades away a frozen audit trail).
+- [x] **Full page-by-page comparison against the design PDF, delivered.**
+      Sent as a standalone report. Headline: core clinical workflow (case-taking,
+      prescriptions, follow-ups) matches or exceeds the spec. Specific gaps
+      found are broken out below instead of staying vague.
 
 ## Found, needs your decision (not yet acted on)
 
 - [ ] "Messages" tab inside a patient's profile (practitioner view) duplicates
-      the Inbox tab — what should happen to it?
+      the Inbox tab — what should happen to it? (Worth noting: the design
+      PDF's own patient-app home screen doesn't feature messaging at all —
+      it has Book / Remedies / Reminders / Documents instead.)
 - [ ] Mechanism for a practitioner to search/view any patient's case on
       mobile without a scheduled follow-up first — to design together.
 
+## Gaps found in the PDF comparison, roughly by priority
+
+- [ ] **Offline queueing for case notes & prescriptions.** The spec states this
+      as an explicit guarantee ("entries queue locally... a queued Rx is never
+      auto-released on reconnect"). Today a save while offline only lives in
+      local browser storage — no explicit retry-on-reconnect. The one gap that's
+      a broken promise rather than a missing widget.
+- [ ] Appointment doesn't auto-scope the case sheet to visit type (first visit
+      vs. follow-up vs. acute) — spec's rule 01.
+- [ ] Publishing a prescription doesn't auto-book the follow-up — spec's rule 04.
+- [ ] Reports page tracks outcome-quality metrics instead of the spec's
+      volume/growth ones — no visits-by-month trend, no follow-up-adherence %,
+      no **caseload-by-practitioner** (now genuinely useful with 2 practitioners
+      on staff).
+- [ ] Today's Day/Week/All-practitioners switch is a static label, not a real
+      control; no mini calendar or follow-ups-due list on Today (only a count).
+- [ ] Patient check-in is 5 discrete buttons, not the spec's 0–100% slider
+      (you'd independently flagged the slider as arguably better yourself).
+- [ ] Smaller: no Email share channel on prescriptions (WhatsApp/SMS only), no
+      real "save as template" for prescriptions, no "same as last time" booking
+      shortcut, practitioner picker doesn't mark "your regular" vs "covering",
+      handoffs don't appear on the patient's case timeline.
+
 ## Still to do
 
-- [ ] Past case visit snapshots: make properly viewable/editable (currently read-only)
 - [ ] Full storage/load-performance audit across case files, documents, audio,
       billing, follow-ups (partially covered by code-splitting so far)
-- [ ] Structured page-by-page comparison against `Sneham Design Web and App - F.pdf`
-      (PDF fully read; comparison + gap list not yet written up)
 - [ ] Apply the real clinic letterhead once provided (currently a text-based
       placeholder letterhead in PDF exports)
 - [ ] Final confirmation summary once everything above is resolved

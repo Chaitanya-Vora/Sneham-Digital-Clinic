@@ -119,6 +119,17 @@ export function WebApp() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // Auto-refresh every 15s, same as the practitioner and patient apps —
+  // without this, the web console only ever loaded data once at login and
+  // needed a manual page reload to see anything new.
+  useEffect(() => {
+    const t = setInterval(() => {
+      const s = useClinic.getState()
+      if (s.userId && !s.hydrating) s.hydrate(s.userId, '')
+    }, 15000)
+    return () => clearInterval(t)
+  }, [])
+
   const commands: Command[] = [
     { id: 'go-today', label: 'Today', group: 'Go to', icon: SunHorizon, run: () => setScreen('today') },
     { id: 'go-calendar', label: 'Calendar', group: 'Go to', icon: CalendarBlank, run: () => setScreen('calendar') },

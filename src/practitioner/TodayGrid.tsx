@@ -19,7 +19,7 @@ import {
   Warning,
   CalendarBlank,
 } from '@phosphor-icons/react'
-import { todayISO, toISO, formatDayLabel, firstAvailableMorningSlot, isPastISO } from '../core/day'
+import { todayISO, toISO, formatDayLabel, firstAvailableMorningSlot, isPastISO, isTodayISO } from '../core/day'
 import { useClinic } from '../core/store'
 import type { Appointment, TimeBlock } from '../core/types'
 import { Avatar, Badge, BottomSheet, Card, Chip, Label } from '../design-system/ui'
@@ -105,8 +105,9 @@ export function TodayGrid({
   const activeDoses = activeAppt ? doseReminders.filter((d) => d.patientId === activeAppt.patientId) : []
   const adherencePct = activeDoses.length > 0 ? Math.round((activeDoses.filter((d) => d.loggedToday).length / activeDoses.length) * 100) : null
 
+  const todayOnlyAppts = appts.filter((a) => isTodayISO(a.date))
   const todayAppts = appts.filter((a) => !isPastISO(a.date))
-  const seen = appts.filter((a) => a.status === 'Seen').length
+  const seen = todayOnlyAppts.filter((a) => a.status === 'Seen').length
   const waiting = todayAppts.filter((a) => a.status === 'Waiting' || a.status === 'New').length
   const upcoming = todayAppts.filter((a) => a.status === 'Upcoming').length
 
@@ -283,7 +284,7 @@ export function TodayGrid({
       {/* views */}
       {view === 'day' ? (
         <DayGridView
-          appts={appts}
+          appts={todayOnlyAppts}
           timeBlocks={timeBlocks}
           patients={patients}
           activeAppt={activeAppt ?? null}
@@ -299,7 +300,7 @@ export function TodayGrid({
         />
       ) : (
         <ListView
-          appts={appts}
+          appts={todayOnlyAppts}
           patients={patients}
           activeAppt={activeAppt ?? null}
           onStartConsult={(id) => { startConsult(id); startTimer(); haptic('success'); const a = appts.find((x) => x.id === id); toast({ title: `Consult started · ${pFind(a?.patientId ?? '')?.name}` }); if (a?.type === 'Video' && startVideo) startVideo(id) }}

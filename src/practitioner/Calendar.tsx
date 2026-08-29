@@ -128,7 +128,7 @@ export function CalendarScreen({ onOpenPatient }: { onOpenPatient: (patientId: s
     return dots
   }, [appointments])
 
-  const selectedKey = selectedDate.toISOString().split('T')[0]
+  const selectedKey = toISO(selectedDate)
   const dayAppointments = weekSchedule.get(selectedKey) ?? []
 
   const weekStart = startOfWeek(selectedDate)
@@ -264,7 +264,7 @@ export function CalendarScreen({ onOpenPatient }: { onOpenPatient: (patientId: s
                           {d.getDate()}
                         </span>
                         {/* dot for appointments */}
-                        {!selected && (weekSchedule.get(d.toISOString().split('T')[0])?.length ?? 0) > 0 && (
+                        {!selected && (weekSchedule.get(toISO(d))?.length ?? 0) > 0 && (
                           <span className="h-[5px] w-[5px] rounded-full bg-brand" />
                         )}
                         {selected && (
@@ -378,7 +378,7 @@ function MonthGrid({
           <div key={ri} className="grid grid-cols-7 gap-0">
             {row.map((d, ci) => {
               if (!d) return <div key={ci} className="py-2" />
-              const key = d.toISOString().split('T')[0]
+              const key = toISO(d)
               const isToday = isSameDay(d, today)
               const isSelected = isSameDay(d, selectedDate)
               const hasDot = dots.has(key)

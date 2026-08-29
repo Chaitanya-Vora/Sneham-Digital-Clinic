@@ -58,7 +58,7 @@ export function CaseFieldEditor({
 export function useCaseProgress(patientId: string, template: CaseTemplateName) {
   return useClinic((s) => {
     const c = s.caseData[patientId]
-    const templateSections = getSections(template)
+    const templateSections = getSections(template, s.caseTemplates)
     const total = templateSections.length
     let done = 0
     const doneIds: Record<string, boolean> = {}

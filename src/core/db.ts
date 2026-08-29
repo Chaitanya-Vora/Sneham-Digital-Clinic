@@ -15,7 +15,7 @@ import type {
   RemedyStock,
   TimeBlock,
 } from './types'
-import type { CaseState } from './caseTemplate'
+import type { CaseState, CustomCaseTemplate } from './caseTemplate'
 import { DEFAULT_PRACTITIONER_REMEDIES } from './remedies'
 import { normaliseDayValue } from './day'
 
@@ -809,6 +809,54 @@ export async function insertCaseVisit(v: CaseVisit): Promise<boolean> {
 }
 
 
+// ── Case Template (custom) ──────────────────────────────────
+
+function toAppCaseTemplate(r: any): CustomCaseTemplate {
+  return {
+    id: r.id,
+    label: r.label,
+    description: r.description ?? '',
+    sections: r.sections ?? [],
+    createdBy: r.created_by ?? null,
+    createdAt: r.created_at,
+  }
+}
+
+export async function fetchCaseTemplates(): Promise<CustomCaseTemplate[]> {
+  const { data, error } = await supabase.from('case_templates').select('*').order('created_at', { ascending: true })
+  if (error) { console.error('fetchCaseTemplates:', error.message); _hydrateErrors++; return [] }
+  return (data ?? []).map(toAppCaseTemplate)
+}
+
+export async function insertCaseTemplate(t: CustomCaseTemplate): Promise<boolean> {
+  const { error } = await supabase.from('case_templates').insert({
+    id: t.id,
+    label: t.label,
+    description: t.description || null,
+    sections: t.sections,
+    created_by: t.createdBy,
+  })
+  if (error) { console.error('insertCaseTemplate:', error.message); return false }
+  return true
+}
+
+export async function updateCaseTemplateDb(id: string, patch: Partial<Pick<CustomCaseTemplate, 'label' | 'description' | 'sections'>>): Promise<boolean> {
+  const db: Record<string, unknown> = { updated_at: new Date().toISOString() }
+  if (patch.label !== undefined) db.label = patch.label
+  if (patch.description !== undefined) db.description = patch.description || null
+  if (patch.sections !== undefined) db.sections = patch.sections
+  const { error } = await supabase.from('case_templates').update(db).eq('id', id)
+  if (error) { console.error('updateCaseTemplateDb:', error.message); return false }
+  return true
+}
+
+export async function deleteCaseTemplateDb(id: string): Promise<boolean> {
+  const { error } = await supabase.from('case_templates').delete().eq('id', id)
+  if (error) { console.error('deleteCaseTemplateDb:', error.message); return false }
+  return true
+}
+
+
 // ── Profile ──────────────────────────────────────────────────
 
 export interface DbProfile {
@@ -850,6 +898,7 @@ export interface HydratedData {
   timeBlocks: TimeBlock[]
   caseVisits: CaseVisit[]
   messages: ChatMessage[]
+  caseTemplates: CustomCaseTemplate[]
   currentPractitionerId: string
 }
 
@@ -876,6 +925,7 @@ export async function hydrateAll(userId: string, userName: string, isPatientSurf
     timeBlocks,
     caseVisits,
     messages,
+    caseTemplates,
   ] = await Promise.all([
     fetchPractitioners(),
     fetchPatients(),
@@ -892,6 +942,7 @@ export async function hydrateAll(userId: string, userName: string, isPatientSurf
     fetchTimeBlocks(),
     fetchCaseVisits(),
     fetchMessages(),
+    fetchCaseTemplates(),
   ])
 
   const hasSelf = practitioner ? allPractitioners.some(p => p.id === practitioner.id) : true
@@ -913,6 +964,7 @@ export async function hydrateAll(userId: string, userName: string, isPatientSurf
     timeBlocks,
     caseVisits,
     messages,
+    caseTemplates,
     currentPractitionerId: practitioner?.id ?? '',
   }
 }

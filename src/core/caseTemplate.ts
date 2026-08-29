@@ -309,13 +309,29 @@ export const FIRST_VISIT_SECTIONS: CaseSectionDef[] = [
   },
 ]
 
-export type CaseTemplateName = 'chronic' | 'acute' | 'pediatric' | 'first-visit'
+// A template "name" is just a string id — one of the 4 built-ins below, or
+// a custom template's own id once a clinic has created one (see
+// CustomCaseTemplate). Kept as `string` rather than a fixed union so a new
+// custom template never needs a type change to be usable.
+export type CaseTemplateName = string
 
 export interface CaseTemplateInfo {
   name: CaseTemplateName
   label: string
   description: string
   sections: CaseSectionDef[]
+}
+
+// A clinic-created template, stored in Supabase (case_templates table) and
+// held in the store — as opposed to the 4 built-ins below, which are fixed
+// in code. Editable/deletable; built-ins are neither.
+export interface CustomCaseTemplate {
+  id: string
+  label: string
+  description: string
+  sections: CaseSectionDef[]
+  createdBy: string | null
+  createdAt: string
 }
 
 export const CASE_TEMPLATES: CaseTemplateInfo[] = [
@@ -325,8 +341,15 @@ export const CASE_TEMPLATES: CaseTemplateInfo[] = [
   { name: 'first-visit', label: 'First Visit', description: 'Comprehensive intake for new patients', sections: FIRST_VISIT_SECTIONS },
 ]
 
-export function getSections(template: CaseTemplateName): CaseSectionDef[] {
-  return CASE_TEMPLATES.find((t) => t.name === template)?.sections ?? CASE_SECTIONS
+export function allTemplates(custom: CustomCaseTemplate[]): CaseTemplateInfo[] {
+  return [...CASE_TEMPLATES, ...custom.map((t) => ({ name: t.id, label: t.label, description: t.description, sections: t.sections }))]
+}
+
+export function getSections(template: CaseTemplateName, custom: CustomCaseTemplate[] = []): CaseSectionDef[] {
+  const builtIn = CASE_TEMPLATES.find((t) => t.name === template)
+  if (builtIn) return builtIn.sections
+  const found = custom.find((t) => t.id === template)
+  return found?.sections ?? CASE_SECTIONS
 }
 
 export function emptyCaseFor(template: CaseTemplateName): CaseState {

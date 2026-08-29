@@ -1,10 +1,11 @@
 import { useState, useMemo, useEffect } from 'react'
-import { CheckCircle, Circle, CircleNotch, Prescription as RxIcon, FloppyDisk, CloudCheck, DeviceMobile, PencilSimpleLine, ClockCounterClockwise, NotePencil, Eye, WarningCircle } from '@phosphor-icons/react'
+import { CheckCircle, Circle, CircleNotch, Prescription as RxIcon, FloppyDisk, CloudCheck, DeviceMobile, PencilSimpleLine, ClockCounterClockwise, NotePencil, Eye, WarningCircle, Plus } from '@phosphor-icons/react'
 import { useClinic } from '../core/store'
-import { CASE_TEMPLATES, type CaseTemplateName, type SectionState, getSections } from '../core/caseTemplate'
+import { allTemplates, type CaseTemplateName, type SectionState, getSections } from '../core/caseTemplate'
 import { Badge, Button, Card, Label, PatientNotFound } from '../design-system/ui'
 import { VoiceRecorder } from '../design-system/VoiceRecorder'
 import { CaseFieldEditor, sectionHasContent, useCaseProgress, useCaseSaveStatus } from '../components/CaseFields'
+import { CaseTemplateEditorModal } from './CaseTemplateEditor'
 
 function VisitHistoryReadonly({
   sections,
@@ -92,15 +93,18 @@ export function CaseSheet({
   const caseState = useClinic((s) => s.caseData[patientId])
   const caseVisits = useClinic((s) => s.caseVisits.filter((v) => v.patientId === patientId))
   const practitioners = useClinic((s) => s.practitioners)
+  const customTemplates = useClinic((s) => s.caseTemplates)
+  const templates = allTemplates(customTemplates)
   const [template, setTemplate] = useState<CaseTemplateName>('chronic')
   const { done, total, doneIds } = useCaseProgress(patientId, template)
   const saveStatus = useCaseSaveStatus(patientId)
-  const sections = getSections(template)
+  const sections = getSections(template, customTemplates)
   const [activeId, setActiveId] = useState('chief')
   const [savedAt, setSavedAt] = useState<string | null>(null)
   const [showTemplatePicker, setShowTemplatePicker] = useState(false)
   const [tab, setTab] = useState<'edit' | 'history'>('edit')
   const [viewingVisitId, setViewingVisitId] = useState<string | null>(null)
+  const [editingTemplate, setEditingTemplate] = useState<'new' | string | null>(null)
 
   useEffect(() => {
     if (!caseState) ensureCase(patientId)
@@ -115,7 +119,7 @@ export function CaseSheet({
   )
 
   const viewingVisit = viewingVisitId ? sortedVisits.find((v) => v.id === viewingVisitId) : null
-  const viewingSections = viewingVisit ? getSections((viewingVisit.template as CaseTemplateName) ?? 'chronic') : sections
+  const viewingSections = viewingVisit ? getSections((viewingVisit.template as CaseTemplateName) ?? 'chronic', customTemplates) : sections
 
   if (!patient) return <PatientNotFound onBack={onBack} />
 
@@ -221,20 +225,39 @@ export function CaseSheet({
                 onClick={() => setShowTemplatePicker(!showTemplatePicker)}
                 className="flex w-full items-center justify-center gap-1.5 rounded-[12px] border border-dashed border-border-dash py-2.5 text-[12.5px] font-semibold text-muted hover:text-body"
               >
-                <PencilSimpleLine size={14} /> {CASE_TEMPLATES.find((t) => t.name === template)?.label ?? 'Change template'}
+                <PencilSimpleLine size={14} /> {templates.find((t) => t.name === template)?.label ?? 'Change template'}
               </button>
               {showTemplatePicker && (
                 <Card className="absolute left-0 right-0 top-full z-10 mt-1 p-2 shadow-float">
-                  {CASE_TEMPLATES.map((t) => (
-                    <button
-                      key={t.name}
-                      onClick={() => { setTemplate(t.name); setActiveId(t.sections[0].id); setShowTemplatePicker(false) }}
-                      className={`flex w-full flex-col rounded-[8px] px-3 py-2 text-left transition hover:bg-tint ${template === t.name ? 'bg-tint' : ''}`}
-                    >
-                      <span className="text-[13px] font-semibold text-ink">{t.label}</span>
-                      <span className="text-[11.5px] text-muted">{t.description}</span>
-                    </button>
-                  ))}
+                  {templates.map((t) => {
+                    const isCustom = customTemplates.some((c) => c.id === t.name)
+                    return (
+                      <div key={t.name} className="flex items-center gap-1">
+                        <button
+                          onClick={() => { setTemplate(t.name); setActiveId(t.sections[0].id); setShowTemplatePicker(false) }}
+                          className={`flex flex-1 flex-col rounded-[8px] px-3 py-2 text-left transition hover:bg-tint ${template === t.name ? 'bg-tint' : ''}`}
+                        >
+                          <span className="text-[13px] font-semibold text-ink">{t.label}</span>
+                          <span className="text-[11.5px] text-muted">{t.description}</span>
+                        </button>
+                        {isCustom && (
+                          <button
+                            onClick={() => { setEditingTemplate(t.name); setShowTemplatePicker(false) }}
+                            className="px-2 text-faint hover:text-body"
+                            title="Edit template"
+                          >
+                            <PencilSimpleLine size={14} />
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })}
+                  <button
+                    onClick={() => { setEditingTemplate('new'); setShowTemplatePicker(false) }}
+                    className="mt-1 flex w-full items-center gap-1.5 rounded-[8px] border-t border-border px-3 py-2.5 text-left text-[12.5px] font-semibold text-brand hover:bg-tint"
+                  >
+                    <Plus size={14} weight="bold" /> New custom template
+                  </button>
                 </Card>
               )}
             </div>
@@ -356,6 +379,14 @@ export function CaseSheet({
             )}
           </Card>
         </div>
+      )}
+
+      {editingTemplate && (
+        <CaseTemplateEditorModal
+          editing={editingTemplate === 'new' ? null : customTemplates.find((t) => t.id === editingTemplate) ?? null}
+          onClose={() => setEditingTemplate(null)}
+          onSaved={(t) => { setTemplate(t.id); setActiveId(t.sections[0]?.id ?? 'chief') }}
+        />
       )}
     </div>
   )

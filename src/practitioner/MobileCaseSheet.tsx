@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react'
-import { CaretLeft, CheckCircle, CircleNotch, Microphone, Prescription as RxIcon, WarningCircle } from '@phosphor-icons/react'
+import { CaretLeft, CheckCircle, CircleNotch, Microphone, PencilSimpleLine, Prescription as RxIcon, WarningCircle } from '@phosphor-icons/react'
 import { useClinic } from '../core/store'
 import { uploadDocument } from '../core/db'
-import { CASE_TEMPLATES, type CaseTemplateName, getSections } from '../core/caseTemplate'
+import { allTemplates, type CaseTemplateName, getSections } from '../core/caseTemplate'
 import { Button, Label } from '../design-system/ui'
 import { VoiceRecorder } from '../design-system/VoiceRecorder'
 import { useToast } from '../design-system/toast'
 import { CaseFieldEditor, useCaseProgress, useCaseSaveStatus } from '../components/CaseFields'
+import { CaseTemplateEditorModal } from '../web/CaseTemplateEditor'
 
 export function MobileCaseSheet({
   patientId,
@@ -23,12 +24,15 @@ export function MobileCaseSheet({
   const addDocument = useClinic((s) => s.addDocument)
   const voiceNotes = useClinic((s) => s.documents.filter((d) => d.patientId === patientId && d.format === 'WEBM'))
   const caseState = useClinic((s) => s.caseData[patientId])
+  const customTemplates = useClinic((s) => s.caseTemplates)
+  const templates = allTemplates(customTemplates)
   const [template, setTemplate] = useState<CaseTemplateName>('chronic')
   const { done, total, doneIds } = useCaseProgress(patientId, template)
   const saveStatus = useCaseSaveStatus(patientId)
   const toast = useToast()
-  const sections = getSections(template)
+  const sections = getSections(template, customTemplates)
   const [activeId, setActiveId] = useState('chief')
+  const [editingTemplate, setEditingTemplate] = useState(false)
 
   useEffect(() => { if (!caseState) ensureCase(patientId) }, [patientId, caseState, ensureCase])
   if (!patient) return (
@@ -66,11 +70,11 @@ export function MobileCaseSheet({
           )}
         </div>
         <div className="mt-1 font-display text-[18px] font-bold text-ink">{patient.name}</div>
-        <div className="mt-1 flex flex-wrap gap-1.5">
-          {CASE_TEMPLATES.map((t) => (
+        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+          {templates.map((t) => (
             <button
               key={t.name}
-              onClick={() => { setTemplate(t.name as CaseTemplateName); setActiveId(getSections(t.name as CaseTemplateName)[0].id) }}
+              onClick={() => { setTemplate(t.name); setActiveId(getSections(t.name, customTemplates)[0].id) }}
               className={`rounded-pill px-3 py-1 text-[12px] font-semibold transition ${
                 template === t.name ? 'bg-brand text-white' : 'bg-tint text-body'
               }`}
@@ -78,6 +82,12 @@ export function MobileCaseSheet({
               {t.label}
             </button>
           ))}
+          <button
+            onClick={() => setEditingTemplate(true)}
+            className="flex items-center gap-1 rounded-pill border border-dashed border-border-dash px-2.5 py-1 text-[11.5px] font-semibold text-muted"
+          >
+            <PencilSimpleLine size={12} /> {customTemplates.some((c) => c.id === template) ? 'Edit' : 'New'}
+          </button>
         </div>
         <div className="mt-0.5 text-[12px] text-faint">{done} of {total} sections</div>
         <div className="mt-2 h-1.5 overflow-hidden rounded-pill bg-tint-pale">
@@ -151,6 +161,14 @@ export function MobileCaseSheet({
           <RxIcon size={16} weight="fill" /> Prescribe
         </Button>
       </div>
+
+      {editingTemplate && (
+        <CaseTemplateEditorModal
+          editing={customTemplates.find((t) => t.id === template) ?? null}
+          onClose={() => setEditingTemplate(false)}
+          onSaved={(t) => { setTemplate(t.id); setActiveId(t.sections[0]?.id ?? 'chief') }}
+        />
+      )}
     </div>
   )
 }

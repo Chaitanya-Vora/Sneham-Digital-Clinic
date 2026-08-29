@@ -23,7 +23,7 @@ import type {
   Surface,
   TimeBlock,
 } from './types'
-import { type CaseState, emptyCase } from './caseTemplate'
+import { type CaseState, type CaseSectionDef, type CustomCaseTemplate, emptyCase } from './caseTemplate'
 import { useToasts } from '../design-system/toast'
 import {
   newId,
@@ -54,6 +54,9 @@ import {
   insertCaseVisit,
   insertMessage,
   markMessagesRead,
+  insertCaseTemplate,
+  updateCaseTemplateDb,
+  deleteCaseTemplateDb,
 } from './db'
 
 const caseTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -90,6 +93,7 @@ interface ClinicState {
   timeBlocks: TimeBlock[]
   caseVisits: CaseVisit[]
   messages: ChatMessage[]
+  caseTemplates: CustomCaseTemplate[]
 
   currentPractitionerId: string
   role: Role
@@ -136,6 +140,9 @@ interface ClinicState {
   snapshotCaseVisit: (patientId: string, appointmentId?: string, template?: string) => void
   sendMessage: (patientId: string, text: string, sender: MessageSender) => void
   markConvoRead: (patientId: string, sender: MessageSender) => void
+  createCaseTemplate: (input: { label: string; description: string; sections: CaseSectionDef[] }) => CustomCaseTemplate
+  updateCaseTemplate: (id: string, patch: { label?: string; description?: string; sections?: CaseSectionDef[] }) => void
+  deleteCaseTemplate: (id: string) => void
   resetDailyDoses: () => void
   resetDemo: () => void
 }
@@ -196,6 +203,7 @@ const emptyState = () => ({
   timeBlocks: [] as TimeBlock[],
   caseVisits: [] as CaseVisit[],
   messages: [] as ChatMessage[],
+  caseTemplates: [] as CustomCaseTemplate[],
   currentPractitionerId: '',
   role: 'Owner' as Role,
   offline: false,
@@ -793,6 +801,32 @@ export const useClinic = create<ClinicState>()(
           ),
         }))
         void markMessagesRead(patientId, sender)
+      },
+
+      createCaseTemplate: (input) => {
+        const t: CustomCaseTemplate = {
+          id: newId(),
+          label: input.label,
+          description: input.description,
+          sections: input.sections,
+          createdBy: get().currentPractitionerId || null,
+          createdAt: new Date().toISOString(),
+        }
+        set((s) => ({ caseTemplates: [...s.caseTemplates, t] }))
+        writeThrough(insertCaseTemplate(t), 'Template may not have saved.')
+        return t
+      },
+
+      updateCaseTemplate: (id, patch) => {
+        set((s) => ({
+          caseTemplates: s.caseTemplates.map((t) => (t.id === id ? { ...t, ...patch } : t)),
+        }))
+        writeThrough(updateCaseTemplateDb(id, patch), 'Template changes may not have saved.')
+      },
+
+      deleteCaseTemplate: (id) => {
+        set((s) => ({ caseTemplates: s.caseTemplates.filter((t) => t.id !== id) }))
+        writeThrough(deleteCaseTemplateDb(id), 'Template deletion may not have saved.')
       },
 
       recordPayment: (appointmentId, fee, mode, status) => {

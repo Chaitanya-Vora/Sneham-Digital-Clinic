@@ -63,6 +63,15 @@ import {
 const caseTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const caseVisitTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
+// A write that couldn't reach the database while offline, kept around to
+// retry on reconnect. Deliberately just these two kinds — case notes and
+// prescriptions are the two the offline guarantee is actually about; other
+// writes still fire-and-report-error as before rather than growing this into
+// a generic everything-queue.
+export type PendingWrite =
+  | { id: string; kind: 'caseData'; patientId: string; queuedAt: string }
+  | { id: string; kind: 'prescription'; rx: Prescription; queuedAt: string }
+
 export interface PublishRxInput {
   patientId: string
   practitionerId: string
@@ -90,12 +99,13 @@ interface ClinicState {
   remedyStock: RemedyStock[]
   notifications: AppNotification[]
   caseData: Record<string, CaseState>
-  caseSaveStatus: Record<string, 'saving' | 'saved' | 'error'>
+  caseSaveStatus: Record<string, 'saving' | 'saved' | 'error' | 'queued'>
   outcomes: Outcome[]
   timeBlocks: TimeBlock[]
   caseVisits: CaseVisit[]
   messages: ChatMessage[]
   caseTemplates: CustomCaseTemplate[]
+  pendingWrites: PendingWrite[]
 
   currentPractitionerId: string
   role: Role
@@ -109,6 +119,7 @@ interface ClinicState {
   hydrate: (userId: string, userName: string) => Promise<void>
   setRole: (r: Role) => void
   setOffline: (v: boolean) => void
+  retryPendingWrites: () => Promise<void>
   publishPrescription: (input: PublishRxInput) => Prescription
   toggleDoseLogged: (id: string) => void
   setRemindersEnabled: (prescriptionId: string, enabled: boolean) => void
@@ -207,9 +218,10 @@ const emptyState = () => ({
   caseVisits: [] as CaseVisit[],
   messages: [] as ChatMessage[],
   caseTemplates: [] as CustomCaseTemplate[],
+  pendingWrites: [] as PendingWrite[],
   currentPractitionerId: '',
   role: 'Owner' as Role,
-  offline: false,
+  offline: typeof navigator !== 'undefined' && 'onLine' in navigator ? !navigator.onLine : false,
   dbError: false,
   hydrated: false,
   hydrating: false,
@@ -259,6 +271,10 @@ export const useClinic = create<ClinicState>()(
               void updateDoseReminderDb(d.id, { logged_today: false })
             }
           }
+          // A hydrate can only succeed with real connectivity — the moment
+          // it does, flush anything queued from a previous offline session
+          // (not just a live 'online' event, which a plain app reopen never fires).
+          if (get().pendingWrites.length > 0) void get().retryPendingWrites()
         } catch (e) {
           console.error('Hydration failed:', e)
           set({
@@ -271,6 +287,28 @@ export const useClinic = create<ClinicState>()(
 
       setRole: (role) => set({ role }),
       setOffline: (offline) => set({ offline }),
+
+      // Replays every queued write in order, dropping each one only once it
+      // actually reaches the database. Safe to call repeatedly — an empty
+      // queue is a no-op, and a write still offline just stays queued.
+      retryPendingWrites: async () => {
+        for (const w of get().pendingWrites) {
+          if (w.kind === 'caseData') {
+            const cs = get().caseData[w.patientId]
+            if (!cs) { set((s) => ({ pendingWrites: s.pendingWrites.filter((p) => p.id !== w.id) })); continue }
+            const ok = await upsertCaseData(w.patientId, cs)
+            if (ok) {
+              set((s) => ({
+                pendingWrites: s.pendingWrites.filter((p) => p.id !== w.id),
+                caseSaveStatus: { ...s.caseSaveStatus, [w.patientId]: 'saved' },
+              }))
+            }
+          } else {
+            const ok = await insertPrescription(w.rx)
+            if (ok) set((s) => ({ pendingWrites: s.pendingWrites.filter((p) => p.id !== w.id) }))
+          }
+        }
+      },
 
       publishPrescription: (input) => {
         const rxId = newId()
@@ -329,7 +367,12 @@ export const useClinic = create<ClinicState>()(
           notifications: [notif, ...s.notifications],
         }))
 
-        writeThrough(insertPrescription(rx), 'Your prescription may not have saved.')
+        if (get().offline) {
+          set((s) => ({ pendingWrites: [...s.pendingWrites, { id: newId(), kind: 'prescription', rx, queuedAt: new Date().toISOString() }] }))
+          useToasts.getState().show({ title: 'Saved — will send once back online', message: `${remedyLabel} is queued and will publish automatically as soon as you're reconnected.` })
+        } else {
+          writeThrough(insertPrescription(rx), 'Your prescription may not have saved.')
+        }
         for (const dr of newReminders) void insertDoseReminder(dr)
         void updatePatient(input.patientId, { currentRemedy: remedyLabel })
         void insertNotification(notif, resolveNotificationOwner(get().patients, get().practitioners, { patientId: input.patientId }))
@@ -422,9 +465,18 @@ export const useClinic = create<ClinicState>()(
         caseTimers.set(patientId, setTimeout(() => {
           const cs = get().caseData[patientId]
           if (cs) {
-            void upsertCaseData(patientId, cs).then((ok) => {
-              set((s) => ({ caseSaveStatus: { ...s.caseSaveStatus, [patientId]: ok ? 'saved' : 'error' } }))
-            })
+            if (get().offline) {
+              set((s) => ({
+                caseSaveStatus: { ...s.caseSaveStatus, [patientId]: 'queued' },
+                pendingWrites: s.pendingWrites.some((w) => w.kind === 'caseData' && w.patientId === patientId)
+                  ? s.pendingWrites
+                  : [...s.pendingWrites, { id: newId(), kind: 'caseData', patientId, queuedAt: new Date().toISOString() }],
+              }))
+            } else {
+              void upsertCaseData(patientId, cs).then((ok) => {
+                set((s) => ({ caseSaveStatus: { ...s.caseSaveStatus, [patientId]: ok ? 'saved' : 'error' } }))
+              })
+            }
           }
           caseTimers.delete(patientId)
         }, 1000))
@@ -455,9 +507,18 @@ export const useClinic = create<ClinicState>()(
         caseTimers.set(patientId, setTimeout(() => {
           const cs = get().caseData[patientId]
           if (cs) {
-            void upsertCaseData(patientId, cs).then((ok) => {
-              set((s) => ({ caseSaveStatus: { ...s.caseSaveStatus, [patientId]: ok ? 'saved' : 'error' } }))
-            })
+            if (get().offline) {
+              set((s) => ({
+                caseSaveStatus: { ...s.caseSaveStatus, [patientId]: 'queued' },
+                pendingWrites: s.pendingWrites.some((w) => w.kind === 'caseData' && w.patientId === patientId)
+                  ? s.pendingWrites
+                  : [...s.pendingWrites, { id: newId(), kind: 'caseData', patientId, queuedAt: new Date().toISOString() }],
+              }))
+            } else {
+              void upsertCaseData(patientId, cs).then((ok) => {
+                set((s) => ({ caseSaveStatus: { ...s.caseSaveStatus, [patientId]: ok ? 'saved' : 'error' } }))
+              })
+            }
           }
           caseTimers.delete(patientId)
         }, 1000))
@@ -886,6 +947,16 @@ export const useClinic = create<ClinicState>()(
     },
   ),
 )
+
+// Real connectivity, not just "did the last hydrate succeed" — reconnecting
+// also drains anything queued while offline (case notes, prescriptions).
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    useClinic.getState().setOffline(false)
+    void useClinic.getState().retryPendingWrites()
+  })
+  window.addEventListener('offline', () => useClinic.getState().setOffline(true))
+}
 
 // ── selectors ──
 export const selPatient = (id: string) => (s: ClinicState) =>

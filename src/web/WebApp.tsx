@@ -90,6 +90,7 @@ export function WebApp() {
   const role = useClinic((s) => s.role)
   const offline = useClinic((s) => s.offline)
   const dbError = useClinic((s) => s.dbError)
+  const pendingCount = useClinic((s) => s.pendingWrites.length)
   const patients = useClinic((s) => s.patients)
   const unread = useClinic((s) => s.notifications.filter((n) => n.surface === 'web' && !n.read).length)
   const todayAppts = useClinic((s) => s.appointments.filter((a) => a.date === todayISO()))
@@ -266,7 +267,8 @@ export function WebApp() {
               <kbd className="rounded-[6px] border border-border bg-screen px-1.5 py-0.5 text-[11px] font-semibold text-faint">⌘K</kbd>
             </button>
             <Badge tone={offline || dbError ? 'amber' : 'green'}>
-              <CloudCheck size={13} weight="fill" /> {offline ? 'Offline' : dbError ? 'Partial sync' : 'Synced'}
+              <CloudCheck size={13} weight="fill" />
+              {offline ? (pendingCount > 0 ? `Offline · ${pendingCount} pending` : 'Offline') : dbError ? 'Partial sync' : 'Synced'}
             </Badge>
             <button
               onClick={() => setNotifOpen((v) => !v)}

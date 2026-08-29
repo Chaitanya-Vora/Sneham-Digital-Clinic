@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { CaretLeft, CheckCircle, CircleNotch, Microphone, PencilSimpleLine, Prescription as RxIcon, WarningCircle } from '@phosphor-icons/react'
+import { CaretLeft, CheckCircle, CircleNotch, DeviceMobile, Microphone, PencilSimpleLine, Prescription as RxIcon, WarningCircle } from '@phosphor-icons/react'
 import { useClinic } from '../core/store'
 import { uploadDocument } from '../core/db'
 import { allTemplates, type CaseTemplateName, getSections } from '../core/caseTemplate'
@@ -66,6 +66,11 @@ export function MobileCaseSheet({
           {saveStatus === 'error' && (
             <span className="flex items-center gap-1 text-[11.5px] font-semibold text-danger">
               <WarningCircle size={13} weight="fill" /> Not saved — retry
+            </span>
+          )}
+          {saveStatus === 'queued' && (
+            <span className="flex items-center gap-1 text-[11.5px] font-semibold text-amber-text">
+              <DeviceMobile size={13} weight="fill" /> Saved on device — will sync
             </span>
           )}
         </div>

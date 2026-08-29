@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { TrendUp, TrendDown, Minus, Handshake, FloppyDisk, X, CheckCircle } from '@phosphor-icons/react'
 import { useClinic } from '../core/store'
 import type { OutcomeKind } from '../core/types'
-import { Avatar, Badge, Button, Card, Chip, Label } from '../design-system/ui'
+import { Avatar, Badge, Button, Card, Chip, Label, PatientNotFound } from '../design-system/ui'
 import { useToast } from '../design-system/toast'
 import { addDaysISO, todayISO, formatDayLabel } from '../core/day'
 
@@ -18,7 +18,7 @@ const COMPARE = [
 ] as const
 
 export function FollowUp({ patientId, onBack }: { patientId: string; onBack: () => void }) {
-  const patient = useClinic((s) => s.patients.find((p) => p.id === patientId)!)
+  const patient = useClinic((s) => s.patients.find((p) => p.id === patientId))
   const doctorId = useClinic((s) => s.currentPractitionerId)
   const practitioners = useClinic((s) => s.practitioners)
   const checkIn = useClinic((s) => s.checkIns.find((c) => c.patientId === patientId))
@@ -37,7 +37,10 @@ export function FollowUp({ patientId, onBack }: { patientId: string; onBack: () 
   const ciTextCls = ciTone === 'amber' ? 'text-amber-text' : ciTone === 'green' ? 'text-ink' : 'text-muted'
   const ciBarCls = ciTone === 'amber' ? 'bg-amber' : ciTone === 'green' ? 'bg-success' : 'bg-faint'
 
+  if (!patient) return <PatientNotFound onBack={onBack} />
+
   function onSave() {
+    if (!patient) return
     saveOutcome({ patientId, practitionerId: doctorId, remedy: patient.currentRemedy ?? '—', outcome, note })
     toast({ title: 'Outcome saved', message: `${outcome} recorded for ${patient.name}.` })
     onBack()
@@ -188,9 +191,15 @@ function HandoffDrawer({
   onClose: () => void
   onSend: (toId: string, watchFor: string) => void
 }) {
-  const patient = useClinic((s) => s.patients.find((p) => p.id === patientId)!)
+  const patient = useClinic((s) => s.patients.find((p) => p.id === patientId))
   const [toId, setToId] = useState(practitioners[0]?.id ?? '')
   const [watchFor, setWatchFor] = useState('')
+
+  useEffect(() => {
+    if (!patient) onClose()
+  }, [patient, onClose])
+
+  if (!patient) return null
 
   return (
     <>

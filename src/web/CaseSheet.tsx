@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { CheckCircle, Circle, CircleNotch, Prescription as RxIcon, FloppyDisk, CloudCheck, DeviceMobile, PencilSimpleLine, ClockCounterClockwise, NotePencil, Eye, WarningCircle } from '@phosphor-icons/react'
 import { useClinic } from '../core/store'
 import { CASE_TEMPLATES, type CaseTemplateName, type SectionState, getSections } from '../core/caseTemplate'
-import { Badge, Button, Card, Label } from '../design-system/ui'
+import { Badge, Button, Card, Label, PatientNotFound } from '../design-system/ui'
 import { VoiceRecorder } from '../design-system/VoiceRecorder'
 import { CaseFieldEditor, sectionHasContent, useCaseProgress, useCaseSaveStatus } from '../components/CaseFields'
 
@@ -84,7 +84,7 @@ export function CaseSheet({
   onPrescribe: () => void
   onBack: () => void
 }) {
-  const patient = useClinic((s) => s.patients.find((p) => p.id === patientId)!)
+  const patient = useClinic((s) => s.patients.find((p) => p.id === patientId))
   const offline = useClinic((s) => s.offline)
   const ensureCase = useClinic((s) => s.ensureCase)
   const markDone = useClinic((s) => s.markSectionDone)
@@ -116,6 +116,8 @@ export function CaseSheet({
 
   const viewingVisit = viewingVisitId ? sortedVisits.find((v) => v.id === viewingVisitId) : null
   const viewingSections = viewingVisit ? getSections((viewingVisit.template as CaseTemplateName) ?? 'chronic') : sections
+
+  if (!patient) return <PatientNotFound onBack={onBack} />
 
   return (
     <div className="space-y-4">

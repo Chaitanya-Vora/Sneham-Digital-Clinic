@@ -47,7 +47,7 @@ import { useClinic } from '../core/store'
 import type { Appointment, Patient, Potency, Repetition } from '../core/types'
 import { MASTER_REMEDIES } from '../core/remedies'
 import { uploadDocument } from '../core/db'
-import { Avatar, Badge, Button, Card, Chip, Label, Stepper } from '../design-system/ui'
+import { Avatar, Badge, Button, Card, Chip, Label, Stepper, PatientNotFound } from '../design-system/ui'
 import { SnehamLockup } from '../design-system/Logo'
 import { ToastHost, useToast } from '../design-system/toast'
 import { CountUp } from '../design-system/feedback'
@@ -93,6 +93,7 @@ export function WebApp() {
   const patients = useClinic((s) => s.patients)
   const unread = useClinic((s) => s.notifications.filter((n) => n.surface === 'web' && !n.read).length)
   const todayAppts = useClinic((s) => s.appointments.filter((a) => a.date === todayISO()))
+  const toast = useToast()
 
   if (!doctor) {
     return (
@@ -137,7 +138,7 @@ export function WebApp() {
     { id: 'go-reports', label: 'Reports', group: 'Go to', icon: ChartLineUp, run: () => setScreen('reports') },
     { id: 'go-settings', label: 'Settings', group: 'Go to', icon: GearSix, run: () => setScreen('settings') },
     { id: 'act-newpatient', label: 'Add a new patient', group: 'Actions', icon: Plus, run: () => setScreen('patients') },
-    { id: 'act-rx', label: 'Write a prescription', group: 'Actions', icon: RxIcon, run: () => setScreen('prescription') },
+    { id: 'act-rx', label: 'Write a prescription', group: 'Actions', icon: RxIcon, run: () => navTo('prescriptions') },
     ...patients.map((p) => ({
       id: `p-${p.id}`,
       label: p.name,
@@ -153,11 +154,17 @@ export function WebApp() {
       setScreen('restricted')
       return
     }
-    if (id === 'today' || id === 'calendar' || id === 'patients' || id === 'reports' || id === 'settings') setScreen(id as Screen)
-    else if (id === 'prescriptions') setScreen('prescription')
-    else if (id === 'casenotes') setScreen('casesheet')
-    else if (id === 'followups') setScreen('followup')
-    else setScreen('today')
+    if (id === 'today' || id === 'calendar' || id === 'patients' || id === 'reports' || id === 'settings') { setScreen(id as Screen); return }
+    // Case notes, prescriptions and follow-ups are all patient-scoped screens —
+    // there's no "current patient" to open them for from the sidebar, so send
+    // the doctor to pick one first instead of opening the screen with a stale
+    // or missing patientId (that used to crash the whole app).
+    if (id === 'prescriptions' || id === 'casenotes' || id === 'followups') {
+      toast({ title: 'Select a patient first', message: 'Open a patient, then use Prescribe, Case sheet or Follow-up from their profile.' })
+      setScreen('patients')
+      return
+    }
+    setScreen('today')
   }
 
   const navActive =
@@ -811,7 +818,7 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
 
 // ── PATIENT DETAIL ──
 function PatientDetail({ patientId, onPrescribe, onCaseSheet, onFollowUp, onBack }: { patientId: string; onPrescribe: () => void; onCaseSheet: () => void; onFollowUp: () => void; onBack: () => void }) {
-  const patient = useClinic((s) => s.patients.find((p) => p.id === patientId)!)
+  const patient = useClinic((s) => s.patients.find((p) => p.id === patientId))
   const rx = useClinic((s) => s.prescriptions.filter((r) => r.patientId === patientId))
   const docs = useClinic((s) => s.documents.filter((d) => d.patientId === patientId))
   const outcomes = useClinic((s) => s.outcomes.filter((o) => o.patientId === patientId))
@@ -836,6 +843,8 @@ function PatientDetail({ patientId, onPrescribe, onCaseSheet, onFollowUp, onBack
     document.addEventListener('mousedown', onClick)
     return () => document.removeEventListener('mousedown', onClick)
   }, [assignOpen])
+
+  if (!patient) return <PatientNotFound onBack={onBack} />
 
   const openAssignDropdown = () => {
     if (assignRef.current) {
@@ -1031,7 +1040,7 @@ function PatientDetail({ patientId, onPrescribe, onCaseSheet, onFollowUp, onBack
 
 // ── PRESCRIPTION WRITER ──
 function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: () => void }) {
-  const patient = useClinic((s) => s.patients.find((p) => p.id === patientId)!)
+  const patient = useClinic((s) => s.patients.find((p) => p.id === patientId))
   const doctor = useClinic((s) => s.practitioners.find((p) => p.id === s.currentPractitionerId))
   const publish = useClinic((s) => s.publishPrescription)
   const updatePractitioner = useClinic((s) => s.updatePractitioner)
@@ -1061,7 +1070,10 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
   const toggleChannel = (c: string) =>
     setChannels((cs) => (cs.includes(c) ? cs.filter((x) => x !== c) : [...cs, c]))
 
+  if (!patient) return <PatientNotFound onBack={onDone} />
+
   function onPublish() {
+    if (!patient) return
     if (!remedy.trim()) { toast({ title: 'Enter a remedy first' }); return }
     publish({
       patientId,
@@ -1515,18 +1527,26 @@ function SettingsView() {
   const practitioners = useClinic((s) => s.practitioners)
   const currentId = useClinic((s) => s.currentPractitionerId)
   const updatePractitioner = useClinic((s) => s.updatePractitioner)
-  const me = practitioners.find((p) => p.id === currentId)!
+  const me = practitioners.find((p) => p.id === currentId)
   const [clinicName, setClinicName] = useState('Sneham Digital Clinic')
   const [consultDuration, setConsultDuration] = useState('20')
   const [notifPrefs, setNotifPrefs] = useState({ newBooking: true, followUpDue: true, lowStock: false, patientCheckIn: true })
   const [editingProfile, setEditingProfile] = useState(false)
   const [profileForm, setProfileForm] = useState({
-    name: me.name,
-    specialty: me.specialty,
-    qualifications: me.qualifications || '',
-    registrationNo: me.registrationNo || '',
+    name: me?.name ?? '',
+    specialty: me?.specialty ?? '',
+    qualifications: me?.qualifications || '',
+    registrationNo: me?.registrationNo || '',
   })
   const toast = useToast()
+
+  if (!me) {
+    return (
+      <div className="flex h-[60vh] items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-tint border-t-brand" />
+      </div>
+    )
+  }
 
   const togglePref = (key: keyof typeof notifPrefs) =>
     setNotifPrefs((p) => ({ ...p, [key]: !p[key] }))

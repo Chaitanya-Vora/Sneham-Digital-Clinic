@@ -4,7 +4,7 @@
 // ─────────────────────────────────────────────────────────────
 import { AnimatePresence, motion, type PanInfo } from 'framer-motion'
 import type { ReactNode } from 'react'
-import { Minus, Plus } from '@phosphor-icons/react'
+import { Minus, Plus, UsersThree } from '@phosphor-icons/react'
 import { haptic } from './haptics'
 
 // ── Button ──
@@ -351,5 +351,25 @@ export function BottomSheet({
         </div>
       )}
     </AnimatePresence>
+  )
+}
+
+// ── Patient not found ──
+// Shared fallback for any patient-scoped screen (prescription, case sheet,
+// follow-up, patient detail) opened with an id that no longer resolves —
+// a deleted patient, a stale link, or navigation reached without picking
+// one first. Renders instead of crashing on an undefined patient.
+export function PatientNotFound({ onBack }: { onBack: () => void }) {
+  return (
+    <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 px-6 text-center">
+      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-tint text-brand">
+        <UsersThree size={26} weight="fill" />
+      </div>
+      <div>
+        <div className="font-display text-[16px] font-bold text-ink">Patient not found</div>
+        <div className="mt-1 text-[13px] text-muted">This patient may have been removed, or no patient was selected.</div>
+      </div>
+      <Button variant="ghost" size="sm" onClick={onBack}>Back to patients</Button>
+    </div>
   )
 }

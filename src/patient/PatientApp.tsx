@@ -764,8 +764,9 @@ function RxScreen({ prescriptions, onToggleReminders, goDoses, onRefresh }: any)
                   hap="tick"
                   onClick={async () => {
                     const doctor = practitioners.find((p: any) => p.id === rx.practitionerId)
+                    const credentials = [doctor?.qualifications, doctor?.registrationNo].filter(Boolean).join(' · ')
                     try {
-                      await exportPrescriptionPdf(rx, patient?.name ?? 'Patient', doctor?.name ?? 'Doctor')
+                      await exportPrescriptionPdf(rx, patient?.name ?? 'Patient', doctor?.name ?? 'Doctor', undefined, credentials || undefined)
                       toast({ title: 'PDF exported' })
                     } catch (e) {
                       // The PDF is written successfully before the native share

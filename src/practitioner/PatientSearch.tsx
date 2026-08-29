@@ -14,9 +14,11 @@ import {
   Plus,
   UserPlus,
   ChatCircleDots,
+  CurrencyInr,
+  Printer,
 } from '@phosphor-icons/react'
 import { useClinic, selPrescriptionsFor, selDosesFor } from '../core/store'
-import type { Patient } from '../core/types'
+import type { Appointment, Patient } from '../core/types'
 import { ChatThread } from '../components/ChatThread'
 import { Avatar, Badge, BottomSheet, Button, Card, Chip, Label } from '../design-system/ui'
 import { Pressable } from '../design-system/Pressable'
@@ -25,6 +27,7 @@ import { spring, springSoft, pushVariants, listContainer, listItem } from '../de
 import { CountUp, ProgressBar } from '../design-system/feedback'
 import { PullToRefresh } from '../design-system/gestures'
 import { useToast } from '../design-system/toast'
+import { exportInvoicePdf } from '../core/pdfExport'
 
 /** `Patient.lastSeen` is a free-form display label ("Today", "10 Jul", "04 Jul") — not
  *  an ISO date — so it can't be sorted lexicographically. This resolves it to a
@@ -199,6 +202,7 @@ export function PatientDetailScreen({
   const scheduleFollowUpAction = useClinic((s) => s.scheduleFollowUp)
   const [tab, setTab] = useState<DetailTab>('overview')
   const [followUpOpen, setFollowUpOpen] = useState(false)
+  const [billingOpen, setBillingOpen] = useState(false)
   // null = showing the preset list; a date string = the "Custom" picker is open
   const [customDate, setCustomDate] = useState<string | null>(null)
 
@@ -305,15 +309,18 @@ export function PatientDetailScreen({
         )}
 
         {/* quick actions */}
-        <div className="mt-3.5 flex gap-2">
-          <Pressable hap="impact" onClick={() => onOpenCase(patientId)} className="flex flex-1 items-center justify-center gap-1.5 rounded-pill bg-brand py-2.5 text-[13px] font-semibold text-screen">
+        <div className="mt-3.5 grid grid-cols-2 gap-2">
+          <Pressable hap="impact" onClick={() => onOpenCase(patientId)} className="flex items-center justify-center gap-1.5 rounded-pill bg-brand py-2.5 text-[13px] font-semibold text-screen">
             <NotePencil size={16} weight="fill" /> Case sheet
           </Pressable>
-          <Pressable hap="tick" onClick={() => onOpenFollowUp(patientId)} className="flex flex-1 items-center justify-center gap-1.5 rounded-pill border border-border bg-surface py-2.5 text-[13px] font-semibold text-body">
+          <Pressable hap="tick" onClick={() => onOpenFollowUp(patientId)} className="flex items-center justify-center gap-1.5 rounded-pill border border-border bg-surface py-2.5 text-[13px] font-semibold text-body">
             <ArrowsClockwise size={16} weight="fill" /> Follow-up
           </Pressable>
-          <Pressable hap="tick" onClick={onPrescribe} className="flex flex-1 items-center justify-center gap-1.5 rounded-pill border border-border bg-surface py-2.5 text-[13px] font-semibold text-body">
+          <Pressable hap="tick" onClick={onPrescribe} className="flex items-center justify-center gap-1.5 rounded-pill border border-border bg-surface py-2.5 text-[13px] font-semibold text-body">
             <Prescription size={16} weight="fill" /> Prescribe
+          </Pressable>
+          <Pressable hap="tick" onClick={() => setBillingOpen(true)} className="flex items-center justify-center gap-1.5 rounded-pill border border-border bg-surface py-2.5 text-[13px] font-semibold text-body">
+            <CurrencyInr size={16} weight="bold" /> Bill
           </Pressable>
         </div>
       </div>
@@ -532,7 +539,104 @@ export function PatientDetailScreen({
           </>
         )}
       </BottomSheet>
+
+      <BillingSheet patientId={patientId} open={billingOpen} onClose={() => setBillingOpen(false)} />
     </div>
+  )
+}
+
+// ── BILLING (mobile) ──
+// A doctor seeing a quick walk-in (e.g. a cold) can collect payment and
+// print/share an invoice with the clinic's letterhead directly from her
+// phone — this used to only exist on the web console.
+function BillingSheet({ patientId, open, onClose }: { patientId: string; open: boolean; onClose: () => void }) {
+  const patient = useClinic((s) => s.patients.find((p) => p.id === patientId))
+  const appt = useClinic((s) => {
+    const mine = s.appointments.filter((a) => a.patientId === patientId)
+    if (mine.length === 0) return undefined
+    const billable = mine.filter((a) => a.status === 'Seen' || a.status === 'In consult')
+    const pool = billable.length > 0 ? billable : mine
+    return [...pool].sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time))[0]
+  })
+  const doctor = useClinic((s) => s.practitioners.find((p) => p.id === s.currentPractitionerId))
+  const recordPayment = useClinic((s) => s.recordPayment)
+  const toast = useToast()
+  const [fee, setFee] = useState(1500)
+  const [mode, setMode] = useState<NonNullable<Appointment['paymentMode']>>('Cash')
+
+  useEffect(() => {
+    if (open && appt) setFee(appt.fee ?? 1500)
+  }, [open, appt?.id])
+
+  const modes: NonNullable<Appointment['paymentMode']>[] = ['Cash', 'UPI', 'Card', 'Bank transfer', 'Other']
+
+  const printInvoice = async (status: 'paid' | 'unpaid') => {
+    if (!patient) return
+    const credentials = [doctor?.qualifications, doctor?.registrationNo].filter(Boolean).join(' · ')
+    await exportInvoicePdf({
+      id: appt?.id ?? patient.id,
+      patientName: patient.name,
+      patientCode: patient.wsCode,
+      doctorName: doctor?.name ?? 'Doctor',
+      doctorCredentials: credentials || undefined,
+      date: new Date().toISOString(),
+      reason: appt?.reason ?? 'Consultation',
+      fee,
+      paymentMode: mode,
+      paymentStatus: status,
+    }).catch(() => {})
+  }
+
+  return (
+    <BottomSheet open={open} onClose={onClose}>
+      <div className="font-display text-[17px] font-bold text-ink">Collect payment</div>
+      {patient && <div className="mt-0.5 text-[12.5px] text-muted">{patient.name}{appt ? ` · ${appt.reason ?? 'Consultation'}` : ''}</div>}
+
+      {!appt && (
+        <Card className="mt-3 px-4 py-3 text-[13px] text-muted">
+          No appointment on record yet for this patient — you can still print an invoice below, but recording a payment needs a visit first.
+        </Card>
+      )}
+
+      <Label className="mt-4">Fee amount</Label>
+      <div className="mt-1.5 flex items-center gap-2 rounded-[14px] border border-border bg-surface px-3.5 py-2.5">
+        <span className="text-[14px] font-semibold text-muted">₹</span>
+        <input
+          type="number"
+          value={fee}
+          onChange={(e) => setFee(Number(e.target.value) || 0)}
+          className="w-full bg-transparent text-[14px] font-semibold text-ink outline-none"
+          data-selectable="true"
+        />
+      </div>
+
+      <Label className="mt-4">Payment mode</Label>
+      <div className="mt-1.5 flex flex-wrap gap-2">
+        {modes.map((m) => (
+          <Chip key={m} selected={mode === m} onClick={() => { haptic('select'); setMode(m) }}>{m}</Chip>
+        ))}
+      </div>
+
+      <div className="mt-5 flex gap-2">
+        <Button variant="ghost" className="flex-1" onClick={() => printInvoice(appt ? 'paid' : 'unpaid')}>
+          <Printer size={16} /> PDF
+        </Button>
+        <Button
+          variant="accent"
+          className="flex-1"
+          disabled={!appt}
+          onClick={() => {
+            if (!appt) return
+            recordPayment(appt.id, fee, mode, 'paid')
+            haptic('success')
+            toast({ title: 'Payment recorded', message: `₹${fee.toLocaleString('en-IN')} — ${mode}` })
+            onClose()
+          }}
+        >
+          <CurrencyInr size={16} weight="bold" /> Record
+        </Button>
+      </div>
+    </BottomSheet>
   )
 }
 

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { User, Session } from '@supabase/supabase-js'
 import { Capacitor } from '@capacitor/core'
 import { App } from '@capacitor/app'
@@ -10,11 +10,14 @@ interface AuthCtx {
   session: Session | null
   loading: boolean
   oauthError: string | null
+  passwordRecovery: boolean
   signUp: (email: string, password: string, fullName: string) => Promise<{ error: string | null }>
   signIn: (email: string, password: string) => Promise<{ error: string | null }>
   signInWithGoogle: () => Promise<{ error: string | null }>
   signOut: () => Promise<void>
   resetPassword: (email: string) => Promise<{ error: string | null }>
+  updatePassword: (newPassword: string) => Promise<{ error: string | null }>
+  cancelPasswordRecovery: () => void
 }
 
 const AuthContext = createContext<AuthCtx | null>(null)
@@ -54,6 +57,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
   const [oauthError, setOauthError] = useState<string | null>(null)
+  const [passwordRecovery, setPasswordRecovery] = useState(false)
+  // Google's authorization code is one-time-use — if the same redirect URL
+  // is ever delivered twice (some Android versions redeliver the deep-link
+  // intent on activity resume), a second exchange attempt for the same code
+  // fails with "Unable to exchange external code". Tracking the last URL we
+  // actually processed makes a repeat a no-op instead of a visible error.
+  const lastProcessedUrlRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (native) getCachedRedirect()
@@ -74,7 +84,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .catch((e) => { console.error('getSession failed:', e); settle(null) })
       .finally(() => clearTimeout(timer))
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, s) => {
+      // A password-reset link lands here as a real, valid session — but it
+      // must not just drop the user straight into the app with their old
+      // password unchanged. PASSWORD_RECOVERY is Supabase's signal that this
+      // session came from a recovery link specifically, distinct from a
+      // normal sign-in.
+      if (event === 'PASSWORD_RECOVERY') setPasswordRecovery(true)
       setSession(s)
       setUser(s?.user ?? null)
       setLoading(false)
@@ -86,11 +102,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (native) {
       App.addListener('appUrlOpen', async ({ url }) => {
         if (!url.includes('auth/callback')) return
+        if (lastProcessedUrlRef.current === url) return
+        lastProcessedUrlRef.current = url
+
         const params = paramsFromDeepLink(url)
 
         const code = params.get('code')
         const accessToken = params.get('access_token')
         const refreshToken = params.get('refresh_token')
+        const isRecovery = params.get('type') === 'recovery'
 
         try {
           if (code) {
@@ -105,6 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           } else {
             throw new Error(params.get('error_description') ?? 'Sign-in was cancelled.')
           }
+          if (isRecovery) setPasswordRecovery(true)
           setOauthError(null)
         } catch (e) {
           setOauthError(e instanceof Error ? e.message : 'Could not complete sign-in.')
@@ -173,8 +194,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: error?.message ?? null }
   }
 
+  const updatePassword = async (newPassword: string) => {
+    const { error } = await supabase.auth.updateUser({ password: newPassword })
+    if (!error) setPasswordRecovery(false)
+    return { error: error?.message ?? null }
+  }
+
+  // Lets someone bail out of the "set a new password" screen back to a
+  // normal sign-in instead — e.g. if they opened the recovery link by
+  // mistake and already know their password.
+  const cancelPasswordRecovery = () => setPasswordRecovery(false)
+
   return (
-    <AuthContext.Provider value={{ user, session, loading, oauthError, signUp, signIn, signInWithGoogle, signOut, resetPassword }}>
+    <AuthContext.Provider
+      value={{
+        user, session, loading, oauthError, passwordRecovery,
+        signUp, signIn, signInWithGoogle, signOut, resetPassword, updatePassword, cancelPasswordRecovery,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   )

@@ -4,6 +4,7 @@ import { useAuth } from './AuthProvider'
 import { LoginScreen } from './LoginScreen'
 import { SignupScreen } from './SignupScreen'
 import { ForgotPasswordScreen } from './ForgotPasswordScreen'
+import { ResetPasswordScreen } from './ResetPasswordScreen'
 import { SnehamMark } from '../design-system/Logo'
 
 type Screen = 'login' | 'signup' | 'forgot'
@@ -49,7 +50,7 @@ function SplashScreen() {
 }
 
 export function AuthGate({ children }: { children: ReactNode }) {
-  const { user, loading } = useAuth()
+  const { user, loading, passwordRecovery } = useAuth()
   const [screen, setScreen] = useState<Screen>('login')
   const [minSplashDone, setMinSplashDone] = useState(false)
 
@@ -78,7 +79,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
         </>
       )}
 
-      {!showSplash && user && children}
+      {!showSplash && user && passwordRecovery && <ResetPasswordScreen />}
+      {!showSplash && user && !passwordRecovery && children}
     </>
   )
 }

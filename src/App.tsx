@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Stethoscope, User, Monitor, SignOut, QrCode, X } from '@phosphor-icons/react'
@@ -12,10 +12,22 @@ import { useClinic } from './core/store'
 import { useShell } from './core/shell'
 import { SnehamMark, SnehamLockup } from './design-system/Logo'
 import { PhoneFrame } from './design-system/ui'
-import { WebApp } from './web/WebApp'
-import { PractitionerApp } from './practitioner/PractitionerApp'
-import { PatientApp } from './patient/PatientApp'
 import { Onboarding } from './web/Onboarding'
+
+// Each surface is only ever needed by one deployment at a time — the web
+// build never needs the practitioner/patient app code and vice versa — so
+// they're code-split instead of all three shipping in one bundle.
+const WebApp = lazy(() => import('./web/WebApp').then((m) => ({ default: m.WebApp })))
+const PractitionerApp = lazy(() => import('./practitioner/PractitionerApp').then((m) => ({ default: m.PractitionerApp })))
+const PatientApp = lazy(() => import('./patient/PatientApp').then((m) => ({ default: m.PatientApp })))
+
+function SurfaceFallback() {
+  return (
+    <div className="flex h-full min-h-[100dvh] items-center justify-center bg-screen">
+      <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-tint border-t-brand" />
+    </div>
+  )
+}
 
 function useSurfaces() {
   const doctor = useClinic((s) => s.practitioners.find((p) => p.id === s.currentPractitionerId))
@@ -27,6 +39,12 @@ function useSurfaces() {
     { value: 'patient' as Surface, label: 'Patient', caption: firstPatient?.name ?? 'Patient' },
   ]
 }
+
+// Set on the production web deployment's Vercel env (VITE_DEFAULT_SURFACE=web)
+// so a doctor handed this URL sees only the practice console — no dev-only
+// surface toggle, no "preview the mobile apps" launcher. Local dev leaves
+// this unset, so the toggle still works for testing all three surfaces.
+const FIXED_SURFACE = (import.meta.env.VITE_DEFAULT_SURFACE as Surface | undefined) || null
 
 function useIsMobile() {
   const [mobile, setMobile] = useState(() => window.matchMedia('(max-width: 760px)').matches)
@@ -87,7 +105,9 @@ function MobileShell() {
 
   return (
     <div className="relative h-[100dvh] w-full overflow-hidden bg-screen">
-      {surface === 'web' ? <WebApp /> : surface === 'practitioner' ? <PractitionerApp /> : <PatientApp />}
+      <Suspense fallback={<SurfaceFallback />}>
+        {surface === 'web' ? <WebApp /> : surface === 'practitioner' ? <PractitionerApp /> : <PatientApp />}
+      </Suspense>
     </div>
   )
 }
@@ -139,7 +159,7 @@ function Launcher({ onPick }: { onPick: (s: Surface) => void }) {
 // Desktop: side-by-side surface switcher with device frames
 // ─────────────────────────────────────────────────────────────
 function DesktopShell() {
-  const [surface, setSurface] = useState<Surface>('web')
+  const [surface, setSurface] = useState<Surface>(FIXED_SURFACE ?? 'web')
   const [qrOpen, setQrOpen] = useState(false)
   const { user, signOut } = useAuth()
   const surfaces = useSurfaces()
@@ -164,32 +184,36 @@ function DesktopShell() {
           <SnehamMark size={28} />
           <span className="font-display text-[13px] font-semibold text-ink">Sneham Digital Clinic</span>
         </div>
-        <div className="inline-flex rounded-pill bg-screen p-1">
-          {surfaces.map((s) => (
-            <button
-              key={s.value}
-              onClick={() => setSurface(s.value)}
-              className={`rounded-pill px-4 py-1.5 text-[13px] font-body font-semibold transition ${
-                surface === s.value ? 'bg-brand text-screen shadow-sm' : 'text-muted hover:text-body'
-              }`}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
+        {!FIXED_SURFACE && (
+          <div className="inline-flex rounded-pill bg-screen p-1">
+            {surfaces.map((s) => (
+              <button
+                key={s.value}
+                onClick={() => setSurface(s.value)}
+                className={`rounded-pill px-4 py-1.5 text-[13px] font-body font-semibold transition ${
+                  surface === s.value ? 'bg-brand text-screen shadow-sm' : 'text-muted hover:text-body'
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="flex items-center gap-2">
           {user && (
             <span className="hidden text-[12px] text-muted lg:inline">
               {user.user_metadata?.full_name || user.email}
             </span>
           )}
-          <button
-            onClick={() => setQrOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-pill border border-border bg-surface px-3 py-1.5 text-[12px] font-semibold text-muted hover:text-body"
-            title="Install on phone"
-          >
-            <QrCode size={14} weight="bold" /> Install
-          </button>
+          {!FIXED_SURFACE && (
+            <button
+              onClick={() => setQrOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-pill border border-border bg-surface px-3 py-1.5 text-[12px] font-semibold text-muted hover:text-body"
+              title="Install on phone"
+            >
+              <QrCode size={14} weight="bold" /> Install
+            </button>
+          )}
           <button
             onClick={signOut}
             className="inline-flex items-center gap-1.5 rounded-pill border border-border bg-surface px-3 py-1.5 text-[12px] font-semibold text-muted hover:text-danger"
@@ -200,17 +224,19 @@ function DesktopShell() {
         </div>
       </div>
 
-      {surface === 'web' ? (
-        <WebApp />
-      ) : (
-        <div className="flex flex-col items-center gap-3 px-4 py-8">
-          <div className="text-center">
-            <div className="font-display text-[15px] font-semibold text-ink">{active.label}</div>
-            <div className="text-[12px] text-faint">{active.caption}</div>
+      <Suspense fallback={<SurfaceFallback />}>
+        {surface === 'web' ? (
+          <WebApp />
+        ) : (
+          <div className="flex flex-col items-center gap-3 px-4 py-8">
+            <div className="text-center">
+              <div className="font-display text-[15px] font-semibold text-ink">{active.label}</div>
+              <div className="text-[12px] text-faint">{active.caption}</div>
+            </div>
+            <PhoneFrame>{surface === 'practitioner' ? <PractitionerApp /> : <PatientApp />}</PhoneFrame>
           </div>
-          <PhoneFrame>{surface === 'practitioner' ? <PractitionerApp /> : <PatientApp />}</PhoneFrame>
-        </div>
-      )}
+        )}
+      </Suspense>
 
       <QRInstallModal open={qrOpen} onClose={() => setQrOpen(false)} />
     </div>

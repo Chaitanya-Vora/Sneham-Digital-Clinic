@@ -44,7 +44,7 @@ import {
 } from '@phosphor-icons/react'
 import { todayISO, formatDayLabel } from '../core/day'
 import { useClinic } from '../core/store'
-import type { Patient, Potency, Repetition } from '../core/types'
+import type { Appointment, Patient, Potency, Repetition } from '../core/types'
 import { MASTER_REMEDIES } from '../core/remedies'
 import { uploadDocument } from '../core/db'
 import { Avatar, Badge, Button, Card, Chip, Label, Stepper } from '../design-system/ui'
@@ -58,7 +58,7 @@ import { CommandPalette, type Command } from './CommandPalette'
 import { WebCalendar } from './WebCalendar'
 import { VideoConsult } from '../video/VideoConsult'
 import { ChatThread } from '../components/ChatThread'
-import { exportPrescriptionPdf } from '../core/pdfExport'
+import { exportPrescriptionPdf, exportInvoicePdf } from '../core/pdfExport'
 
 type Screen = 'today' | 'calendar' | 'patients' | 'patient' | 'prescription' | 'casesheet' | 'followup' | 'reports' | 'settings' | 'restricted'
 const POTENCIES: Potency[] = ['6C', '12C', '30C', '200C', '1M', '10M', 'Q']
@@ -341,8 +341,8 @@ export function WebApp() {
 function TodayView({ onOpenPatient, onStartVideo }: { onOpenPatient: (id: string) => void; onStartVideo: (apptId: string) => void }) {
   const appts = useClinic((s) => s.appointments)
   const patients = useClinic((s) => s.patients)
-  const recordPayment = useClinic((s) => s.recordPayment)
   const toast = useToast()
+  const [billingApptId, setBillingApptId] = useState<string | null>(null)
   const inr = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`
   const fmt = (n: number) => String(Math.round(n))
   const todayAppts = appts.filter((a) => a.date === todayISO())
@@ -423,7 +423,7 @@ function TodayView({ onOpenPatient, onStartVideo }: { onOpenPatient: (id: string
                 )}
                 {a.status === 'Seen' && a.paymentStatus !== 'paid' && a.paymentStatus !== 'waived' && (
                   <button
-                    onClick={(e) => { e.stopPropagation(); recordPayment(a.id, CONSULT_FEE, 'Cash', 'paid'); toast({ title: 'Payment recorded', message: `₹${CONSULT_FEE} — Cash` }) }}
+                    onClick={(e) => { e.stopPropagation(); setBillingApptId(a.id) }}
                     className="flex items-center gap-1 rounded-pill border border-green-border bg-tint px-3 py-1.5 text-[12px] font-semibold text-brand transition hover:bg-accent hover:text-white"
                   >
                     ₹ Collect
@@ -437,7 +437,105 @@ function TodayView({ onOpenPatient, onStartVideo }: { onOpenPatient: (id: string
           })}
         </motion.div>
       </Card>
+      <BillingModal apptId={billingApptId} onClose={() => setBillingApptId(null)} />
     </div>
+  )
+}
+
+// ── BILLING ──
+// Used to be a single hardcoded ₹1500-Cash button with no way to enter the
+// real fee or payment mode. Now a real editable form, and can print/share an
+// invoice with the clinic's letterhead.
+function BillingModal({ apptId, onClose }: { apptId: string | null; onClose: () => void }) {
+  const appt = useClinic((s) => s.appointments.find((a) => a.id === apptId))
+  const patient = useClinic((s) => s.patients.find((p) => p.id === appt?.patientId))
+  const doctor = useClinic((s) => s.practitioners.find((p) => p.id === s.currentPractitionerId))
+  const recordPayment = useClinic((s) => s.recordPayment)
+  const toast = useToast()
+  const [fee, setFee] = useState(1500)
+  const [mode, setMode] = useState<NonNullable<Appointment['paymentMode']>>('Cash')
+
+  useEffect(() => {
+    if (appt) setFee(appt.fee ?? 1500)
+  }, [appt?.id])
+
+  if (!apptId || !appt || !patient) return null
+
+  const modes: NonNullable<Appointment['paymentMode']>[] = ['Cash', 'UPI', 'Card', 'Bank transfer', 'Other']
+
+  const printInvoice = async (status: 'paid' | 'unpaid') => {
+    const credentials = [doctor?.qualifications, doctor?.registrationNo].filter(Boolean).join(' · ')
+    await exportInvoicePdf({
+      id: appt.id,
+      patientName: patient.name,
+      patientCode: patient.wsCode,
+      doctorName: doctor?.name ?? 'Doctor',
+      doctorCredentials: credentials || undefined,
+      date: new Date().toISOString(),
+      reason: appt.reason,
+      fee,
+      paymentMode: mode,
+      paymentStatus: status,
+    }).catch(() => {})
+  }
+
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-ink/40 backdrop-blur-sm animate-fade" onClick={onClose}>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="relative mx-4 w-full max-w-[400px] rounded-3xl border border-border bg-surface p-6 shadow-modal animate-pop"
+      >
+        <button onClick={onClose} className="absolute right-4 top-4 rounded-full p-1 text-muted hover:text-body">
+          <X size={18} />
+        </button>
+        <h2 className="font-display text-[18px] font-bold text-ink">Collect payment</h2>
+        <p className="mt-0.5 text-[13px] text-muted">{patient.name} · {appt.reason ?? 'Consultation'}</p>
+
+        <Label className="mt-4">Fee amount</Label>
+        <div className="mt-1.5 flex items-center gap-2 rounded-[12px] border border-border bg-canvas px-3.5 py-2.5">
+          <span className="text-[15px] font-semibold text-muted">₹</span>
+          <input
+            type="number"
+            value={fee}
+            onChange={(e) => setFee(Number(e.target.value) || 0)}
+            className="w-full bg-transparent text-[15px] font-semibold text-ink outline-none"
+          />
+        </div>
+
+        <Label className="mt-4">Payment mode</Label>
+        <div className="mt-1.5 flex flex-wrap gap-2">
+          {modes.map((m) => (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              className={`rounded-pill border px-3.5 py-2 text-[13px] font-semibold transition ${
+                mode === m ? 'border-green-border bg-tint text-ink-deep' : 'border-border bg-surface text-muted'
+              }`}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-6 flex gap-2">
+          <Button variant="ghost" className="flex-1" onClick={() => printInvoice('paid')}>
+            <Printer size={16} /> PDF
+          </Button>
+          <Button
+            variant="accent"
+            className="flex-1"
+            onClick={() => {
+              recordPayment(appt.id, fee, mode, 'paid')
+              toast({ title: 'Payment recorded', message: `₹${fee.toLocaleString('en-IN')} — ${mode}` })
+              onClose()
+            }}
+          >
+            <CurrencyInr size={16} weight="bold" /> Record payment
+          </Button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -936,10 +1034,14 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
   const patient = useClinic((s) => s.patients.find((p) => p.id === patientId)!)
   const doctor = useClinic((s) => s.practitioners.find((p) => p.id === s.currentPractitionerId))
   const publish = useClinic((s) => s.publishPrescription)
+  const updatePractitioner = useClinic((s) => s.updatePractitioner)
   const toast = useToast()
 
-  const [remedy, setRemedy] = useState('Nux Vomica')
-  const [query, setQuery] = useState('')
+  // The remedy field is the actual value — typing always works, chips below
+  // are just a fast-select that fill the same field. It used to only accept
+  // a click on a chip; there was no way to type a remedy that wasn't
+  // already on the list.
+  const [remedy, setRemedy] = useState('')
   const [potency, setPotency] = useState<Potency>('200C')
   const [dose, setDose] = useState(4)
   const [duration, setDuration] = useState(14)
@@ -948,21 +1050,23 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
   const [channels, setChannels] = useState<string[]>(['WhatsApp'])
 
   const list = useMemo(() => {
-    const q = query.toLowerCase()
+    const q = remedy.toLowerCase()
     const personal = (doctor?.remedyList ?? []).filter((r) => r.toLowerCase().includes(q))
     if (q.length < 2) return personal
     const personalSet = new Set((doctor?.remedyList ?? []).map((r) => r.toLowerCase()))
     const master = MASTER_REMEDIES.filter((r) => r.toLowerCase().includes(q) && !personalSet.has(r.toLowerCase()))
     return [...personal, ...master]
-  }, [doctor?.remedyList, query])
+  }, [doctor?.remedyList, remedy])
+  const isNewRemedy = remedy.trim().length > 1 && !(doctor?.remedyList ?? []).some((r) => r.toLowerCase() === remedy.trim().toLowerCase())
   const toggleChannel = (c: string) =>
     setChannels((cs) => (cs.includes(c) ? cs.filter((x) => x !== c) : [...cs, c]))
 
   function onPublish() {
+    if (!remedy.trim()) { toast({ title: 'Enter a remedy first' }); return }
     publish({
       patientId,
       practitionerId: doctor?.id ?? '',
-      remedy,
+      remedy: remedy.trim(),
       potency,
       doseGlobules: dose,
       repetition: rep,
@@ -995,13 +1099,13 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
         {/* form */}
         <Card className="space-y-5 p-5">
           <div>
-            <Label>Remedy · my list only</Label>
+            <Label>Remedy</Label>
             <div className="mt-2 flex items-center gap-2 rounded-pill border border-border bg-surface px-3.5 py-2">
               <MagnifyingGlass size={15} className="text-faint" />
               <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search my remedies"
+                value={remedy}
+                onChange={(e) => setRemedy(e.target.value)}
+                placeholder="Type or select a remedy"
                 className="w-full bg-transparent text-[13px] outline-none placeholder:text-faint"
               />
             </div>
@@ -1011,7 +1115,18 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
                   {r === remedy && <Check size={12} weight="bold" className="mr-1 inline" />}{r}
                 </Chip>
               ))}
-              <Chip className="border-dashed" onClick={() => toast({ title: 'Remedy added to your list' })}>+ Add to my list</Chip>
+              {isNewRemedy && (
+                <Chip
+                  className="border-dashed"
+                  onClick={() => {
+                    if (!doctor) return
+                    updatePractitioner(doctor.id, { remedyList: [...doctor.remedyList, remedy.trim()] })
+                    toast({ title: `${remedy.trim()} added to your list` })
+                  }}
+                >
+                  + Add "{remedy.trim()}" to my list
+                </Chip>
+              )}
             </div>
           </div>
 
@@ -1060,7 +1175,7 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
               <SnehamLockup dense />
             </div>
             <div className="space-y-3 p-5">
-              <div className="text-[12px] text-muted">{patient.name} · {patient.age} {patient.sex[0]} · {patient.wsCode} · 26 Jul 2026</div>
+              <div className="text-[12px] text-muted">{patient.name} · {patient.age} {patient.sex[0]} · {patient.wsCode} · {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
               <div className="font-display text-[22px] font-bold text-ink">{remedy}</div>
               <div className="flex flex-wrap gap-1.5">
                 <Badge tone="amber">{potency}</Badge>
@@ -1099,12 +1214,13 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
             <Button variant="accent" className="w-full" onClick={onPublish}>
               <RxIcon size={17} weight="fill" /> Publish to patient app
             </Button>
-            <div className="flex gap-3">
-              <button onClick={() => toast({ title: 'Template saved', message: `${remedy} ${potency} saved for quick access.` })} className="flex-1 text-[12.5px] font-semibold text-brand">Save as template</button>
+            <div className="flex justify-center">
               <button onClick={async () => {
-                const rx = { id: crypto.randomUUID(), patientId: patient.id, practitionerId: doctor?.id ?? '', remedy, potency: potency as any, doseGlobules: dose, repetition: rep as any, durationDays: duration, preparation: prep, publishedAt: new Date().toISOString(), sharedVia: [], remindersEnabled: false, reminderTimes: [] }
-                await exportPrescriptionPdf(rx, patient.name, doctor?.name ?? 'Doctor').catch(() => {})
-              }} className="flex items-center gap-1 text-[12.5px] font-semibold text-body"><Printer size={14} /> PDF</button>
+                if (!remedy.trim()) { toast({ title: 'Enter a remedy first' }); return }
+                const rx = { id: crypto.randomUUID(), patientId: patient.id, practitionerId: doctor?.id ?? '', remedy: remedy.trim(), potency: potency as any, doseGlobules: dose, repetition: rep as any, durationDays: duration, preparation: prep, publishedAt: new Date().toISOString(), sharedVia: [], remindersEnabled: false, reminderTimes: [] }
+                const credentials = [doctor?.qualifications, doctor?.registrationNo].filter(Boolean).join(' · ')
+                await exportPrescriptionPdf(rx, patient.name, doctor?.name ?? 'Doctor', undefined, credentials || undefined).catch(() => {})
+              }} className="flex items-center gap-1.5 text-[12.5px] font-semibold text-body"><Printer size={14} /> Print / save as PDF</button>
             </div>
           </Card>
         </div>

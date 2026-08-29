@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { Capacitor } from '@capacitor/core'
 import type { Surface } from './types'
 
 const VALID: Surface[] = ['web', 'practitioner', 'patient']
@@ -9,7 +8,11 @@ function fromHash(): Surface | null {
   const h = location.hash.replace('#', '') as Surface
   if (VALID.includes(h)) return h
   const env = import.meta.env.VITE_DEFAULT_SURFACE as string | undefined
-  if (env && VALID.includes(env as Surface) && Capacitor.isNativePlatform()) return env as Surface
+  // A fixed surface is now honored on web too, not just native builds — a
+  // launched deployment (e.g. the production web console) can pin itself to
+  // one surface via this build-time env var, same as the practitioner/patient
+  // APKs already do, so a mobile browser visiting it skips the dev launcher.
+  if (env && VALID.includes(env as Surface)) return env as Surface
   return null
 }
 

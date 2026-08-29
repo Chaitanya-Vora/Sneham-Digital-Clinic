@@ -30,6 +30,8 @@ import {
   Certificate,
   ChatText,
   CaretLeft,
+  Printer,
+  CurrencyInr,
 } from '@phosphor-icons/react'
 import { todayISO, toISO, formatDayLabel } from '../core/day'
 import { useClinic } from '../core/store'
@@ -44,6 +46,7 @@ import { spring, springSoft, tabVariants, pushVariants, listContainer, listItem 
 import { CountUp } from '../design-system/feedback'
 import { PullToRefresh, useHorizontalSwipe, EdgeSwipeBack } from '../design-system/gestures'
 import { useToast } from '../design-system/toast'
+import { exportPrescriptionPdf, exportInvoicePdf } from '../core/pdfExport'
 import { MobileCaseSheet } from './MobileCaseSheet'
 import { MobileFollowUp } from './MobileFollowUp'
 import { CalendarScreen } from './Calendar'
@@ -351,6 +354,7 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
   const ME = useClinic((s) => s.currentPractitionerId)
   const doctor = useClinic((s) => s.practitioners.find((p) => p.id === s.currentPractitionerId))
   const publish = useClinic((s) => s.publishPrescription)
+  const updatePractitioner = useClinic((s) => s.updatePractitioner)
   const patients = useClinic((s) => s.patients)
 
   const [pickerQuery, setPickerQuery] = useState('')
@@ -360,8 +364,12 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
   // before Publish does anything. This used to arrive pre-filled with a
   // default remedy and an enabled Publish button, so one tap could send an
   // invented prescription to whichever patient was guessed above.
-  const [remedy, setRemedy] = useState<string | null>(null)
-  const [query, setQuery] = useState('')
+  // The remedy field is the actual value — typing always works, chips below
+  // are just a fast-select that fill the same field. It used to only accept
+  // a click on a chip; there was no way to type a remedy that wasn't
+  // already on the personal or master list.
+  const [remedy, setRemedy] = useState('')
+  const [showAllRemedies, setShowAllRemedies] = useState(false)
   const [potency, setPotency] = useState<Potency>('200C')
   const [dose, setDose] = useState(4)
   const [rep, setRep] = useState<Repetition>('Once daily · night')
@@ -370,19 +378,20 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
 
   const remedyList = doctor?.remedyList ?? []
   const list = useMemo(() => {
-    const q = query.toLowerCase()
+    const q = remedy.toLowerCase()
     const personal = remedyList.filter((r) => r.toLowerCase().includes(q))
     if (q.length < 2) return personal
     const personalSet = new Set(remedyList.map((r) => r.toLowerCase()))
     const master = MASTER_REMEDIES.filter((r) => r.toLowerCase().includes(q) && !personalSet.has(r.toLowerCase()))
     return [...personal, ...master]
-  }, [remedyList, query])
+  }, [remedyList, remedy])
+  const isNewRemedy = remedy.trim().length > 1 && !remedyList.some((r) => r.toLowerCase() === remedy.trim().toLowerCase())
 
-  const canPublish = !!currentPatient && !!remedy
+  const canPublish = !!currentPatient && !!remedy.trim()
 
   function resetForm() {
-    setRemedy(null)
-    setQuery('')
+    setRemedy('')
+    setShowAllRemedies(false)
     setPotency('200C')
     setDose(4)
     setRep('Once daily · night')
@@ -390,9 +399,9 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
   }
 
   function onPublish() {
-    if (!canPublish || !currentPatient || !remedy) return
+    if (!canPublish || !currentPatient || !remedy.trim()) return
     publish({
-      patientId: currentPatient.id, practitionerId: ME, remedy, potency, doseGlobules: dose, repetition: rep,
+      patientId: currentPatient.id, practitionerId: ME, remedy: remedy.trim(), potency, doseGlobules: dose, repetition: rep,
       durationDays: rep === 'As needed' ? null : 14, preparation: prep,
       remindersEnabled: rep !== 'As needed', reminderTimes: rep === 'Twice daily' ? ['8:00 AM', '8:00 PM'] : ['8:00 PM'],
       sharedVia: ['Patient app', 'WhatsApp'], origin: 'practitioner',
@@ -454,18 +463,30 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
         <Label>Remedy</Label>
         <div className="mt-2 flex items-center gap-2 rounded-pill border border-border bg-surface px-3.5 py-2">
           <MagnifyingGlass size={16} className="text-faint" />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search remedies" className="w-full bg-transparent text-[13px] outline-none placeholder:text-faint" data-selectable="true" />
+          <input value={remedy} onChange={(e) => setRemedy(e.target.value)} placeholder="Type or select a remedy" className="w-full bg-transparent text-[13px] outline-none placeholder:text-faint" data-selectable="true" />
         </div>
         <div className="mt-2.5 flex flex-wrap gap-2">
-          {(query ? list : list.slice(0, 8)).map((r) => (
+          {(remedy || showAllRemedies ? list : list.slice(0, 8)).map((r) => (
             <Chip key={r} selected={r === remedy} onClick={() => { haptic('select'); setRemedy(r) }}>
               {r === remedy && <Check size={12} weight="bold" className="mr-1 inline" />}{r}
             </Chip>
           ))}
-          {!query && list.length > 8 && (
-            <button onClick={() => setQuery(' ')} className="rounded-pill border border-dashed border-border-dash px-3 py-1 text-[12px] font-semibold text-muted">
+          {!remedy && !showAllRemedies && list.length > 8 && (
+            <button onClick={() => setShowAllRemedies(true)} className="rounded-pill border border-dashed border-border-dash px-3 py-1 text-[12px] font-semibold text-muted">
               +{list.length - 8} more
             </button>
+          )}
+          {isNewRemedy && (
+            <Chip
+              className="border-dashed"
+              onClick={() => {
+                if (!doctor) return
+                haptic('success')
+                updatePractitioner(doctor.id, { remedyList: [...doctor.remedyList, remedy.trim()] })
+              }}
+            >
+              + Add "{remedy.trim()}" to my list
+            </Chip>
           )}
         </div>
       </div>
@@ -511,7 +532,22 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
           </motion.div>
           <div className="mt-3 font-display text-[19px] font-bold text-ink">Prescription published</div>
           <div className="mt-1 px-4 text-[13px] text-muted">{remedy} {potency} &middot; {rep} &mdash; sent to {currentPatient.name}{"'"}s app and WhatsApp.</div>
-          <div className="mt-5 flex w-full gap-2">
+          <Pressable
+            hap="tick"
+            onClick={async () => {
+              const credentials = [doctor?.qualifications, doctor?.registrationNo].filter(Boolean).join(' · ')
+              const rx = {
+                id: crypto.randomUUID(), patientId: currentPatient.id, practitionerId: ME, remedy, potency,
+                doseGlobules: dose, repetition: rep, durationDays: rep === 'As needed' ? null : 14, preparation: prep,
+                publishedAt: new Date().toISOString(), sharedVia: [], remindersEnabled: false, reminderTimes: [],
+              }
+              await exportPrescriptionPdf(rx, currentPatient.name, doctor?.name ?? 'Doctor', undefined, credentials || undefined).catch(() => {})
+            }}
+            className="mt-3 flex items-center gap-1.5 text-[12.5px] font-semibold text-body"
+          >
+            <Printer size={14} /> Print / save as PDF
+          </Pressable>
+          <div className="mt-4 flex w-full gap-2">
             <Pressable hap="tick" onClick={() => setDone(false)} className="flex-1 rounded-pill border border-border bg-surface py-2.5 text-center font-display text-[14px] font-semibold text-body">Done</Pressable>
             <Pressable hap="tick" onClick={() => { setDone(false); resetForm(); onPatientPicked(null) }} className="flex-1 rounded-pill bg-brand py-2.5 text-center font-display text-[14px] font-semibold text-screen">Next patient</Pressable>
           </div>

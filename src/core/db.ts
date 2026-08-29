@@ -41,6 +41,7 @@ export const newId = (): string => {
 function toAppPractitioner(r: any): Practitioner {
   return {
     id: r.id,
+    authUserId: r.auth_user_id ?? undefined,
     name: r.name,
     initials: r.initials,
     role: r.role,
@@ -131,6 +132,7 @@ export async function ensurePractitioner(userId: string, userName: string): Prom
 function toAppPatient(r: any): Patient {
   return {
     id: r.id,
+    authUserId: r.auth_user_id ?? undefined,
     wsCode: r.ws_code,
     name: r.name,
     initials: r.initials,
@@ -181,6 +183,12 @@ export async function fetchPatients(): Promise<Patient[]> {
 export async function insertPatient(p: Patient): Promise<boolean> {
   const { error } = await supabase.from('patients').insert(toDbPatient(p))
   if (error) { console.error('insertPatient:', error.message); return false }
+  return true
+}
+
+export async function linkPatientAuthUser(patientId: string, userId: string): Promise<boolean> {
+  const { error } = await supabase.from('patients').update({ auth_user_id: userId }).eq('id', patientId)
+  if (error) { console.error('linkPatientAuthUser:', error.message); return false }
   return true
 }
 
@@ -845,8 +853,12 @@ export interface HydratedData {
   currentPractitionerId: string
 }
 
-export async function hydrateAll(userId: string, userName: string): Promise<HydratedData> {
-  const practitioner = await ensurePractitioner(userId, userName)
+export async function hydrateAll(userId: string, userName: string, isPatientSurface: boolean): Promise<HydratedData> {
+  // The patient app must never auto-create a practitioner profile for
+  // whoever logs in — that's how a patient's own sign-up ended up showing
+  // up in the doctor's team list. Only non-patient builds (practitioner
+  // app, web console) get one.
+  const practitioner = isPatientSurface ? null : await ensurePractitioner(userId, userName)
 
   const [
     allPractitioners,
@@ -882,8 +894,8 @@ export async function hydrateAll(userId: string, userName: string): Promise<Hydr
     fetchMessages(),
   ])
 
-  const hasSelf = allPractitioners.some(p => p.id === practitioner.id)
-  const practitioners = hasSelf ? allPractitioners : [practitioner, ...allPractitioners]
+  const hasSelf = practitioner ? allPractitioners.some(p => p.id === practitioner.id) : true
+  const practitioners = practitioner && !hasSelf ? [practitioner, ...allPractitioners] : allPractitioners
 
   return {
     practitioners,
@@ -901,6 +913,6 @@ export async function hydrateAll(userId: string, userName: string): Promise<Hydr
     timeBlocks,
     caseVisits,
     messages,
-    currentPractitionerId: practitioner.id,
+    currentPractitionerId: practitioner?.id ?? '',
   }
 }

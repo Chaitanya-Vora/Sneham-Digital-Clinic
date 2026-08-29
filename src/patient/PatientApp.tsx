@@ -36,7 +36,7 @@ import {
 } from '@phosphor-icons/react'
 import { useClinic } from '../core/store'
 import { useAuth } from '../auth/AuthProvider'
-import type { AppNotification, Appointment, CheckIn } from '../core/types'
+import type { AppNotification, Appointment, CheckIn, Patient } from '../core/types'
 import { Avatar, Badge, BottomSheet, Button, Card, Label, Toggle } from '../design-system/ui'
 import { Pressable } from '../design-system/Pressable'
 import { haptic } from '../design-system/haptics'
@@ -61,19 +61,34 @@ function openJitsi(appointmentId: string) {
 
 type PushedScreen = null | 'doses' | 'personal' | 'medical' | 'notifications' | 'privacy' | 'checkin' | 'documents' | 'messages'
 
-export function PatientApp() {
-  const [tab, setTab] = useState<Tab>('home')
-  const [dir, setDir] = useState(1)
-  const [pushed, setPushed] = useState<PushedScreen>(null)
-
-  const patient = useClinic((s) => {
+// Resolves "which patient is me" for the logged-in account: a linked auth
+// account first (works on any device, survives reinstalls), then a
+// locally-remembered id (for patients registered before accounts were
+// linked). Deliberately never falls back to "the first patient in the
+// list" — that showed one patient's medical records to a different,
+// unrelated logged-in patient.
+function useMyPatient() {
+  const { user } = useAuth()
+  return useClinic((s) => {
+    if (user) {
+      const linked = s.patients.find((p) => p.authUserId === user.id)
+      if (linked) return linked
+    }
     const savedId = localStorage.getItem('sneham-my-patient-id')
     if (savedId) {
       const found = s.patients.find((p) => p.id === savedId)
       if (found) return found
     }
-    return s.patients[0]
+    return null
   })
+}
+
+export function PatientApp() {
+  const [tab, setTab] = useState<Tab>('home')
+  const [dir, setDir] = useState(1)
+  const [pushed, setPushed] = useState<PushedScreen>(null)
+
+  const patient = useMyPatient()
   const ME = patient?.id ?? ''
   const prescriptions = useClinic((s) => s.prescriptions.filter((r) => r.patientId === ME))
   const doses = useClinic((s) => s.doseReminders.filter((d) => d.patientId === ME))
@@ -99,7 +114,7 @@ export function PatientApp() {
 
   const hydrate = useClinic((s) => s.hydrate)
   const userId = useClinic((s) => s.userId)
-  const hydrating = useClinic((s) => s.hydrating)
+  const hydrated = useClinic((s) => s.hydrated)
   const refresh = async () => { if (userId) await hydrate(userId, patient?.name ?? 'Patient') }
 
   // Auto-refresh every 15s so changes from the practitioner appear without manual pull
@@ -112,7 +127,12 @@ export function PatientApp() {
   }, [])
 
   if (!patient) {
-    if (hydrating) {
+    if (!hydrated) {
+      // Only the very first load (before we know anything yet) shows the
+      // spinner. The 15s background poll also flips `hydrating` on and off,
+      // but it must never re-show this spinner in place of the
+      // registration form — that was silently wiping whatever a patient
+      // had already typed, every 15 seconds, while filling it in.
       return (
         <div className="flex h-full items-center justify-center bg-screen">
           <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-tint border-t-brand" />
@@ -614,11 +634,7 @@ function DoseRow({ d, onToggle }: { d: any; onToggle: (id: string) => void }) {
 // ── PRESCRIPTIONS ──
 function RxScreen({ prescriptions, onToggleReminders, goDoses, onRefresh }: any) {
   const toast = useToast()
-  const patient = useClinic((s) => {
-    const savedId = localStorage.getItem('sneham-my-patient-id')
-    if (savedId) return s.patients.find((p) => p.id === savedId) ?? s.patients[0]
-    return s.patients[0]
-  })
+  const patient = useMyPatient()
   const practitioners = useClinic((s) => s.practitioners)
   const header = <BigHeader title="Prescriptions" sub={`${practitioners[0]?.name ?? 'Doctor'} · Sneham Digital Clinic`} />
   return (
@@ -1129,11 +1145,7 @@ function DataPrivacyScreen({ back, onRefresh }: { back: () => void; onRefresh: (
   const [confirmDelete, setConfirmDelete] = useState(false)
   const { signOut } = useAuth()
   const resetDemo = useClinic((s) => s.resetDemo)
-  const patient = useClinic((s) => {
-    const savedId = localStorage.getItem('sneham-my-patient-id')
-    if (savedId) return s.patients.find((p) => p.id === savedId) ?? s.patients[0]
-    return s.patients[0]
-  })
+  const patient = useMyPatient()
   const prescriptions = useClinic((s) => s.prescriptions.filter((r) => r.patientId === patient?.id))
   const appointments = useClinic((s) => s.appointments.filter((a) => a.patientId === patient?.id))
   const doses = useClinic((s) => s.doseReminders.filter((d) => d.patientId === patient?.id))
@@ -1522,19 +1534,52 @@ function TabBar({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
 
 // ── PATIENT SELF-REGISTRATION ──
 function PatientSelfRegister() {
+  const { user } = useAuth()
   const addPatient = useClinic((s) => s.addPatient)
+  const linkPatientIdentity = useClinic((s) => s.linkPatientIdentity)
+  const patients = useClinic((s) => s.patients)
   const toast = useToast()
   const [name, setName] = useState('')
   const [age, setAge] = useState('')
   const [sex, setSex] = useState<'Female' | 'Male' | 'Other'>('Female')
   const [location, setLocation] = useState('')
+  const [phone, setPhone] = useState('')
   const [complaint, setComplaint] = useState('')
-  const [step, setStep] = useState<1 | 2>(1)
+  const [step, setStep] = useState<1 | 'confirm' | 2>(1)
+  const [matchedPatient, setMatchedPatient] = useState<Patient | null>(null)
   const [saving, setSaving] = useState(false)
   const nameRef = useRef<HTMLInputElement>(null)
 
-  const canProceed = name.trim().length >= 2 && age.trim().length > 0
+  const canProceed = name.trim().length >= 2 && age.trim().length > 0 && phone.trim().length >= 7
   const canSubmit = complaint.trim().length >= 3
+
+  // If the practitioner already added this person as a patient, their phone
+  // number is the only thing we have to recognise them by — so a real match
+  // here means "link this login to that existing record" instead of
+  // creating a duplicate. Only ever matches a record no one has claimed yet.
+  function handleContinue() {
+    if (!canProceed) return
+    const trimmedPhone = phone.trim()
+    const match = patients.find((p) => p.phone?.trim() === trimmedPhone && !p.authUserId)
+    if (match) {
+      setMatchedPatient(match)
+      setStep('confirm')
+    } else {
+      setStep(2)
+    }
+  }
+
+  function claimMatch() {
+    if (!matchedPatient || !user) return
+    linkPatientIdentity(matchedPatient.id, user.id)
+    localStorage.setItem('sneham-my-patient-id', matchedPatient.id)
+    toast({ title: 'Welcome back', message: `We found your record, ${matchedPatient.name}.` })
+  }
+
+  function notMe() {
+    setMatchedPatient(null)
+    setStep(2)
+  }
 
   function submit() {
     if (!canSubmit) return
@@ -1545,8 +1590,9 @@ function PatientSelfRegister() {
       sex,
       location: location.trim() || 'Mumbai',
       chiefComplaint: complaint.trim(),
-      phone: '',
+      phone: phone.trim(),
     })
+    if (user) linkPatientIdentity(created.id, user.id)
     localStorage.setItem('sneham-my-patient-id', created.id)
     toast({ title: 'Welcome to Sneham', message: 'Your profile has been created.' })
   }
@@ -1562,9 +1608,8 @@ function PatientSelfRegister() {
       </div>
 
       <div className="flex-1 space-y-5 overflow-y-auto px-[18px] pb-[120px]">
-        <AnimatePresence mode="wait">
           {step === 1 && (
-            <motion.div key="s1" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
+            <div className="space-y-4 animate-fade">
               <div>
                 <Label>Full name</Label>
                 <input
@@ -1606,6 +1651,17 @@ function PatientSelfRegister() {
                 </div>
               </div>
               <div>
+                <Label>Phone number</Label>
+                <input
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="+91 98765 43210"
+                  type="tel"
+                  className="mt-1.5 w-full rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-[14px] text-body outline-none focus:border-green-border"
+                />
+                <p className="mt-1 text-[11.5px] text-faint">If your clinic already has a record for you, this helps us find it.</p>
+              </div>
+              <div>
                 <Label>City</Label>
                 <input
                   value={location}
@@ -1614,10 +1670,22 @@ function PatientSelfRegister() {
                   className="mt-1.5 w-full rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-[14px] text-body outline-none focus:border-green-border"
                 />
               </div>
-            </motion.div>
+            </div>
+          )}
+          {step === 'confirm' && matchedPatient && (
+            <div className="space-y-4 animate-fade">
+              <Card className="flex items-center gap-3 px-4 py-4">
+                <Avatar initials={matchedPatient.initials} size={48} />
+                <div>
+                  <div className="font-display text-[16px] font-bold text-ink">{matchedPatient.name}</div>
+                  <div className="text-[13px] text-muted">{matchedPatient.age} &middot; {matchedPatient.location}</div>
+                </div>
+              </Card>
+              <p className="text-[14px] leading-relaxed text-body">We found an existing record with this phone number at Sneham Digital Clinic. Is this you?</p>
+            </div>
           )}
           {step === 2 && (
-            <motion.div key="s2" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="space-y-4">
+            <div className="space-y-4 animate-fade">
               <div>
                 <Label>What brings you here?</Label>
                 <p className="mt-0.5 text-[12px] text-faint">Describe your main health concern</p>
@@ -1630,9 +1698,8 @@ function PatientSelfRegister() {
                   autoFocus
                 />
               </div>
-            </motion.div>
+            </div>
           )}
-        </AnimatePresence>
       </div>
 
       <div className="flex gap-2 border-t border-border bg-surface/95 px-[18px] pb-[var(--app-bottom)] pt-3 backdrop-blur">
@@ -1641,11 +1708,22 @@ function PatientSelfRegister() {
             <CaretLeft size={16} /> Back
           </Button>
         )}
-        {step === 1 ? (
-          <Button variant="primary" className="flex-1" disabled={!canProceed} onClick={() => setStep(2)}>
+        {step === 1 && (
+          <Button variant="primary" className="flex-1" disabled={!canProceed} onClick={handleContinue}>
             Continue
           </Button>
-        ) : (
+        )}
+        {step === 'confirm' && (
+          <>
+            <Button variant="ghost" className="flex-1" onClick={notMe}>
+              Not me
+            </Button>
+            <Button variant="primary" className="flex-1" onClick={claimMatch}>
+              Yes, that's me
+            </Button>
+          </>
+        )}
+        {step === 2 && (
           <Button variant="primary" className="flex-1" disabled={!canSubmit || saving} onClick={submit}>
             {saving ? 'Creating profile...' : 'Get started'}
           </Button>

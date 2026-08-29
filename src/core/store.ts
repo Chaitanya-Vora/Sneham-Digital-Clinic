@@ -31,6 +31,7 @@ import {
   getHydrateErrors,
   insertPatient,
   updatePatient,
+  linkPatientAuthUser,
   insertAppointment,
   updateAppointmentDb,
   insertPrescription,
@@ -117,6 +118,7 @@ interface ClinicState {
   saveOutcome: (input: { patientId: string; practitionerId: string; remedy: string; outcome: OutcomeKind; note: string }) => void
   createHandoff: (input: { patientId: string; fromId: string; toId: string; coveringUntil: string; note: Handoff['note'] }) => void
   addPatient: (input: { name: string; age: number; sex: Patient['sex']; location: string; chiefComplaint: string; phone: string }) => Patient
+  linkPatientIdentity: (patientId: string, userId: string) => void
   startConsult: (appointmentId: string) => void
   endConsult: (appointmentId: string) => void
   markNoShow: (appointmentId: string) => void
@@ -142,6 +144,27 @@ const fmtSlot = (time: string): DoseReminder['slot'] => {
   if (upper.includes('AM')) return 'Morning'
   if (upper.includes('PM')) return 'Evening'
   return 'As needed'
+}
+
+// Resolves who should actually receive a notification, by looking up the
+// specific target patient's or practitioner's linked auth account — instead
+// of guessing with whichever account happens to be performing the action.
+// Returns null (best-effort broadcast) when the target hasn't linked an
+// account yet, same safe fallback the app already used everywhere.
+const resolveNotificationOwner = (
+  patients: Patient[],
+  practitioners: Practitioner[],
+  target: { patientId?: string; practitionerId?: string | null },
+): string | null => {
+  if (target.patientId) {
+    const p = patients.find((x) => x.id === target.patientId)
+    if (p?.authUserId) return p.authUserId
+  }
+  if (target.practitionerId) {
+    const pr = practitioners.find((x) => x.id === target.practitionerId)
+    if (pr?.authUserId) return pr.authUserId
+  }
+  return null
 }
 
 const emptyState = () => ({
@@ -181,7 +204,8 @@ export const useClinic = create<ClinicState>()(
         set({ hydrating: true })
         try {
           resetHydrateErrors()
-          const data = await hydrateAll(userId, userName)
+          const isPatientSurface = (import.meta.env.VITE_DEFAULT_SURFACE as string | undefined) === 'patient'
+          const data = await hydrateAll(userId, userName, isPatientSurface)
           const fetchErrors = getHydrateErrors()
 
           if (fetchErrors > 0) {
@@ -285,7 +309,7 @@ export const useClinic = create<ClinicState>()(
         void insertPrescription(rx)
         for (const dr of newReminders) void insertDoseReminder(dr)
         void updatePatient(input.patientId, { currentRemedy: remedyLabel })
-        void insertNotification(notif, null)
+        void insertNotification(notif, resolveNotificationOwner(get().patients, get().practitioners, { patientId: input.patientId }))
 
         return rx
       },
@@ -314,8 +338,7 @@ export const useClinic = create<ClinicState>()(
       pushNotification: (n) => {
         const notif: AppNotification = { ...n, id: newId(), read: false }
         set((s) => ({ notifications: [notif, ...s.notifications] }))
-        const owner = notif.surface === 'patient' ? null : get().userId
-        void insertNotification(notif, owner)
+        void insertNotification(notif, resolveNotificationOwner(get().patients, get().practitioners, { patientId: notif.patientId }))
       },
 
       markNotificationRead: (id) => {
@@ -499,7 +522,7 @@ export const useClinic = create<ClinicState>()(
         void updatePatient(input.patientId, { assignment: 'Assigned out' })
         const uid = get().userId
         if (uid) void insertNotification(webNotif, uid)
-        void insertNotification(patientNotif, null)
+        void insertNotification(patientNotif, resolveNotificationOwner(get().patients, get().practitioners, { patientId: input.patientId }))
       },
 
       addPatient: (input) => {
@@ -532,6 +555,13 @@ export const useClinic = create<ClinicState>()(
         set((s) => ({ patients: [patient, ...s.patients] }))
         void insertPatient(patient)
         return patient
+      },
+
+      linkPatientIdentity: (patientId, userId) => {
+        set((s) => ({
+          patients: s.patients.map((p) => (p.id === patientId ? { ...p, authUserId: userId } : p)),
+        }))
+        void linkPatientAuthUser(patientId, userId)
       },
 
       startConsult: (appointmentId) => {
@@ -607,7 +637,7 @@ export const useClinic = create<ClinicState>()(
           notifications: [notif, ...s.notifications],
         }))
         void insertAppointment(appt)
-        void insertNotification(notif, null)
+        void insertNotification(notif, resolveNotificationOwner(get().patients, get().practitioners, { patientId: input.patientId }))
       },
 
       updateAppointmentStatus: (id, status) => {
@@ -675,11 +705,9 @@ export const useClinic = create<ClinicState>()(
           notifications: [notif, practNotif, ...s.notifications],
         }))
         void insertCheckIn(checkIn)
-        const uid = get().userId
-        if (uid) {
-          void insertNotification(notif, uid)
-          void insertNotification(practNotif, uid)
-        }
+        const owner = resolveNotificationOwner(get().patients, get().practitioners, { practitionerId: patient?.owningPractitionerId })
+        void insertNotification(notif, owner)
+        void insertNotification(practNotif, owner)
       },
 
       updatePractitioner: (id, patch) => {

@@ -44,6 +44,7 @@ export type OutcomeKind =
 
 export interface Practitioner {
   id: string
+  authUserId?: string
   name: string
   initials: string
   role: Role
@@ -56,6 +57,7 @@ export interface Practitioner {
 
 export interface Patient {
   id: string
+  authUserId?: string
   wsCode: string
   name: string
   initials: string

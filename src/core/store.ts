@@ -261,7 +261,10 @@ export const useClinic = create<ClinicState>()(
             hydrated: true,
             hydrating: false,
             userId,
-            role: 'Owner',
+            // Every login used to be treated as Owner regardless of who
+            // actually signed in — the real per-practitioner role from the
+            // database was fetched but never read.
+            role: data.practitioners.find((p) => p.id === data.currentPractitionerId)?.role ?? 'Owner',
             offline: false,
             dbError: false,
             lastDoseResetDate: today,
@@ -645,7 +648,7 @@ export const useClinic = create<ClinicState>()(
         set((s) => ({
           patients: s.patients.map((p) => (p.id === patientId ? { ...p, authUserId: userId } : p)),
         }))
-        writeThrough(linkPatientAuthUser(patientId, userId), 'Could not link your account — try again.')
+        writeThrough(linkPatientAuthUser(patientId), 'Could not link your account — try again.')
       },
 
       startConsult: (appointmentId) => {

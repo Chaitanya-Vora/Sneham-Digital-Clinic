@@ -110,11 +110,18 @@ export async function ensurePractitioner(userId: string, userName: string): Prom
   const words = cleanName.split(' ').filter(Boolean)
   const initials = words.map(w => w[0]).join('').toUpperCase().slice(0, 2) || 'DR'
 
+  // The very first practitioner for a clinic has no one to grant them
+  // Owner, so they default to it; anyone joining an existing clinic
+  // defaults to a regular practitioner instead — otherwise every new
+  // signup would silently become a second master login.
+  const { count } = await supabase.from('practitioners').select('id', { count: 'exact', head: true })
+  const role: Practitioner['role'] = count && count > 0 ? 'Practitioner' : 'Owner'
+
   const practitioner: Practitioner = {
     id,
     name: userName,
     initials,
-    role: 'Owner',
+    role,
     specialty: 'Homeopathy',
     openCases: 0,
     remedyList: DEFAULT_PRACTITIONER_REMEDIES,
@@ -186,8 +193,12 @@ export async function insertPatient(p: Patient): Promise<boolean> {
   return true
 }
 
-export async function linkPatientAuthUser(patientId: string, userId: string): Promise<boolean> {
-  const { error } = await supabase.from('patients').update({ auth_user_id: userId }).eq('id', patientId)
+// Goes through a security-definer RPC rather than a raw update — at the
+// moment of linking, this patient row isn't yet recognized as "theirs" by
+// RLS (that's exactly what this call establishes), so the database function
+// checks auth.uid() itself and only ever allows claiming an unclaimed row.
+export async function linkPatientAuthUser(patientId: string): Promise<boolean> {
+  const { error } = await supabase.rpc('link_patient_auth', { target_patient_id: patientId })
   if (error) { console.error('linkPatientAuthUser:', error.message); return false }
   return true
 }

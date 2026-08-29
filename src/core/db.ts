@@ -779,6 +779,7 @@ function toAppCaseVisit(r: any): CaseVisit {
     sections: r.sections ?? {},
     remedy: r.remedy ?? undefined,
     outcome: r.outcome ?? undefined,
+    editedAt: r.edited_at ?? undefined,
   }
 }
 
@@ -805,6 +806,16 @@ export async function fetchCaseVisits(): Promise<CaseVisit[]> {
 export async function insertCaseVisit(v: CaseVisit): Promise<boolean> {
   const { error } = await supabase.from('case_visits').insert(toDbCaseVisit(v))
   if (error) { console.error('insertCaseVisit:', error.message); return false }
+  return true
+}
+
+export async function updateCaseVisitDb(id: string, patch: { sections?: Record<string, unknown>; remedy?: string; outcome?: string; editedAt: string }): Promise<boolean> {
+  const db: Record<string, unknown> = { edited_at: patch.editedAt }
+  if (patch.sections !== undefined) db.sections = patch.sections
+  if (patch.remedy !== undefined) db.remedy = patch.remedy
+  if (patch.outcome !== undefined) db.outcome = patch.outcome
+  const { error } = await supabase.from('case_visits').update(db).eq('id', id)
+  if (error) { console.error('updateCaseVisitDb:', error.message); return false }
   return true
 }
 

@@ -183,6 +183,7 @@ export interface CaseVisit {
   sections: Record<string, unknown>
   remedy?: string
   outcome?: string
+  editedAt?: string // ISO — set when a past visit's notes are amended after the fact
 }
 
 export type MessageSender = 'practitioner' | 'patient'

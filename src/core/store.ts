@@ -52,6 +52,7 @@ import {
   updatePractitionerDb,
   upsertCaseData,
   insertCaseVisit,
+  updateCaseVisitDb,
   insertMessage,
   markMessagesRead,
   insertCaseTemplate,
@@ -60,6 +61,7 @@ import {
 } from './db'
 
 const caseTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const caseVisitTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 export interface PublishRxInput {
   patientId: string
@@ -138,6 +140,7 @@ interface ClinicState {
   recordPayment: (appointmentId: string, fee: number, mode: Appointment['paymentMode'], status: Appointment['paymentStatus']) => void
   addDocument: (doc: ClinicDocument) => void
   snapshotCaseVisit: (patientId: string, appointmentId?: string, template?: string) => void
+  updateCaseVisit: (id: string, patch: { sections?: Record<string, unknown>; remedy?: string; outcome?: string }) => void
   sendMessage: (patientId: string, text: string, sender: MessageSender) => void
   markConvoRead: (patientId: string, sender: MessageSender) => void
   createCaseTemplate: (input: { label: string; description: string; sections: CaseSectionDef[] }) => CustomCaseTemplate
@@ -778,6 +781,20 @@ export const useClinic = create<ClinicState>()(
         }
         set((s) => ({ caseVisits: [visit, ...s.caseVisits] }))
         writeThrough(insertCaseVisit(visit), 'Visit snapshot may not have saved.')
+      },
+
+      updateCaseVisit: (id, patch) => {
+        const editedAt = new Date().toISOString()
+        set((s) => ({
+          caseVisits: s.caseVisits.map((v) => (v.id === id ? { ...v, ...patch, editedAt } : v)),
+        }))
+        const timer = caseVisitTimers.get(id)
+        if (timer) clearTimeout(timer)
+        caseVisitTimers.set(id, setTimeout(() => {
+          const visit = get().caseVisits.find((v) => v.id === id)
+          if (visit) writeThrough(updateCaseVisitDb(id, { sections: visit.sections, remedy: visit.remedy, outcome: visit.outcome, editedAt: visit.editedAt! }), 'Changes to this past visit may not have saved.')
+          caseVisitTimers.delete(id)
+        }, 1000))
       },
 
       sendMessage: (patientId, text, sender) => {

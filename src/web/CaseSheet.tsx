@@ -2,27 +2,57 @@ import { useState, useMemo, useEffect } from 'react'
 import { CheckCircle, Circle, CircleNotch, Prescription as RxIcon, FloppyDisk, CloudCheck, DeviceMobile, PencilSimpleLine, ClockCounterClockwise, NotePencil, Eye, WarningCircle, Plus } from '@phosphor-icons/react'
 import { useClinic } from '../core/store'
 import { allTemplates, type CaseTemplateName, type SectionState, getSections } from '../core/caseTemplate'
-import { Badge, Button, Card, Label, PatientNotFound } from '../design-system/ui'
+import { Badge, Button, Card, Chip, Label, PatientNotFound } from '../design-system/ui'
 import { VoiceRecorder } from '../design-system/VoiceRecorder'
 import { CaseFieldEditor, sectionHasContent, useCaseProgress, useCaseSaveStatus } from '../components/CaseFields'
 import { CaseTemplateEditorModal } from './CaseTemplateEditor'
 
-function VisitHistoryReadonly({
+function VisitHistoryPanel({
   sections,
   visit,
+  editing,
+  onSave,
 }: {
   sections: ReturnType<typeof getSections>
   visit: { sections: Record<string, unknown>; date: string; remedy?: string; outcome?: string }
+  editing: boolean
+  onSave: (sections: Record<string, SectionState>) => void
 }) {
   const [activeId, setActiveId] = useState(sections[0]?.id ?? 'chief')
+  // Local draft only exists while editing — keyed to this visit via the
+  // parent's `key={viewingVisit.id}`, so switching visits always remounts
+  // this component instead of carrying one visit's draft into another.
+  const [draft, setDraft] = useState<Record<string, SectionState>>(() => visit.sections as Record<string, SectionState>)
   const active = sections.find((s) => s.id === activeId) ?? sections[0]
-  const sectionState = (visit.sections[active.id] ?? { fields: {}, chips: {} }) as SectionState
+  const source = editing ? draft : (visit.sections as Record<string, SectionState>)
+  const sectionState = (source[active.id] ?? { fields: {}, chips: {} }) as SectionState
+
+  useEffect(() => {
+    if (editing) onSave(draft)
+    // Saves on every edit (autosave, matching the live case editor) rather
+    // than only on an explicit "done" action — nothing to lose by leaving
+    // the panel mid-edit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft])
+
+  const setField = (sectionId: string, key: string, value: string) =>
+    setDraft((d) => ({ ...d, [sectionId]: { ...(d[sectionId] ?? { fields: {}, chips: {}, done: false }), fields: { ...(d[sectionId]?.fields ?? {}), [key]: value } } }))
+
+  const toggleChip = (sectionId: string, key: string, value: string, multi: boolean) =>
+    setDraft((d) => {
+      const cur = d[sectionId] ?? { fields: {}, chips: {}, done: false }
+      const existing = cur.chips[key] ?? []
+      const next = existing.includes(value)
+        ? existing.filter((v) => v !== value)
+        : multi ? [...existing, value] : [value]
+      return { ...d, [sectionId]: { ...cur, chips: { ...cur.chips, [key]: next } } }
+    })
 
   return (
     <div className="grid grid-cols-[200px_1fr] gap-3">
       <div className="space-y-1">
         {sections.map((s) => {
-          const state = visit.sections[s.id] as SectionState | undefined
+          const state = source[s.id] as SectionState | undefined
           const hasContent = sectionHasContent(state)
           return (
             <button
@@ -44,28 +74,47 @@ function VisitHistoryReadonly({
         {active.fields.map((f) => {
           if (f.type === 'chips') {
             const selected = (sectionState?.chips?.[f.key] ?? []) as string[]
-            if (!selected.length) return null
+            if (!editing && !selected.length) return null
             return (
               <div key={f.key}>
                 <Label>{f.label}</Label>
-                <div className="mt-1.5 flex flex-wrap gap-1.5">
-                  {selected.map((v) => (
-                    <span key={v} className="rounded-pill bg-tint px-2.5 py-1 text-[12px] font-medium text-body">{v}</span>
-                  ))}
-                </div>
+                {editing ? (
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {(f.options ?? []).map((opt) => (
+                      <Chip key={opt} selected={selected.includes(opt)} onClick={() => toggleChip(active.id, f.key, opt, !!f.multi)}>
+                        {opt}
+                      </Chip>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {selected.map((v) => (
+                      <span key={v} className="rounded-pill bg-tint px-2.5 py-1 text-[12px] font-medium text-body">{v}</span>
+                    ))}
+                  </div>
+                )}
               </div>
             )
           }
           const val = (sectionState?.fields?.[f.key] ?? '') as string
-          if (!val.trim()) return null
+          if (!editing && !val.trim()) return null
           return (
             <div key={f.key}>
               <Label>{f.label}</Label>
-              <p className="mt-1 whitespace-pre-wrap rounded-[10px] bg-tint-pale px-3 py-2 text-[13.5px] leading-relaxed text-body">{val}</p>
+              {editing ? (
+                <textarea
+                  value={val}
+                  onChange={(e) => setField(active.id, f.key, e.target.value)}
+                  rows={3}
+                  className="mt-1.5 w-full resize-y rounded-[10px] border border-border bg-surface px-3 py-2 text-[13.5px] leading-relaxed text-body outline-none focus:border-green-border"
+                />
+              ) : (
+                <p className="mt-1 whitespace-pre-wrap rounded-[10px] bg-tint-pale px-3 py-2 text-[13.5px] leading-relaxed text-body">{val}</p>
+              )}
             </div>
           )
         })}
-        {active.fields.every((f) => {
+        {!editing && active.fields.every((f) => {
           if (f.type === 'chips') return !((sectionState?.chips?.[f.key] ?? []) as string[]).length
           return !((sectionState?.fields?.[f.key] ?? '') as string).trim()
         }) && (
@@ -104,7 +153,9 @@ export function CaseSheet({
   const [showTemplatePicker, setShowTemplatePicker] = useState(false)
   const [tab, setTab] = useState<'edit' | 'history'>('edit')
   const [viewingVisitId, setViewingVisitId] = useState<string | null>(null)
+  const [editingVisit, setEditingVisit] = useState(false)
   const [editingTemplate, setEditingTemplate] = useState<'new' | string | null>(null)
+  const updateCaseVisit = useClinic((s) => s.updateCaseVisit)
 
   useEffect(() => {
     if (!caseState) ensureCase(patientId)
@@ -324,7 +375,7 @@ export function CaseSheet({
                 return (
                   <button
                     key={v.id}
-                    onClick={() => setViewingVisitId(v.id)}
+                    onClick={() => { setViewingVisitId(v.id); setEditingVisit(false) }}
                     className={`flex w-full flex-col rounded-[12px] border px-4 py-3 text-left transition ${
                       isActive
                         ? 'border-green-border bg-surface shadow-card'
@@ -356,7 +407,7 @@ export function CaseSheet({
               <div className="flex flex-col items-center justify-center py-16 text-center">
                 <Eye size={36} className="text-border-dash" />
                 <p className="mt-3 text-[14px] font-medium text-muted">Select a visit to view notes</p>
-                <p className="mt-1 text-[12.5px] text-faint">Past case notes are read-only snapshots of what was recorded during that visit.</p>
+                <p className="mt-1 text-[12.5px] text-faint">Past visits stay in your permanent record — open one to review or amend it.</p>
               </div>
             ) : (
               <>
@@ -368,13 +419,26 @@ export function CaseSheet({
                     <p className="text-[12.5px] text-muted">
                       {practitioners.find((p) => p.id === viewingVisit.practitionerId)?.name ?? 'Unknown'}
                       {viewingVisit.remedy && <> &middot; {viewingVisit.remedy}</>}
+                      {viewingVisit.editedAt && (
+                        <> &middot; amended {new Date(viewingVisit.editedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</>
+                      )}
                     </p>
                   </div>
-                  <Badge tone="neutral">
-                    <Eye size={13} /> Read-only
-                  </Badge>
+                  <Button
+                    variant={editingVisit ? 'primary' : 'ghost'}
+                    size="sm"
+                    onClick={() => setEditingVisit((v) => !v)}
+                  >
+                    {editingVisit ? <><CheckCircle size={14} weight="fill" /> Done</> : <><PencilSimpleLine size={14} /> Amend</>}
+                  </Button>
                 </div>
-                <VisitHistoryReadonly sections={viewingSections} visit={viewingVisit} />
+                <VisitHistoryPanel
+                  key={viewingVisit.id}
+                  sections={viewingSections}
+                  visit={viewingVisit}
+                  editing={editingVisit}
+                  onSave={(newSections) => updateCaseVisit(viewingVisit.id, { sections: newSections })}
+                />
               </>
             )}
           </Card>

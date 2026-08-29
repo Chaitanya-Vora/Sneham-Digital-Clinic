@@ -28,9 +28,14 @@ export function VideoConsult({ patientName, practitionerName, appointmentId, onE
 
   const roomName = `sneham-consult-${appointmentId.replace(/[^a-zA-Z0-9]/g, '')}`
   const isNative = Capacitor.isNativePlatform()
+  const hasOpenedRef = useRef(false)
 
   useEffect(() => {
-    if (isNative) {
+    // Guards against React StrictMode's mount→cleanup→mount in dev, which
+    // would otherwise call Browser.open() twice and join the room twice —
+    // two simultaneous audio streams, an instant feedback howl.
+    if (isNative && !hasOpenedRef.current) {
+      hasOpenedRef.current = true
       Browser.open({ url: `https://meet.jit.si/${roomName}` }).catch(() => {})
       setStage('live')
       startTimeRef.current = Date.now()
@@ -75,6 +80,7 @@ export function VideoConsult({ patientName, practitionerName, appointmentId, onE
 
   const endCall = () => {
     setShowEndConfirm(false)
+    if (isNative) void Browser.close().catch(() => {})
     apiRef.current?.executeCommand('hangup')
     handleCallEnd()
   }
@@ -113,9 +119,11 @@ export function VideoConsult({ patientName, practitionerName, appointmentId, onE
         )}
       </div>
 
-      {/* Jitsi meeting embed */}
+      {/* Jitsi meeting embed — native joins via the external browser tab
+          instead (see the effect above); mounting the iframe here too would
+          be a second, simultaneous join to the same room. */}
       <div className="flex-1">
-        {stage === 'waiting' && (
+        {stage === 'waiting' && !isNative && (
           <div className="flex h-full flex-col items-center justify-center">
             <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-white/10">
               <User size={40} weight="fill" className="text-white/50" />
@@ -125,6 +133,15 @@ export function VideoConsult({ patientName, practitionerName, appointmentId, onE
             <div className="mt-4 h-6 w-6 animate-spin rounded-full border-2 border-white/20 border-t-white/60" />
           </div>
         )}
+        {isNative ? (
+          <div className="flex h-full flex-col items-center justify-center px-8 text-center">
+            <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-white/10">
+              <VideoCamera size={40} weight="fill" className="text-white/50" />
+            </div>
+            <p className="mt-4 font-display text-[18px] font-semibold text-white">Call is open in your browser</p>
+            <p className="mt-1 text-[14px] text-white/40">Switch back here and tap Back or End call when you're done.</p>
+          </div>
+        ) : (
         <div className={`h-full w-full ${stage === 'waiting' ? 'absolute inset-0 opacity-0' : ''}`}>
           <JitsiMeeting
             domain="meet.jit.si"
@@ -163,6 +180,7 @@ export function VideoConsult({ patientName, practitionerName, appointmentId, onE
             }}
           />
         </div>
+        )}
       </div>
 
       {/* Floating end-call button */}

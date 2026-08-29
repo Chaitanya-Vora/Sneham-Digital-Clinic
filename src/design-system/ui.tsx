@@ -10,7 +10,7 @@ import { haptic } from './haptics'
 // ── Button ──
 type BtnVariant = 'primary' | 'accent' | 'ghost' | 'quiet' | 'danger'
 const btnBase =
-  'inline-flex items-center justify-center gap-2 font-display font-semibold rounded-pill transition active:scale-[0.97] disabled:opacity-40 disabled:pointer-events-none whitespace-nowrap'
+  'inline-flex items-center justify-center gap-2 font-display font-semibold rounded-pill transition active:scale-[0.97] disabled:opacity-60 disabled:pointer-events-none whitespace-nowrap'
 const btnVariants: Record<BtnVariant, string> = {
   primary: 'bg-brand text-screen hover:bg-[#37522f] shadow-cta',
   accent: 'bg-accent text-white hover:bg-accent-deep shadow-float',

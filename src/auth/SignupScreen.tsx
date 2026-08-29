@@ -9,7 +9,7 @@ interface Props {
 }
 
 export function SignupScreen({ onSwitch }: Props) {
-  const { signUp, signInWithGoogle } = useAuth()
+  const { signUp, signInWithGoogle, oauthError } = useAuth()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -182,20 +182,20 @@ export function SignupScreen({ onSwitch }: Props) {
             )}
           </div>
 
-          {error && (
+          {(error || oauthError) && (
             <motion.div
               initial={{ opacity: 0, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
               className="rounded-[8px] border border-danger/20 bg-danger/5 px-3 py-2.5 text-[13px] text-danger"
             >
-              {error}
+              {error || oauthError}
             </motion.div>
           )}
 
           <button
             type="submit"
             disabled={!canSubmit || busy}
-            className="flex w-full items-center justify-center gap-2 rounded-[12px] bg-brand py-3.5 text-[15px] font-semibold text-white shadow-cta transition hover:bg-accent-deep disabled:opacity-50"
+            className="flex w-full items-center justify-center gap-2 rounded-[12px] bg-brand py-3.5 text-[15px] font-semibold text-white shadow-cta transition hover:bg-accent-deep disabled:opacity-60"
           >
             {busy ? (
               <Spinner size={20} className="animate-spin" />

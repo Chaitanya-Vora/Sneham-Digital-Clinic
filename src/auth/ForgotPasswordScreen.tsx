@@ -107,7 +107,7 @@ export function ForgotPasswordScreen({ onSwitch }: Props) {
           <button
             type="submit"
             disabled={!canSubmit || busy}
-            className="flex w-full items-center justify-center gap-2 rounded-[12px] bg-brand py-3.5 text-[15px] font-semibold text-white shadow-cta transition hover:bg-accent-deep disabled:opacity-50"
+            className="flex w-full items-center justify-center gap-2 rounded-[12px] bg-brand py-3.5 text-[15px] font-semibold text-white shadow-cta transition hover:bg-accent-deep disabled:opacity-60"
           >
             {busy ? (
               <Spinner size={20} className="animate-spin" />

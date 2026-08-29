@@ -24,6 +24,7 @@ import type {
   TimeBlock,
 } from './types'
 import { type CaseState, emptyCase } from './caseTemplate'
+import { useToasts } from '../design-system/toast'
 import {
   newId,
   hydrateAll,
@@ -167,6 +168,17 @@ const resolveNotificationOwner = (
   return null
 }
 
+// Every write below updates the UI instantly (optimistic) and saves in the
+// background — but a failed save used to vanish silently, so a lost network
+// connection looked identical to a successful one. This surfaces it as a
+// toast without blocking the UI on the write. useToasts is itself a Zustand
+// store, so it's reachable from here with no React plumbing needed.
+function writeThrough(promise: Promise<boolean>, failureMessage: string) {
+  void promise.then((ok) => {
+    if (!ok) useToasts.getState().show({ title: 'Could not save', message: failureMessage })
+  })
+}
+
 const emptyState = () => ({
   practitioners: [] as Practitioner[],
   patients: [] as Patient[],
@@ -306,7 +318,7 @@ export const useClinic = create<ClinicState>()(
           notifications: [notif, ...s.notifications],
         }))
 
-        void insertPrescription(rx)
+        writeThrough(insertPrescription(rx), 'Your prescription may not have saved.')
         for (const dr of newReminders) void insertDoseReminder(dr)
         void updatePatient(input.patientId, { currentRemedy: remedyLabel })
         void insertNotification(notif, resolveNotificationOwner(get().patients, get().practitioners, { patientId: input.patientId }))
@@ -323,7 +335,7 @@ export const useClinic = create<ClinicState>()(
             d.id === id ? { ...d, loggedToday: next } : d,
           ),
         }))
-        void updateDoseReminderDb(id, { logged_today: next })
+        writeThrough(updateDoseReminderDb(id, { logged_today: next }), 'Dose log may not have saved.')
       },
 
       setRemindersEnabled: (prescriptionId, enabled) => {
@@ -332,7 +344,7 @@ export const useClinic = create<ClinicState>()(
             r.id === prescriptionId ? { ...r, remindersEnabled: enabled } : r,
           ),
         }))
-        void updatePrescriptionDb(prescriptionId, { reminders_enabled: enabled })
+        writeThrough(updatePrescriptionDb(prescriptionId, { reminders_enabled: enabled }), 'Reminder setting may not have saved.')
       },
 
       pushNotification: (n) => {
@@ -369,14 +381,14 @@ export const useClinic = create<ClinicState>()(
             n.kind === 'handoff' && n.pending ? { ...n, pending: false, read: true } : n,
           ),
         }))
-        void updateHandoffDb(id, { status: 'accepted' })
+        writeThrough(updateHandoffDb(id, { status: 'accepted' }), 'Your response may not have saved.')
       },
 
       declineHandoff: (id) => {
         set((s) => ({
           handoffs: s.handoffs.map((h) => (h.id === id ? { ...h, status: 'declined' } : h)),
         }))
-        void updateHandoffDb(id, { status: 'declined' })
+        writeThrough(updateHandoffDb(id, { status: 'declined' }), 'Your response may not have saved.')
       },
 
       ensureCase: (patientId) =>
@@ -473,7 +485,7 @@ export const useClinic = create<ClinicState>()(
             p.id === input.patientId ? { ...p, lastOutcome: input.outcome } : p,
           ),
         }))
-        void insertOutcome(outcome)
+        writeThrough(insertOutcome(outcome), 'Outcome may not have saved.')
         void updatePatient(input.patientId, { lastOutcome: input.outcome })
       },
 
@@ -518,7 +530,7 @@ export const useClinic = create<ClinicState>()(
           ),
           notifications: [webNotif, patientNotif, ...s.notifications],
         }))
-        void insertHandoff(handoff)
+        writeThrough(insertHandoff(handoff), 'Handoff may not have sent.')
         void updatePatient(input.patientId, { assignment: 'Assigned out' })
         const uid = get().userId
         if (uid) void insertNotification(webNotif, uid)
@@ -553,7 +565,7 @@ export const useClinic = create<ClinicState>()(
           regularMedication: '',
         }
         set((s) => ({ patients: [patient, ...s.patients] }))
-        void insertPatient(patient)
+        writeThrough(insertPatient(patient), 'Patient may not have saved — check your connection.')
         return patient
       },
 
@@ -561,7 +573,7 @@ export const useClinic = create<ClinicState>()(
         set((s) => ({
           patients: s.patients.map((p) => (p.id === patientId ? { ...p, authUserId: userId } : p)),
         }))
-        void linkPatientAuthUser(patientId, userId)
+        writeThrough(linkPatientAuthUser(patientId, userId), 'Could not link your account — try again.')
       },
 
       startConsult: (appointmentId) => {
@@ -570,7 +582,7 @@ export const useClinic = create<ClinicState>()(
             a.id === appointmentId ? { ...a, status: 'In consult' as const } : a,
           ),
         }))
-        void updateAppointmentDb(appointmentId, { status: 'In consult' })
+        writeThrough(updateAppointmentDb(appointmentId, { status: 'In consult' }), 'Consult status may not have saved.')
       },
 
       endConsult: (appointmentId) => {
@@ -580,7 +592,7 @@ export const useClinic = create<ClinicState>()(
             a.id === appointmentId ? { ...a, status: 'Seen' as const } : a,
           ),
         }))
-        void updateAppointmentDb(appointmentId, { status: 'Seen' })
+        writeThrough(updateAppointmentDb(appointmentId, { status: 'Seen' }), 'Consult status may not have saved.')
         if (appt) get().snapshotCaseVisit(appt.patientId, appointmentId)
       },
 
@@ -603,7 +615,7 @@ export const useClinic = create<ClinicState>()(
           ),
           notifications: appt ? [notif, ...s.notifications] : s.notifications,
         }))
-        void updateAppointmentDb(appointmentId, { status: 'Seen' })
+        writeThrough(updateAppointmentDb(appointmentId, { status: 'Seen' }), 'No-show may not have saved.')
         if (appt) {
           const uid = get().userId
           if (uid) void insertNotification(notif, uid)
@@ -636,7 +648,7 @@ export const useClinic = create<ClinicState>()(
           appointments: [appt, ...s.appointments],
           notifications: [notif, ...s.notifications],
         }))
-        void insertAppointment(appt)
+        writeThrough(insertAppointment(appt), 'Appointment may not have saved.')
         void insertNotification(notif, resolveNotificationOwner(get().patients, get().practitioners, { patientId: input.patientId }))
       },
 
@@ -644,25 +656,25 @@ export const useClinic = create<ClinicState>()(
         set((s) => ({
           appointments: s.appointments.map((a) => (a.id === id ? { ...a, status } : a)),
         }))
-        void updateAppointmentDb(id, { status })
+        writeThrough(updateAppointmentDb(id, { status }), 'Status change may not have saved.')
       },
 
       rescheduleAppointment: (id, time) => {
         set((s) => ({
           appointments: s.appointments.map((a) => (a.id === id ? { ...a, time } : a)),
         }))
-        void updateAppointmentDb(id, { time })
+        writeThrough(updateAppointmentDb(id, { time }), 'Reschedule may not have saved.')
       },
 
       addTimeBlock: (input) => {
         const block: TimeBlock = { ...input, id: newId() }
         set((s) => ({ timeBlocks: [...s.timeBlocks, block] }))
-        void insertTimeBlock(block)
+        writeThrough(insertTimeBlock(block), 'Blocked time may not have saved.')
       },
 
       removeTimeBlock: (id) => {
         set((s) => ({ timeBlocks: s.timeBlocks.filter((b) => b.id !== id) }))
-        void deleteTimeBlockDb(id)
+        writeThrough(deleteTimeBlockDb(id), 'Removing the block may not have saved.')
       },
 
       submitCheckIn: (input) => {
@@ -704,7 +716,7 @@ export const useClinic = create<ClinicState>()(
           checkIns: [...s.checkIns, checkIn],
           notifications: [notif, practNotif, ...s.notifications],
         }))
-        void insertCheckIn(checkIn)
+        writeThrough(insertCheckIn(checkIn), 'Check-in may not have saved.')
         const owner = resolveNotificationOwner(get().patients, get().practitioners, { practitionerId: patient?.owningPractitionerId })
         void insertNotification(notif, owner)
         void insertNotification(practNotif, owner)
@@ -722,7 +734,7 @@ export const useClinic = create<ClinicState>()(
             return updated
           }),
         }))
-        void updatePractitionerDb(id, patch)
+        writeThrough(updatePractitionerDb(id, patch), 'Profile changes may not have saved.')
       },
 
       assignPatient: (patientId, practitionerId) => {
@@ -731,7 +743,7 @@ export const useClinic = create<ClinicState>()(
             p.id === patientId ? { ...p, owningPractitionerId: practitionerId, assignment: 'Assigned to me' as const } : p,
           ),
         }))
-        void updatePatient(patientId, { owningPractitionerId: practitionerId, assignment: 'Assigned to me' })
+        writeThrough(updatePatient(patientId, { owningPractitionerId: practitionerId, assignment: 'Assigned to me' }), 'Assignment may not have saved.')
       },
 
       addDocument: (doc) => {
@@ -757,7 +769,7 @@ export const useClinic = create<ClinicState>()(
           remedy: patient?.currentRemedy ?? undefined,
         }
         set((s) => ({ caseVisits: [visit, ...s.caseVisits] }))
-        void insertCaseVisit(visit)
+        writeThrough(insertCaseVisit(visit), 'Visit snapshot may not have saved.')
       },
 
       sendMessage: (patientId, text, sender) => {
@@ -771,7 +783,7 @@ export const useClinic = create<ClinicState>()(
           read: false,
         }
         set((s) => ({ messages: [...s.messages, msg] }))
-        void insertMessage(msg)
+        writeThrough(insertMessage(msg), 'Message may not have sent.')
       },
 
       markConvoRead: (patientId, sender) => {
@@ -790,7 +802,10 @@ export const useClinic = create<ClinicState>()(
             a.id === appointmentId ? { ...a, fee, paymentMode: mode, paymentStatus: status, paidAt } : a,
           ),
         }))
-        void updateAppointmentDb(appointmentId, { fee, payment_mode: mode, payment_status: status, paid_at: paidAt ?? null })
+        writeThrough(
+          updateAppointmentDb(appointmentId, { fee, payment_mode: mode, payment_status: status, paid_at: paidAt ?? null }),
+          'Payment record may not have saved.',
+        )
       },
 
       resetDailyDoses: () => {

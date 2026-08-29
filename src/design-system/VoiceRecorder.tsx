@@ -4,16 +4,17 @@ import { Microphone, Stop, Play, Pause, Trash, Paperclip } from '@phosphor-icons
 type Status = 'idle' | 'recording' | 'recorded' | 'denied'
 
 // A genuinely working recorder: getUserMedia + MediaRecorder. Produces a
-// playable clip. (Audio lives in-session — persistence arrives with Supabase.)
-export function VoiceRecorder({ onAttach }: { onAttach?: (seconds: number) => void }) {
+// playable clip and hands the actual audio Blob to onAttach for the caller
+// to persist — this component doesn't know how or where to store it.
+export function VoiceRecorder({ onAttach }: { onAttach?: (seconds: number, blob: Blob) => void }) {
   const [status, setStatus] = useState<Status>('idle')
   const [seconds, setSeconds] = useState(0)
   const [url, setUrl] = useState<string | null>(null)
   const [playing, setPlaying] = useState(false)
-  const [attached, setAttached] = useState(false)
 
   const mediaRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
+  const blobRef = useRef<Blob | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const timerRef = useRef<number | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -36,6 +37,7 @@ export function VoiceRecorder({ onAttach }: { onAttach?: (seconds: number) => vo
       mr.ondataavailable = (e) => e.data.size > 0 && chunksRef.current.push(e.data)
       mr.onstop = () => {
         const blob = new Blob(chunksRef.current, { type: mr.mimeType || 'audio/webm' })
+        blobRef.current = blob
         setUrl(URL.createObjectURL(blob))
         setStatus('recorded')
         stream.getTracks().forEach((t) => t.stop())
@@ -43,7 +45,6 @@ export function VoiceRecorder({ onAttach }: { onAttach?: (seconds: number) => vo
       mr.start()
       mediaRef.current = mr
       setSeconds(0)
-      setAttached(false)
       setStatus('recording')
       timerRef.current = window.setInterval(() => setSeconds((s) => s + 1), 1000)
     } catch {
@@ -62,7 +63,6 @@ export function VoiceRecorder({ onAttach }: { onAttach?: (seconds: number) => vo
     setSeconds(0)
     setStatus('idle')
     setPlaying(false)
-    setAttached(false)
   }
 
   function togglePlay() {
@@ -135,14 +135,15 @@ export function VoiceRecorder({ onAttach }: { onAttach?: (seconds: number) => vo
               </button>
               <button
                 onClick={() => {
-                  setAttached(true)
-                  onAttach?.(seconds)
+                  if (!blobRef.current) return
+                  onAttach?.(seconds, blobRef.current)
+                  // Reset immediately so another note can be recorded right
+                  // away — attaching one voice note shouldn't block a second.
+                  reset()
                 }}
-                className={`flex h-9 items-center gap-1.5 rounded-pill px-3 text-[12.5px] font-semibold ${
-                  attached ? 'bg-tint text-brand' : 'bg-brand text-screen'
-                }`}
+                className="flex h-9 items-center gap-1.5 rounded-pill bg-brand px-3 text-[12.5px] font-semibold text-screen"
               >
-                <Paperclip size={14} /> {attached ? 'Attached' : 'Attach'}
+                <Paperclip size={14} /> Attach
               </button>
             </div>
           )}

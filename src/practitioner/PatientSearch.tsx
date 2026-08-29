@@ -50,10 +50,12 @@ export function PatientSearchSheet({
   open,
   onClose,
   onSelect,
+  onAddPatient,
 }: {
   open: boolean
   onClose: () => void
   onSelect: (patientId: string) => void
+  onAddPatient: () => void
 }) {
   const patients = useClinic((s) => s.patients)
   const [query, setQuery] = useState('')
@@ -115,6 +117,9 @@ export function PatientSearchSheet({
                 </Pressable>
               )}
             </div>
+            <Pressable ariaLabel="add patient" hap="tick" onClick={onAddPatient} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-brand">
+              <Plus size={18} weight="bold" />
+            </Pressable>
           </div>
 
           {/* label */}
@@ -554,6 +559,8 @@ export function AddPatientSheet({
   const [phone, setPhone] = useState('')
   const [complaint, setComplaint] = useState('')
   const [location, setLocation] = useState('Bandra')
+  const [nameError, setNameError] = useState('')
+  const [ageError, setAgeError] = useState('')
 
   const reset = () => {
     setName('')
@@ -562,10 +569,16 @@ export function AddPatientSheet({
     setPhone('')
     setComplaint('')
     setLocation('Bandra')
+    setNameError('')
+    setAgeError('')
   }
 
   const onRegister = () => {
-    if (!name.trim() || !age.trim()) return
+    const nameOk = name.trim().length > 0
+    const ageOk = age.trim().length > 0
+    setNameError(nameOk ? '' : 'Name is required')
+    setAgeError(ageOk ? '' : 'Age is required')
+    if (!nameOk || !ageOk) { haptic('warn'); return }
     const patient = addPatient({
       name: name.trim(),
       age: parseInt(age, 10) || 0,
@@ -590,13 +603,28 @@ export function AddPatientSheet({
       <div className="mt-3 space-y-3">
         <div>
           <Label>Name</Label>
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" className={`mt-1.5 ${inputCls}`} data-selectable="true" />
+          <input
+            value={name}
+            onChange={(e) => { setName(e.target.value); if (nameError) setNameError('') }}
+            placeholder="Full name"
+            className={`mt-1.5 ${inputCls} ${nameError ? 'border-danger' : ''}`}
+            data-selectable="true"
+          />
+          {nameError && <p className="mt-1 text-[12px] text-danger">{nameError}</p>}
         </div>
 
         <div className="flex gap-3">
           <div className="flex-1">
             <Label>Age</Label>
-            <input value={age} onChange={(e) => setAge(e.target.value)} type="number" placeholder="Age" className={`mt-1.5 ${inputCls}`} data-selectable="true" />
+            <input
+              value={age}
+              onChange={(e) => { setAge(e.target.value); if (ageError) setAgeError('') }}
+              type="number"
+              placeholder="Age"
+              className={`mt-1.5 ${inputCls} ${ageError ? 'border-danger' : ''}`}
+              data-selectable="true"
+            />
+            {ageError && <p className="mt-1 text-[12px] text-danger">{ageError}</p>}
           </div>
           <div className="flex-[2]">
             <Label>Sex</Label>

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
-import { CaretLeft, CheckCircle, CircleNotch, Prescription as RxIcon, WarningCircle } from '@phosphor-icons/react'
+import { CaretLeft, CheckCircle, CircleNotch, Microphone, Prescription as RxIcon, WarningCircle } from '@phosphor-icons/react'
 import { useClinic } from '../core/store'
+import { uploadDocument } from '../core/db'
 import { CASE_TEMPLATES, type CaseTemplateName, getSections } from '../core/caseTemplate'
 import { Button, Label } from '../design-system/ui'
 import { VoiceRecorder } from '../design-system/VoiceRecorder'
@@ -19,6 +20,8 @@ export function MobileCaseSheet({
   const patient = useClinic((s) => s.patients.find((p) => p.id === patientId))
   const ensureCase = useClinic((s) => s.ensureCase)
   const markDone = useClinic((s) => s.markSectionDone)
+  const addDocument = useClinic((s) => s.addDocument)
+  const voiceNotes = useClinic((s) => s.documents.filter((d) => d.patientId === patientId && d.format === 'WEBM'))
   const caseState = useClinic((s) => s.caseData[patientId])
   const [template, setTemplate] = useState<CaseTemplateName>('chronic')
   const { done, total, doneIds } = useCaseProgress(patientId, template)
@@ -104,8 +107,33 @@ export function MobileCaseSheet({
           <CaseFieldEditor key={f.key} patientId={patientId} sectionId={active.id} field={f} />
         ))}
         <div>
-          <Label>Voice note</Label>
-          <div className="mt-2"><VoiceRecorder onAttach={(sec) => toast({ title: `Voice note attached · ${sec}s` })} /></div>
+          <Label>Voice notes</Label>
+          {voiceNotes.length > 0 && (
+            <div className="mt-2 space-y-1.5">
+              {voiceNotes.map((d) => (
+                <div key={d.id} className="flex items-center gap-2 rounded-[12px] border border-border bg-surface px-3 py-2">
+                  <Microphone size={14} className="text-brand" />
+                  <span className="flex-1 truncate text-[12.5px] font-medium text-ink">{d.name}</span>
+                  <span className="shrink-0 text-[11px] text-faint">{d.date}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="mt-2">
+            <VoiceRecorder
+              onAttach={async (sec, blob) => {
+                const dateLabel = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
+                const file = new File([blob], `Voice note ${dateLabel}.webm`, { type: blob.type || 'audio/webm' })
+                const doc = await uploadDocument(file, patientId)
+                if (doc) {
+                  addDocument(doc)
+                  toast({ title: `Voice note attached · ${sec}s` })
+                } else {
+                  toast({ title: 'Could not save voice note', message: 'Check your connection and try again.' })
+                }
+              }}
+            />
+          </div>
         </div>
       </div>
 

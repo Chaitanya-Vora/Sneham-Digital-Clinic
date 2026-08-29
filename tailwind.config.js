@@ -43,6 +43,21 @@ export default {
         display: ['Outfit', 'system-ui', 'sans-serif'],
         body: ['"Source Sans 3"', 'system-ui', 'sans-serif'],
       },
+      // A real type scale, so new screens have one to reach for instead of
+      // inventing another one-off text-[Npx]. Names are chosen to avoid any
+      // collision with the color tokens above — text-body/text-ink/etc.
+      // already mean a color, and fontSize and color share the `text-*`
+      // utility namespace in Tailwind.
+      fontSize: {
+        hero: ['28px', { lineHeight: '1.15' }],
+        h1: ['22px', { lineHeight: '1.2' }],
+        h2: ['18px', { lineHeight: '1.3' }],
+        h3: ['15px', { lineHeight: '1.4' }],
+        paragraph: ['14px', { lineHeight: '1.5' }],
+        small: ['13px', { lineHeight: '1.5' }],
+        label: ['12px', { lineHeight: '1.4' }],
+        micro: ['11px', { lineHeight: '1.4' }],
+      },
       borderRadius: {
         pill: '999px',
       },

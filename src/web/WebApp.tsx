@@ -415,7 +415,7 @@ function TodayView({ onOpenPatient, onStartVideo }: { onOpenPatient: (id: string
                 </div>
                 {a.type === 'Video' && (
                   <button
-                    onClick={(e) => { e.stopPropagation(); onStartVideo(a.id) }}
+                    onClick={(e) => { e.stopPropagation(); useClinic.getState().startConsult(a.id); onStartVideo(a.id) }}
                     className="flex items-center gap-1.5 rounded-pill bg-brand px-3 py-1.5 text-[12px] font-semibold text-white transition hover:bg-accent-deep"
                   >
                     Join call

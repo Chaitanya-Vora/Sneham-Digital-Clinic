@@ -35,6 +35,8 @@ export function MobileFollowUp({
   const [note, setNote] = useState(patient?.currentRemedy ? `Continue ${patient.currentRemedy}; review in two weeks.` : '')
   const [handoff, setHandoff] = useState(false)
   const [toId, setToId] = useState(practitioners[0]?.id ?? '')
+  const [handoffReason, setHandoffReason] = useState('')
+  const [coveringUntilDate, setCoveringUntilDate] = useState(addDaysISO(todayISO(), 7))
   const [saved, setSaved] = useState(false)
 
   if (!patient) return (
@@ -122,7 +124,7 @@ export function MobileFollowUp({
       {/* handoff sheet */}
       <BottomSheet open={handoff} onClose={() => setHandoff(false)}>
         <div className="font-display text-[17px] font-bold text-ink">Hand off {patient.name}</div>
-        <div className="mt-0.5 text-[12.5px] text-muted">Ownership stays with you · cover reverts in 7 days.</div>
+        <div className="mt-0.5 text-[12.5px] text-muted">Ownership stays with you while someone else covers.</div>
         <div className="mt-3 space-y-2">
           {practitioners.map((p) => (
             <button
@@ -140,16 +142,36 @@ export function MobileFollowUp({
             </button>
           ))}
         </div>
+        <div className="mt-3">
+          <Label>Covering until</Label>
+          <input
+            type="date"
+            value={coveringUntilDate}
+            min={addDaysISO(todayISO(), 1)}
+            onChange={(e) => setCoveringUntilDate(e.target.value)}
+            className="mt-1.5 w-full rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-[13px] text-body outline-none focus:border-green-border"
+          />
+        </div>
+        <div className="mt-3">
+          <Label>Reason for handoff</Label>
+          <input
+            value={handoffReason}
+            onChange={(e) => setHandoffReason(e.target.value)}
+            placeholder="e.g. On leave next week"
+            className="mt-1.5 w-full rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-[13px] text-body outline-none focus:border-green-border"
+          />
+        </div>
         <Button
           variant="primary"
           className="mt-4 w-full"
+          disabled={!handoffReason.trim()}
           onClick={() => {
             createHandoff({
               patientId,
               fromId: doctorId,
               toId,
-              coveringUntil: formatDayLabel(addDaysISO(todayISO(), 7)),
-              note: { currentRemedy: patient.currentRemedy ?? '—', caseStatus: `${outcome} at last review.`, reason: 'Covering the follow-up.', watchFor: '' },
+              coveringUntil: formatDayLabel(coveringUntilDate),
+              note: { currentRemedy: patient.currentRemedy ?? '—', caseStatus: `${outcome} at last review.`, reason: handoffReason.trim(), watchFor: note },
             })
             setHandoff(false)
             onDone()

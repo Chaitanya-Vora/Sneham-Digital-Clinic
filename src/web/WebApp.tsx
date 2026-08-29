@@ -354,12 +354,19 @@ export function WebApp() {
 
 // ── TODAY ──
 function TodayView({ onOpenPatient, onStartVideo }: { onOpenPatient: (id: string) => void; onStartVideo: (apptId: string) => void }) {
-  const appts = useClinic((s) => s.appointments)
+  const allAppts = useClinic((s) => s.appointments)
   const patients = useClinic((s) => s.patients)
+  const role = useClinic((s) => s.role)
+  const myId = useClinic((s) => s.currentPractitionerId)
+  const practitioners = useClinic((s) => s.practitioners)
   const toast = useToast()
   const [billingApptId, setBillingApptId] = useState<string | null>(null)
   const inr = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`
   const fmt = (n: number) => String(Math.round(n))
+  // Today's own schedule is always scoped to the logged-in practitioner —
+  // an Owner's Today is her own calendar first, not the whole clinic's
+  // appointments merged into one list. The team rollup below covers the rest.
+  const appts = allAppts.filter((a) => a.practitionerId === myId)
   const todayAppts = appts.filter((a) => a.date === todayISO())
   const seenToday = todayAppts.filter((a) => a.status === 'Seen' || a.status === 'In consult').length
   const remainingToday = todayAppts.filter((a) => a.status === 'Upcoming' || a.status === 'Waiting' || a.status === 'New').length
@@ -369,6 +376,8 @@ function TodayView({ onOpenPatient, onStartVideo }: { onOpenPatient: (id: string
   const revenueToday = todayAppts.reduce((sum, a) => sum + (a.paymentStatus === 'paid' ? (a.fee ?? CONSULT_FEE) : 0), 0)
   const paidCount = todayAppts.filter((a) => a.paymentStatus === 'paid').length
   const avgValue = paidCount > 0 ? Math.round(revenueToday / paidCount) : 0
+  const team = practitioners.filter((p) => p.id !== myId)
+  const teamToday = allAppts.filter((a) => a.date === todayISO() && a.practitionerId !== myId)
   const stats = [
     { label: "Today's appointments", num: todayAppts.length, format: fmt, sub: `${remainingToday} remaining` },
     { label: 'Patients seen', num: seenToday, format: fmt, sub: newToday > 0 ? `${newToday} new` : 'today' },
@@ -452,6 +461,51 @@ function TodayView({ onOpenPatient, onStartVideo }: { onOpenPatient: (id: string
           })}
         </motion.div>
       </Card>
+
+      {role === 'Owner' && team.length > 0 && (
+        <Card className="p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="font-display text-[16px] font-bold text-ink">Your team today</h2>
+            <Badge tone="neutral">{teamToday.length} appointment{teamToday.length !== 1 ? 's' : ''}</Badge>
+          </div>
+          <div className="space-y-4">
+            {team.map((p) => {
+              const rows = teamToday.filter((a) => a.practitionerId === p.id)
+              return (
+                <div key={p.id}>
+                  <div className="mb-1.5 flex items-center gap-2">
+                    <Avatar initials={p.initials} size={22} />
+                    <span className="text-[13px] font-semibold text-ink">{p.name}</span>
+                    <span className="text-[12px] text-faint">{rows.length} today</span>
+                  </div>
+                  {rows.length === 0 ? (
+                    <p className="pl-8 text-[12.5px] text-faint">Nothing scheduled today.</p>
+                  ) : (
+                    <div className="space-y-1.5 pl-8">
+                      {rows.map((a) => {
+                        const pt = patients.find((x) => x.id === a.patientId)
+                        return (
+                          <button
+                            key={a.id}
+                            onClick={() => onOpenPatient(a.patientId)}
+                            className="flex w-full items-center gap-3 rounded-[10px] px-2.5 py-2 text-left transition hover:bg-surface-hover"
+                          >
+                            <span className="w-14 text-[12.5px] font-semibold text-body">{a.time}</span>
+                            <span className="flex-1 truncate text-[12.5px] text-ink">{pt?.name ?? 'Patient'}</span>
+                            <span className="truncate text-[11.5px] text-faint">{a.reason}</span>
+                            <Badge tone={a.status === 'In consult' ? 'green' : 'neutral'}>{a.status}</Badge>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </Card>
+      )}
+
       <BillingModal apptId={billingApptId} onClose={() => setBillingApptId(null)} />
     </div>
   )

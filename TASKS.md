@@ -69,13 +69,17 @@ done and what's left.
 - [ ] Mechanism for a practitioner to search/view any patient's case on
       mobile without a scheduled follow-up first — to design together.
 
+- [x] **Offline queueing for case notes & prescriptions — the top-priority gap,
+      closed.** Real `navigator.onLine`/online/offline listeners now drive the
+      offline flag (previously only inferred from whether the last sync happened
+      to succeed). A save attempted while offline is held in a persisted queue
+      instead of firing at a doomed request, and drains automatically the moment
+      connectivity returns. Verified end-to-end against the real database —
+      network to Supabase actually blocked, confirmed nothing written, network
+      restored, confirmed the queued write landed with no manual retry.
+
 ## Gaps found in the PDF comparison, roughly by priority
 
-- [ ] **Offline queueing for case notes & prescriptions.** The spec states this
-      as an explicit guarantee ("entries queue locally... a queued Rx is never
-      auto-released on reconnect"). Today a save while offline only lives in
-      local browser storage — no explicit retry-on-reconnect. The one gap that's
-      a broken promise rather than a missing widget.
 - [ ] Appointment doesn't auto-scope the case sheet to visit type (first visit
       vs. follow-up vs. acute) — spec's rule 01.
 - [ ] Publishing a prescription doesn't auto-book the follow-up — spec's rule 04.

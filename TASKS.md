@@ -25,21 +25,27 @@ done and what's left.
       gracefully instead of crashing. Verified in-browser against production
       data and deployed (commit `077bd5b`).
 
+- [x] **Chiku Vora's duplicate appointments — root cause fixed.** Her patient
+      login had a phantom *practitioner* row created for it (a gap in an
+      earlier fix), and the patient app's "Book a visit" screen defaulted to
+      `practitioners[0]` instead of her actual assigned doctor — so bookings
+      silently landed on the wrong practitioner (herself). Fixed the default
+      to always use the patient's real assigned doctor, fixed 4 other "your
+      doctor" display spots with the same assumption, added a double-tap
+      guard on booking. Data cleaned up per your approval: reassigned her
+      real message + patient ownership to Dr. Ishwari, deleted the 9 bad
+      appointments and the 2 stray practitioner rows. Deployed.
+- [x] **Customizable case-taking templates.** Practitioners can create their
+      own templates (sections + fields, free-text or chip-select) from
+      either the web case sheet or practitioner mobile — not limited to the
+      4 built-in ones anymore. New `case_templates` table in Supabase.
+      Type-checked and build-verified; **not** click-through verified in the
+      browser this round (the preview pane was reporting `document.hidden`,
+      which pauses the animation the screen relies on) — worth trying
+      yourself and flagging anything off.
+
 ## Found, needs your decision (not yet acted on)
 
-- [ ] **Chiku Vora's duplicate appointments — root cause found.** All 8 extra
-      "Follow-up" appointments are attributed to a phantom *practitioner* row
-      literally named "Chiku" (her own patient login accidentally got a
-      practitioner profile created for it — a gap in an earlier fix this
-      session), not to Dr. Ishwari. They were created in two rapid bursts
-      (5 bookings in 15 seconds on Aug 27, 2 more in 4 seconds on Aug 29),
-      which points to the patient-app booking flow firing multiple times per
-      action rather than someone intentionally booking 8 follow-ups. Needs:
-      (a) a code fix so patient-side booking can never resolve "the
-      practitioner" to the patient's own account, and (b) a decision on what
-      to do with the 9 real-but-wrong appointment rows already in the
-      database (reassign to Dr. Ishwari, or delete the extras) — flagging
-      rather than touching real patient data without asking.
 - [ ] "Messages" tab inside a patient's profile (practitioner view) duplicates
       the Inbox tab — what should happen to it?
 - [ ] Mechanism for a practitioner to search/view any patient's case on
@@ -47,7 +53,6 @@ done and what's left.
 
 ## Still to do
 
-- [ ] Case-taking templates: make customizable (currently 4 hardcoded in `caseTemplate.ts`)
 - [ ] Past case visit snapshots: make properly viewable/editable (currently read-only)
 - [ ] Full storage/load-performance audit across case files, documents, audio,
       billing, follow-ups (partially covered by code-splitting so far)

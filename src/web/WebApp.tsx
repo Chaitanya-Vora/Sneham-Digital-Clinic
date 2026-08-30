@@ -52,6 +52,7 @@ import type { Appointment, Patient, Potency, Repetition, RxTemplate } from '../c
 import { MASTER_REMEDIES } from '../core/remedies'
 import { uploadDocument } from '../core/db'
 import { Avatar, Badge, Button, Card, Chip, Label, Stepper, PatientNotFound } from '../design-system/ui'
+import { Pressable } from '../design-system/Pressable'
 import { SnehamLockup } from '../design-system/Logo'
 import { ToastHost, useToast } from '../design-system/toast'
 import { CountUp } from '../design-system/feedback'
@@ -940,8 +941,9 @@ function PrescriptionsOverview({ onOpenPatient, onWriteFor }: { onOpenPatient: (
           filtered.map((r) => {
             const pt = patients.find((p) => p.id === r.patientId)
             return (
-              <button
+              <Pressable
                 key={r.id}
+                as="div"
                 onClick={() => (pt ? onOpenPatient(pt.id) : undefined)}
                 className="flex w-full items-center gap-4 border-b border-border px-5 py-3.5 text-left transition last:border-0 hover:bg-surface-hover"
               >
@@ -963,7 +965,7 @@ function PrescriptionsOverview({ onOpenPatient, onWriteFor }: { onOpenPatient: (
                     Write again
                   </button>
                 )}
-              </button>
+              </Pressable>
             )
           })
         )}

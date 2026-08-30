@@ -110,9 +110,18 @@ done and what's left.
 - [x] Messages panel on a patient's profile had an unbounded-height bug
       (looked broken/collapsed) — fixed to a fixed, scrollable height.
 
-**Not yet click-tested in the browser this round — doing that next, before
-committing/deploying, precisely because "billing is done but not visible" bit
-us once already.**
+**Click-tested live (logged in as Dr. Ishwari, against the real database) —
+not just read from the diff:** Messages panel renders at a fixed 420px card
+with a real internal scroll region; Billing section shows directly on Chiku
+Vora's profile with a working "Record payment" entry point; potency and
+duration are genuine `<input>` fields (typed "50M" and "21" into them live,
+values held, nothing disabled); Prescriptions / Case notes / Follow-ups all
+open as direct sidebar screens with real data, no profile detour; Reports
+shows "New this month", the visits-by-month chart, and practitioner
+workload. The Owner-only Mine/Everyone toggle is confirmed by code + the
+database (Neha's row is `role = 'Owner'`, Ishwari's is `'Practitioner'`, and
+Ishwari's own Today screen correctly shows no toggle) but wasn't
+click-tested as Neha herself — that would need her password.
 
 ## Row Level Security — status
 
@@ -155,12 +164,19 @@ us once already.**
       else's (there's nothing wider for a non-Owner to switch to — RLS
       already limits what her account can fetch to her own caseload).
 
+## Deployed
+
+- [x] Committed (`ff5deeb`), pushed, and deployed to production —
+      https://sneham-clinic.vercel.app — confirmed loading correctly
+      post-deploy.
+
 ## Still to do
 
-- [ ] Live browser verification of everything in this update (in progress).
+- [ ] Click-test the Owner Mine/Everyone toggle as Neha herself (needs her
+      password — everything else about it is confirmed via code + database).
 - [ ] Full storage/load-performance audit across case files, documents, audio,
       billing, follow-ups (partially covered by code-splitting so far)
 - [ ] Apply the real clinic letterhead once provided (currently a text-based
       placeholder letterhead in PDF exports)
-- [ ] Commit + push + one final production deploy, once the above is verified
-- [ ] Final confirmation summary once everything above is resolved
+- [ ] The real fix for the RLS helper-function RPC exposure (schema
+      relocation) — see the Row Level Security section above.

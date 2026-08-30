@@ -65,14 +65,26 @@ done and what's left.
       prescriptions, follow-ups) matches or exceeds the spec. Specific gaps
       found are broken out below instead of staying vague.
 
-## Found, needs your decision (not yet acted on)
+## Found, needs your decision — resolved
 
-- [ ] "Messages" tab inside a patient's profile (practitioner view) duplicates
-      the Inbox tab — what should happen to it? (Worth noting: the design
-      PDF's own patient-app home screen doesn't feature messaging at all —
-      it has Book / Remedies / Reminders / Documents instead.)
-- [ ] Mechanism for a practitioner to search/view any patient's case on
-      mobile without a scheduled follow-up first — to design together.
+- [x] **"Messages" tab duplicating the Inbox — fixed on mobile, flagged on web.**
+      Turned out the two surfaces weren't actually in the same situation.
+      Practitioner **mobile** genuinely had the same conversation reachable
+      two ways (global Inbox, and a "Messages" sub-tab inside a patient's
+      profile) — removed the profile one per your decision, Inbox is now the
+      only place to read/reply. The **web console**, though, has no global
+      Inbox at all — the per-patient Messages panel is its *only* messaging
+      surface, so removing it there would have killed messaging on web
+      entirely. Left web's panel in place rather than implement that by
+      mistake; flagged below for a real decision on whether web should get
+      its own Inbox to match mobile.
+- [x] **Mobile patient search without a scheduled follow-up — already fixed,
+      no new work needed.** Checked the current code and tested live: the
+      header search icon on practitioner mobile opens any patient (search →
+      select → full case) with zero dependency on a follow-up or
+      appointment — confirmed by opening Chiku Vora's case straight from
+      search on a phone-width viewport. This was resolved in an earlier
+      audit-fix pass; the open item in this file was stale.
 
 - [x] **Offline queueing for case notes & prescriptions — the top-priority gap,
       closed.** Real `navigator.onLine`/online/offline listeners now drive the
@@ -228,8 +240,15 @@ click-tested as Neha herself — that would need her password.
       password — everything else about it is confirmed via code + database).
 - [ ] Apply the real clinic letterhead once provided (currently a text-based
       placeholder letterhead in PDF exports)
-- [ ] Decide on the hydrate-everything-every-15-seconds architecture
-      (pagination vs. realtime subscriptions) — see the storage/performance
-      audit above. Not urgent at today's data volume.
+- [ ] Hydrate-everything-every-15-seconds architecture — explicitly not a
+      priority right now (your call). Revisit once real data volume makes it
+      worth doing.
 - [ ] Document/image compression before upload — lower priority, see the
       storage/performance audit above.
+- [ ] Decide whether the web console should get its own global Inbox
+      (matching mobile) — its per-patient Messages panel is currently the
+      only way to message a patient from web, so it wasn't removed.
+- [ ] Small bug found while testing tonight, not yet fixed: a `<button>`
+      nested inside another `<button>` in the web Prescriptions overview
+      screen (invalid HTML, can make clicks behave unpredictably) — spun off
+      as its own task rather than folded in here.

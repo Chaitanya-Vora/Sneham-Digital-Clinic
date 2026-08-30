@@ -6,6 +6,30 @@ done and what's left.
 
 ## Done
 
+- [x] **Real clinic letterhead applied to every PDF.** Logo and Dr. Neha's
+      actual signature pulled from the real letterhead file, along with her
+      real address (Chiplun, replacing the placeholder "Bandra clinic" text
+      shown in the app's own UI too), registration number, and
+      qualifications — single source of truth in `letterheadAssets.ts`.
+      Caught and fixed a corrupted-base64 bug the hard way (rendered an
+      actual generated PDF and looked at it — "wrong PNG signature" — fixed
+      by having Vite encode the image files itself instead of a
+      hand-transcribed string), plus a potency/remedy-name text overlap and
+      a broken Rx-symbol glyph, both found the same way.
+- [x] **Every official document prints under Dr. Neha Tripathi specifically**
+      — the clinic's registered principal — regardless of which
+      practitioner (her or an assistant) actually published it in the app.
+      Previously showed whoever was logged in, which also meant Neha's
+      signature image could appear next to a different doctor's name.
+- [x] **Real free-text prescription body.** Homeopaths often deliberately
+      avoid writing plain remedy names so patients can't self-medicate,
+      using their own shorthand instead (e.g. "Px" for Phosphorus). Added a
+      genuine free-text field — auto-filled from the structured remedy/
+      potency/dose fields as a starting point (which still drive dose
+      reminders and reporting), but whatever the doctor actually types is
+      what prints, verbatim, as plain typed text with no box or icons
+      around it. Web console only so far — practitioner mobile's Quick Rx
+      still uses the old structured-only writer.
 - [x] **Reports page rebuilt against the actual design PDF, not memory.** Found
       it had drifted from spec — a 5-tile stat row that didn't match, plus
       three whole sections never in the spec (Outcome distribution, a
@@ -253,10 +277,20 @@ click-tested as Neha herself — that would need her password.
 
 ## Still to do
 
+- [ ] **Lab test order PDF feature — approved, not started.** From the
+      "INV- DR NEHA" file: a huge categorised lab-test checklist (Haematology,
+      Diabetic Profile, Lipid Profile, Thyroid, Scans, etc. — ~150 tests
+      across 17 categories). New feature: a practitioner picks tests for a
+      patient and generates a requisition slip on the same real letterhead.
+      Needs its own data model (new table), store action, UI, and PDF export.
+- [ ] Bring the free-text prescription body to practitioner mobile's Quick Rx
+      (web console has it; mobile still only has the structured fields).
+- [ ] Still unresolved: the "tabs redirect to select-a-patient" report from
+      earlier — couldn't reproduce it on the 3 main sidebar tabs or Cmd+K as
+      Ishwari; never got exact repro steps (which tab, which login, how you
+      got there).
 - [ ] Click-test the Owner Mine/Everyone toggle as Neha herself (needs her
       password — everything else about it is confirmed via code + database).
-- [ ] Apply the real clinic letterhead once provided (currently a text-based
-      placeholder letterhead in PDF exports)
 - [ ] Hydrate-everything-every-15-seconds architecture — explicitly not a
       priority right now (your call). Revisit once real data volume makes it
       worth doing.

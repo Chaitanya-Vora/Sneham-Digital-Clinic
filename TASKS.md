@@ -7,7 +7,12 @@ done and what's left.
 ## Done
 
 - [x] All 9 critical + 23 other audit findings from `audit-triage.html`
-- [x] Google OAuth "Unable to exchange external code" error
+- [x] Google OAuth "Unable to exchange external code" error — re-verified live
+      tonight against production: "Continue with Google" correctly redirects
+      to Google's real sign-in page with no error interstitial (the old bug
+      threw before or on the return leg). Didn't complete a full sign-in
+      (would need real Google credentials), but the redirect chain — the
+      part that was actually broken — checks out.
 - [x] **Branded auth emails — actually live now.** Confirm-signup and reset-password
       emails are sent via Resend custom SMTP (Supabase's default mailer doesn't allow
       template editing at all) with the Sneham-branded HTML, not just written to a
@@ -134,25 +139,27 @@ click-tested as Neha herself — that would need her password.
       SQL (`set local role authenticated` + a real JWT claim) and live
       Supabase advisor check — confirmed `rls_enabled: true` on all 18 tables
       right now.
-- [ ] **Smaller, separate finding: 7 internal helper functions
-      (`my_patient_id`, `my_practitioner_id`, `my_practitioner_role`,
-      `is_clinic_owner`, `can_access_patient`, `handle_new_user`,
-      `rls_auto_enable`) are still directly callable via
-      `/rest/v1/rpc/<name>`** by anyone logged in (Supabase's security
-      advisor flags this as a WARN, not an error). Tried to close this
-      tonight by revoking direct execute access — that broke RLS entirely for
-      about a minute (every policy calls these same functions internally, and
-      Postgres checks execute-privilege against the querying role even inside
-      a policy, not just the function's owner). Caught it immediately via a
-      live check, reverted, confirmed normal access restored before touching
-      anything else. Real risk if left as-is is low — no patient *data* leaks
-      this way, at most someone logged in could get a true/false "can I
-      access patient X" answer, or read back their own id/role. The correct
-      fix (move these functions to a schema Supabase doesn't expose over the
-      API, which doesn't touch grants at all) needs each function's body
-      checked first — doing that properly is a separate, dedicated pass, not
-      something to rush tonight. Full account in
-      `supabase/migration_v11_lock_down_helper_functions.sql`.
+- [x] **Helper-function RPC exposure: closed, on the third attempt.** The 7
+      internal helper functions (`my_patient_id`, `my_practitioner_id`,
+      `my_practitioner_role`, `is_clinic_owner`, `can_access_patient`,
+      `handle_new_user`, `rls_auto_enable`) were directly callable via
+      `/rest/v1/rpc/<name>` by anyone logged in — a WARN-level finding, no
+      patient data exposed, but real. First two attempts (revoking execute,
+      then moving them to a separate `internal` schema relying on
+      `search_path`) both broke live data access and were reverted within
+      the same check each time — full account in
+      `migration_v11_lock_down_helper_functions.sql` and
+      `migration_v12_move_to_internal_schema.sql`. Third attempt moved them
+      to `internal` **and** made every internal reference explicitly
+      schema-qualified (`internal.my_patient_id()`, `public.patients`, etc.)
+      instead of relying on search_path resolution at all — verified live as
+      both a regular practitioner and the Owner (exercising every branch,
+      including `is_clinic_owner()`), confirmed both the signup trigger and
+      the RLS-auto-enable event trigger still correctly point at the moved
+      functions, and a fresh security advisor pull shows all 7 gone —
+      `link_patient_auth` is the only one still listed, which is correct,
+      since patients call it directly during self-registration. Full account
+      in `migration_v14_move_to_internal_with_explicit_qualification.sql`.
 
 ## Master / assistant visibility — status
 
@@ -221,11 +228,8 @@ click-tested as Neha herself — that would need her password.
       password — everything else about it is confirmed via code + database).
 - [ ] Apply the real clinic letterhead once provided (currently a text-based
       placeholder letterhead in PDF exports)
-- [ ] The real fix for the RLS helper-function RPC exposure (schema
-      relocation) — tried again tonight, broke access a second time in a
-      different way, reverted again. See `migration_v12_move_to_internal_schema.sql`
-      for the full diagnosis — the mechanism works in isolated testing but not
-      against the real functions, for a reason I couldn't pin down without a
-      third live attempt. Recommend either running the fix live in the
-      Supabase SQL Editor together, or leaving this specific low-severity
-      item deferred.
+- [ ] Decide on the hydrate-everything-every-15-seconds architecture
+      (pagination vs. realtime subscriptions) — see the storage/performance
+      audit above. Not urgent at today's data volume.
+- [ ] Document/image compression before upload — lower priority, see the
+      storage/performance audit above.

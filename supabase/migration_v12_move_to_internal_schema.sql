@@ -1,0 +1,57 @@
+-- Migration v12: Attempted schema relocation for RLS helper functions — reverted
+-- Run this in Supabase SQL Editor
+--
+-- Follow-up to v11 (which found that revoking EXECUTE breaks RLS itself,
+-- since policies call these same functions under the querying role's own
+-- privileges). The security advisor's other suggested remedy is to move the
+-- functions out of the schema PostgREST exposes over the API — that doesn't
+-- touch any grant, so it shouldn't have the same failure mode.
+--
+-- Verified first, read-only, before touching anything:
+--   - Every one of the 7 functions has its own `SET search_path TO 'public'`
+--     (a per-function override, independent of the caller's search_path).
+--   - can_access_patient() calls is_clinic_owner(), my_patient_id(),
+--     my_practitioner_id() unqualified, and reads `patients`/`handoffs`
+--     unqualified — all meant to resolve via that search_path.
+--   - Every RLS policy calls these functions unqualified too
+--     (`can_access_patient(patient_id)`, not `public.can_access_patient(...)`).
+--   - Both the `on_auth_user_created` trigger (calls handle_new_user) and the
+--     `ensure_rls` event trigger (calls rls_auto_enable) store their function
+--     reference by OID in the catalog, not by re-parsing a name at fire time —
+--     confirmed via pg_get_triggerdef()/pg_event_trigger, so a schema move
+--     shouldn't break either trigger's ability to find its function.
+--
+-- Applied: `alter function ... set schema internal`, then `alter function
+-- internal.<name> set search_path to 'internal, public'` on the moved
+-- functions. Immediately re-tested the same way as v11 (simulated
+-- authenticated role, real JWT claim) — and it broke again, differently:
+-- `function is_clinic_owner() does not exist`, thrown from inside
+-- can_access_patient's own body. Reverted within the same check (moved all
+-- seven back to `public`, restored their search_path), confirmed normal
+-- access returned.
+--
+-- What's genuinely confusing: I reproduced the exact same shape — a
+-- SECURITY DEFINER SQL function, called from an RLS policy, calling another
+-- SECURITY DEFINER SQL function unqualified, three levels deep, both with
+-- `SET search_path` pointing at the right schema — in an isolated sandbox
+-- schema, and it worked correctly both 2 and 3 levels deep. I could not
+-- reproduce the failure outside of the real functions, which means either
+-- something about the *specific* real functions differs from my
+-- reproduction in a way I haven't spotted, or the tool connection that ran
+-- the ALTER statements had a stale cached plan for one of these functions
+-- from before the change (Supabase's infrastructure pools connections, and
+-- a cached plan built under the old search_path wouldn't necessarily be
+-- invalidated by a mid-session catalog change on a different connection).
+--
+-- Given this is the second live break in one session from the same category
+-- of change, I'm not attempting a third blind retry. Real risk of leaving
+-- this as-is stays low (see v11's note — no patient *data* is exposed this
+-- way, only a same-identity echo or a true/false access-oracle for a given
+-- patient id). Next attempt should either happen with the user watching it
+-- run live in the Supabase SQL Editor (a guaranteed-fresh session, easy to
+-- eyeball immediately), or with every internal reference explicitly
+-- schema-qualified (internal.is_clinic_owner(), public.patients, etc.)
+-- instead of relying on search_path at all — strictly safer than what was
+-- tried here, just not attempted yet.
+
+-- (No SQL runs from this file — the fix it describes was reverted live.)

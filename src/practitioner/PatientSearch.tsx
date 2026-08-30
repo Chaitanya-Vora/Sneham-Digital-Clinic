@@ -19,7 +19,6 @@ import {
 } from '@phosphor-icons/react'
 import { useClinic, selPrescriptionsFor, selDosesFor } from '../core/store'
 import type { Appointment, Patient } from '../core/types'
-import { ChatThread } from '../components/ChatThread'
 import { Avatar, Badge, BottomSheet, Button, Card, Chip, Label } from '../design-system/ui'
 import { Pressable } from '../design-system/Pressable'
 import { haptic } from '../design-system/haptics'
@@ -174,7 +173,7 @@ export function PatientSearchSheet({
 // 2. PatientDetailScreen — full-screen patient detail view
 // ─────────────────────────────────────────────────────────────
 
-type DetailTab = 'overview' | 'history' | 'prescriptions' | 'messages'
+type DetailTab = 'overview' | 'history' | 'prescriptions'
 
 export function PatientDetailScreen({
   patientId,
@@ -196,7 +195,6 @@ export function PatientDetailScreen({
   const doses = useClinic(selDosesFor(patientId))
   const outcomes = useClinic((s) => s.outcomes.filter((o) => o.patientId === patientId))
   const checkIns = useClinic((s) => s.checkIns.filter((c) => c.patientId === patientId))
-  const unreadMessages = useClinic((s) => s.messages.filter((m) => m.patientId === patientId && m.sender === 'patient' && !m.read).length)
   const toast = useToast()
 
   const scheduleFollowUpAction = useClinic((s) => s.scheduleFollowUp)
@@ -238,7 +236,6 @@ export function PatientDetailScreen({
     { id: 'overview', label: 'Overview' },
     { id: 'history', label: 'History' },
     { id: 'prescriptions', label: 'Prescriptions' },
-    { id: 'messages', label: 'Messages' },
   ]
 
   const ME = useClinic((s) => s.currentPractitionerId)
@@ -338,11 +335,6 @@ export function PatientDetailScreen({
             }`}
           >
             {t.label}
-            {t.id === 'messages' && unreadMessages > 0 && (
-              <span className="ml-1 inline-flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-danger px-1 align-top text-[9.5px] font-bold text-white">
-                {unreadMessages}
-              </span>
-            )}
             {tab === t.id && (
               <motion.div
                 layoutId="patient-detail-tab"
@@ -468,12 +460,6 @@ export function PatientDetailScreen({
               </motion.div>
             )}
           </div>
-        )}
-
-        {tab === 'messages' && (
-          <Card className="overflow-hidden">
-            <ChatThread patientId={patientId} viewAs="practitioner" />
-          </Card>
         )}
       </div>
 

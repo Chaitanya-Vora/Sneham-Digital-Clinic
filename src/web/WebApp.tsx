@@ -25,18 +25,12 @@ import {
   Warning,
   CurrencyInr,
   Clock,
-  UsersFour,
   TrendUp,
   ToggleRight,
   ToggleLeft,
   Printer,
   PencilSimple,
   Stethoscope,
-  Pill,
-  Smiley,
-  SmileyMeh,
-  SmileySad,
-  Sparkle,
   UserCircle,
   IdentificationCard,
   GraduationCap,
@@ -1766,45 +1760,43 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
   const patients = useClinic((s) => s.patients)
   const appointments = useClinic((s) => s.appointments)
   const prescriptions = useClinic((s) => s.prescriptions)
-  const outcomes = useClinic((s) => s.outcomes)
-  const checkIns = useClinic((s) => s.checkIns)
   const practitioners = useClinic((s) => s.practitioners)
 
   const inr = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`
 
   const CONSULT_FEE = 1500
   const seenCount = appointments.filter((a) => a.status === 'Seen' || a.status === 'In consult').length
-  const totalAppts = appointments.length
-  const followUpRate = totalAppts > 0 ? Math.round((appointments.filter((a) => a.reason).length / totalAppts) * 100) : 0
   const paidAppts = appointments.filter((a) => a.paymentStatus === 'paid')
   const totalRevenue = paidAppts.reduce((sum, a) => sum + (a.fee ?? CONSULT_FEE), 0)
-  const newPatientsThisMonth = (() => {
-    const thisMonth = new Date().toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
-    return patients.filter((p) => p.patientSince === thisMonth).length
+
+  // Adherence = of follow-ups that have actually come due (seen or cancelled —
+  // not still upcoming), what fraction were kept vs. missed. Null rather than
+  // a fake 0%/100% when nothing has resolved yet.
+  const resolvedFollowUps = appointments.filter((a) => a.reason === 'Follow-up' && (a.status === 'Seen' || a.status === 'Cancelled'))
+  const followUpAdherence = resolvedFollowUps.length > 0
+    ? Math.round((resolvedFollowUps.filter((a) => a.status === 'Seen').length / resolvedFollowUps.length) * 100)
+    : null
+
+  // New patients over the same rolling 6-month window as the visits chart below.
+  const monthWindow = (() => {
+    const now = new Date()
+    const keys = new Set<string>()
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      keys.add(`${d.getFullYear()}-${d.getMonth()}`)
+    }
+    return keys
   })()
+  const newPatientsInWindow = patients.filter((p) => {
+    const d = new Date(p.patientSince)
+    return !isNaN(d.getTime()) && monthWindow.has(`${d.getFullYear()}-${d.getMonth()}`)
+  }).length
 
-  const stats = [
-    { label: 'Total patients', num: patients.length, format: (n: number) => String(Math.round(n)), icon: UsersFour, tone: 'brand' as const },
-    { label: 'New this month', num: newPatientsThisMonth, format: (n: number) => String(Math.round(n)), icon: Plus, tone: 'brand' as const },
-    { label: 'Consultations done', num: seenCount, format: (n: number) => String(Math.round(n)), icon: Stethoscope, tone: 'green' as const },
-    { label: 'Prescriptions issued', num: prescriptions.length, format: (n: number) => String(Math.round(n)), icon: Pill, tone: 'amber' as const },
-    { label: 'Revenue collected', num: totalRevenue, format: inr, icon: CurrencyInr, tone: 'green' as const },
+  const statsBefore = [
+    { label: 'Total visits', num: seenCount, format: (n: number) => String(Math.round(n)), icon: Stethoscope, tone: 'green' as const },
+    { label: 'New patients', num: newPatientsInWindow, format: (n: number) => String(Math.round(n)), icon: Plus, tone: 'brand' as const },
   ]
-
-  const outcomeMap = useMemo(() => {
-    const map: Record<string, number> = {}
-    outcomes.forEach((o) => { map[o.outcome] = (map[o.outcome] || 0) + 1 })
-    return map
-  }, [outcomes])
-
-  const outcomeBars = [
-    { label: 'Clear improvement', count: outcomeMap['Clear improvement'] || 0, color: 'bg-success', icon: Smiley },
-    { label: 'Partial', count: outcomeMap['Partial'] || 0, color: 'bg-accent', icon: SmileyMeh },
-    { label: 'No change', count: outcomeMap['No change'] || 0, color: 'bg-[#94a3b8]', icon: SmileyMeh },
-    { label: 'Aggravation', count: outcomeMap['Aggravation'] || 0, color: 'bg-danger', icon: SmileySad },
-    { label: 'Changed remedy', count: outcomeMap['Changed remedy'] || 0, color: 'bg-[#a78bfa]', icon: Sparkle },
-  ]
-  const maxOutcome = Math.max(...outcomeBars.map((o) => o.count), 1)
+  const revenueStat = { label: 'Revenue', num: totalRevenue, format: inr, icon: CurrencyInr, tone: 'green' as const }
 
   const remedyCount = useMemo(() => {
     const map: Record<string, number> = {}
@@ -1818,31 +1810,7 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
     cases: p.openCases,
     patients: patients.filter((pt) => pt.owningPractitionerId === p.id).length,
   }))
-
-  const weeklyRevenue = useMemo(() => {
-    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-    const counts = new Array(7).fill(0)
-    const today = new Date()
-    appointments.forEach((a) => {
-      if (a.status !== 'Seen' && a.status !== 'In consult') return
-      if (!a.date) return
-      const apptDate = new Date(a.date + 'T00:00:00')
-      counts[apptDate.getDay()]++
-    })
-    prescriptions.forEach((p) => {
-      if (!p.publishedAt) return
-      const d = new Date(p.publishedAt)
-      const diff = Math.floor((today.getTime() - d.getTime()) / 86400000)
-      if (diff >= 0 && diff < 7) counts[d.getDay()]++
-    })
-    return days.map((day, i) => ({ day, value: counts[i] * CONSULT_FEE }))
-  }, [appointments, prescriptions])
-  const maxRev = Math.max(...weeklyRevenue.map((d) => d.value), 1)
-
-  const checkInImprovement = useMemo(() => {
-    if (checkIns.length === 0) return 0
-    return Math.round(checkIns.reduce((sum, c) => sum + c.improvementPct, 0) / checkIns.length)
-  }, [checkIns])
+  const maxCases = Math.max(...practitionerLoad.map((p) => p.cases), 1)
 
   // Visits by month, new vs. returning — the last 6 months, oldest first.
   const visitsByMonth = useMemo(() => {
@@ -1873,11 +1841,11 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
         <div className="text-[12.5px] text-faint">Practice analytics · live data from your clinic</div>
       </div>
 
-      <div className="grid grid-cols-5 gap-3">
-        {stats.map((s) => (
+      <div className="grid grid-cols-4 gap-3">
+        {statsBefore.map((s) => (
           <Card key={s.label} className="px-4 py-4">
             <div className="flex items-center gap-2.5">
-              <div className={`flex h-9 w-9 items-center justify-center rounded-[10px] ${s.tone === 'green' ? 'bg-tint text-success' : s.tone === 'amber' ? 'bg-amber-tint text-amber-text' : 'bg-tint-pale text-brand'}`}>
+              <div className={`flex h-9 w-9 items-center justify-center rounded-[10px] ${s.tone === 'green' ? 'bg-tint text-success' : 'bg-tint-pale text-brand'}`}>
                 <s.icon size={18} weight="fill" />
               </div>
               <Label>{s.label}</Label>
@@ -1885,163 +1853,117 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
             <CountUp value={s.num} format={s.format} duration={1.4} className="mt-2 block font-display text-[26px] font-bold leading-none text-ink" />
           </Card>
         ))}
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <Card className="p-5">
-          <h2 className="mb-4 font-display text-[15px] font-bold text-ink">Outcome distribution</h2>
-          {outcomes.length === 0 ? (
-            <p className="py-8 text-center text-[13px] text-faint">No outcomes recorded yet</p>
-          ) : (
-            <div className="space-y-3">
-              {outcomeBars.map((o) => (
-                <div key={o.label} className="flex items-center gap-3">
-                  <div className="w-[130px] flex items-center gap-2 text-[12.5px] text-body">
-                    <o.icon size={16} weight="fill" className="shrink-0 text-muted" />
-                    <span className="truncate">{o.label}</span>
-                  </div>
-                  <div className="flex-1 h-[22px] rounded-[6px] bg-screen overflow-hidden">
-                    <motion.div
-                      initial={{ width: 0 }}
-                      animate={{ width: `${(o.count / maxOutcome) * 100}%` }}
-                      transition={{ duration: 0.8, ease: easeCalm }}
-                      className={`h-full rounded-[6px] ${o.color}`}
-                    />
-                  </div>
-                  <span className="w-6 text-right font-display text-[13px] font-bold text-ink">{o.count}</span>
-                </div>
-              ))}
+        <Card className="px-4 py-4">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-tint-pale text-brand">
+              <ArrowsClockwise size={18} weight="fill" />
             </div>
-          )}
-        </Card>
-
-        <Card className="p-5">
-          <h2 className="mb-4 font-display text-[15px] font-bold text-ink">Top remedies prescribed</h2>
-          {remedyCount.length === 0 ? (
-            <p className="py-8 text-center text-[13px] text-faint">No prescriptions issued yet</p>
-          ) : (
-            <div className="space-y-3">
-              {remedyCount.map(([name, count], i) => (
-                <div key={name} className="flex items-center gap-3">
-                  <span className="w-5 text-right font-display text-[12px] font-bold text-faint">{i + 1}</span>
-                  <div className="w-[110px] truncate text-[12.5px] font-medium text-body">{name}</div>
-                  <div className="flex-1 h-[22px] rounded-[6px] bg-screen overflow-hidden">
-                    <motion.div
-                      initial={{ width: 0 }}
-                      animate={{ width: `${(count / maxRemedy) * 100}%` }}
-                      transition={{ duration: 0.8, delay: i * 0.06, ease: easeCalm }}
-                      className="h-full rounded-[6px] bg-accent"
-                    />
-                  </div>
-                  <span className="w-6 text-right font-display text-[13px] font-bold text-ink">{count}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-      </div>
-
-      <Card className="p-5">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-display text-[15px] font-bold text-ink">Patient visits</h2>
-          <div className="flex items-center gap-3 text-[11.5px] text-muted">
-            <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-brand" />New</span>
-            <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-accent" />Returning</span>
+            <Label>Follow-up adherence</Label>
           </div>
-        </div>
-        <div className="flex items-end gap-4" style={{ height: 160 }}>
-          {visitsByMonth.map((m, i) => (
-            <div key={m.key} className="flex flex-1 flex-col items-center gap-1.5">
-              <div className="text-[11px] font-semibold text-faint">{m.new + m.returning || ''}</div>
-              <div className="flex w-full flex-col justify-end overflow-hidden rounded-t-[8px]" style={{ height: 120 }}>
-                <motion.div
-                  initial={{ height: 0 }}
-                  animate={{ height: `${(m.returning / maxMonthly) * 120}px` }}
-                  transition={{ duration: 0.7, delay: i * 0.05, ease: easeCalm }}
-                  className="w-full bg-accent"
-                />
-                <motion.div
-                  initial={{ height: 0 }}
-                  animate={{ height: `${(m.new / maxMonthly) * 120}px` }}
-                  transition={{ duration: 0.7, delay: i * 0.05, ease: easeCalm }}
-                  className="w-full rounded-t-[8px] bg-brand"
-                />
-              </div>
-              <div className="text-[12px] font-medium text-muted">{m.label}</div>
+          {followUpAdherence === null ? (
+            <span className="mt-2 block font-display text-[26px] font-bold leading-none text-faint">—</span>
+          ) : (
+            <CountUp value={followUpAdherence} format={(n) => `${Math.round(n)}%`} duration={1.4} className="mt-2 block font-display text-[26px] font-bold leading-none text-ink" />
+          )}
+        </Card>
+        <Card className="px-4 py-4">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-tint text-success">
+              <revenueStat.icon size={18} weight="fill" />
             </div>
-          ))}
-        </div>
-      </Card>
+            <Label>{revenueStat.label}</Label>
+          </div>
+          <CountUp value={revenueStat.num} format={revenueStat.format} duration={1.4} className="mt-2 block font-display text-[26px] font-bold leading-none text-ink" />
+        </Card>
+      </div>
 
       <div className="grid grid-cols-3 gap-4">
         <Card className="col-span-2 p-5">
-          <h2 className="mb-4 font-display text-[15px] font-bold text-ink">Weekly revenue</h2>
-          <div className="flex items-end gap-3" style={{ height: 180 }}>
-            {weeklyRevenue.map((d, i) => (
-              <div key={d.day} className="flex flex-1 flex-col items-center gap-1.5">
-                <div className="text-[11px] font-semibold text-faint">{inr(d.value)}</div>
-                <motion.div
-                  initial={{ height: 0 }}
-                  animate={{ height: `${(d.value / maxRev) * 140}px` }}
-                  transition={{ duration: 0.8, delay: i * 0.05, ease: easeCalm }}
-                  className="w-full rounded-t-[8px] bg-accent"
-                />
-                <div className="text-[12px] font-medium text-muted">{d.day}</div>
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="font-display text-[15px] font-bold text-ink">Patient visits</h2>
+            <div className="flex items-center gap-3 text-[11.5px] text-muted">
+              <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-brand" />New</span>
+              <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-accent" />Returning</span>
+            </div>
+          </div>
+          <div className="flex items-end gap-4" style={{ height: 160 }}>
+            {visitsByMonth.map((m, i) => (
+              <div key={m.key} className="flex flex-1 flex-col items-center gap-1.5">
+                <div className="text-[11px] font-semibold text-faint">{m.new + m.returning || ''}</div>
+                <div className="flex w-full flex-col justify-end overflow-hidden rounded-t-[8px]" style={{ height: 120 }}>
+                  <motion.div
+                    initial={{ height: 0 }}
+                    animate={{ height: `${(m.returning / maxMonthly) * 120}px` }}
+                    transition={{ duration: 0.7, delay: i * 0.05, ease: easeCalm }}
+                    className="w-full bg-accent"
+                  />
+                  <motion.div
+                    initial={{ height: 0 }}
+                    animate={{ height: `${(m.new / maxMonthly) * 120}px` }}
+                    transition={{ duration: 0.7, delay: i * 0.05, ease: easeCalm }}
+                    className="w-full rounded-t-[8px] bg-brand"
+                  />
+                </div>
+                <div className="text-[12px] font-medium text-muted">{m.label}</div>
               </div>
             ))}
           </div>
         </Card>
 
-        <Card className="p-5">
-          <h2 className="mb-4 font-display text-[15px] font-bold text-ink">Quick stats</h2>
-          <div className="space-y-4">
-            <div>
-              <Label>Avg patient improvement</Label>
-              <div className="mt-1 flex items-end gap-1">
-                <span className="font-display text-[28px] font-bold leading-none text-ink">{checkInImprovement}</span>
-                <span className="mb-0.5 text-[13px] text-faint">%</span>
+        <div className="space-y-4">
+          <Card className="p-5">
+            <h2 className="font-display text-[15px] font-bold text-ink">Most prescribed</h2>
+            <div className="mb-4 text-[11.5px] text-faint">From your own remedy list</div>
+            {remedyCount.length === 0 ? (
+              <p className="py-8 text-center text-[13px] text-faint">No prescriptions issued yet</p>
+            ) : (
+              <div className="space-y-3">
+                {remedyCount.map(([name, count], i) => (
+                  <div key={name} className="flex items-center gap-3">
+                    <span className="w-5 text-right font-display text-[12px] font-bold text-faint">{i + 1}</span>
+                    <div className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-body">{name}</div>
+                    <div className="w-[60px] h-[22px] rounded-[6px] bg-screen overflow-hidden">
+                      <motion.div
+                        initial={{ width: 0 }}
+                        animate={{ width: `${(count / maxRemedy) * 100}%` }}
+                        transition={{ duration: 0.8, delay: i * 0.06, ease: easeCalm }}
+                        className="h-full rounded-[6px] bg-accent"
+                      />
+                    </div>
+                    <span className="w-6 text-right font-display text-[13px] font-bold text-ink">{count}</span>
+                  </div>
+                ))}
               </div>
-              <div className="mt-2 h-2 overflow-hidden rounded-full bg-screen">
-                <motion.div
-                  initial={{ width: 0 }}
-                  animate={{ width: `${checkInImprovement}%` }}
-                  transition={{ duration: 1, ease: easeCalm }}
-                  className="h-full rounded-full bg-success"
-                />
-              </div>
-            </div>
-            <div className="border-t border-border pt-3">
-              <Label>Check-ins received</Label>
-              <CountUp value={checkIns.length} format={(n) => String(Math.round(n))} duration={1} className="mt-1 block font-display text-[22px] font-bold leading-none text-ink" />
-            </div>
-            <div className="border-t border-border pt-3">
-              <Label>Follow-up rate</Label>
-              <CountUp value={followUpRate} format={(n) => `${Math.round(n)}%`} duration={1} className="mt-1 block font-display text-[22px] font-bold leading-none text-ink" />
-            </div>
-          </div>
-        </Card>
-      </div>
+            )}
+          </Card>
 
-      <Card className="p-5">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-display text-[15px] font-bold text-ink">Practitioner workload</h2>
-          <Button variant="ghost" size="sm" onClick={onGoToPatients}>
-            <UsersThree size={14} /> Rebalance gently
-          </Button>
-        </div>
-        <div className="grid grid-cols-4 gap-3">
-          {practitionerLoad.map((p) => (
-            <div key={p.name} className="rounded-[14px] border border-border bg-surface px-4 py-3.5">
-              <div className="font-display text-[14px] font-semibold text-ink">{p.name}</div>
-              <div className="mt-2 flex items-baseline gap-1">
-                <span className="font-display text-[22px] font-bold text-ink">{p.cases}</span>
-                <span className="text-[12px] text-faint">open cases</span>
-              </div>
-              <div className="mt-1 text-[12px] text-muted">{p.patients} patients assigned</div>
+          <Card className="p-5">
+            <div className="mb-1 flex items-center justify-between">
+              <h2 className="font-display text-[15px] font-bold text-ink">Caseload by practitioner</h2>
             </div>
-          ))}
+            <div className="mb-4 text-[11.5px] text-faint">A scheduling aid, not a scoreboard</div>
+            <div className="space-y-3">
+              {practitionerLoad.map((p) => (
+                <div key={p.name} className="flex items-center gap-3">
+                  <div className="w-[70px] truncate text-[12.5px] font-medium text-body">{p.name}</div>
+                  <div className="flex-1 h-[22px] rounded-[6px] bg-screen overflow-hidden">
+                    <motion.div
+                      initial={{ width: 0 }}
+                      animate={{ width: `${(p.cases / maxCases) * 100}%` }}
+                      transition={{ duration: 0.8, ease: easeCalm }}
+                      className="h-full rounded-[6px] bg-accent"
+                    />
+                  </div>
+                  <span className="w-14 text-right text-[12px] text-faint">{p.cases} open</span>
+                </div>
+              ))}
+            </div>
+            <Button variant="ghost" size="sm" className="mt-4 w-full" onClick={onGoToPatients}>
+              <UsersThree size={14} /> Rebalance gently
+            </Button>
+          </Card>
         </div>
-      </Card>
+      </div>
     </div>
   )
 }

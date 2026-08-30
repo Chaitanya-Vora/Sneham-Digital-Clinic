@@ -47,6 +47,7 @@ import { MASTER_REMEDIES } from '../core/remedies'
 import { uploadDocument } from '../core/db'
 import { Avatar, Badge, Button, Card, Chip, Label, Stepper, PatientNotFound } from '../design-system/ui'
 import { Pressable } from '../design-system/Pressable'
+import { CLINIC_DETAILS } from '../core/letterheadAssets'
 import { SnehamLockup } from '../design-system/Logo'
 import { ToastHost, useToast } from '../design-system/toast'
 import { CountUp } from '../design-system/feedback'
@@ -81,7 +82,7 @@ export function WebApp() {
   const [notifOpen, setNotifOpen] = useState(false)
   const [cmdOpen, setCmdOpen] = useState(false)
   const [clinicOpen, setClinicOpen] = useState(false)
-  const [selectedClinic, setSelectedClinic] = useState('Bandra clinic')
+  const [selectedClinic, setSelectedClinic] = useState('Chiplun clinic')
   const [newPatientOpen, setNewPatientOpen] = useState(false)
   const [videoApptId, setVideoApptId] = useState<string | null>(null)
   const clinicRef = useRef<HTMLDivElement>(null)
@@ -198,7 +199,7 @@ export function WebApp() {
                 exit={{ opacity: 0, y: -4 }}
                 className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-[12px] border border-border bg-surface shadow-modal"
               >
-                {['Bandra clinic', 'Andheri clinic', 'Thane clinic'].map((c) => (
+                {['Chiplun clinic', 'Andheri clinic', 'Thane clinic'].map((c) => (
                   <button
                     key={c}
                     onClick={() => { setSelectedClinic(c); setClinicOpen(false) }}
@@ -1412,6 +1413,24 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
   const [rep, setRep] = useState<Repetition>('Once daily · night')
   const [prep, setPrep] = useState("Dissolve under the tongue at night, 15 minutes away from food, drink or mint. Tip into the cap — don't touch the globules.")
   const [channels, setChannels] = useState<string[]>(['WhatsApp'])
+
+  // What actually prints on the slip — in the doctor's own words/shorthand,
+  // not necessarily the plain remedy name (many homeopaths deliberately
+  // avoid writing that, so patients can't self-medicate). The fields above
+  // (remedy/potency/dose/repetition) still drive dose reminders and
+  // reporting either way; this is just what gets typed on the page. Starts
+  // pre-filled from those fields as a convenience, but once she edits it
+  // directly it stops auto-updating — her words win.
+  const [bodyText, setBodyText] = useState('')
+  const [bodyTouched, setBodyTouched] = useState(false)
+  useEffect(() => {
+    if (bodyTouched) return
+    if (!remedy.trim()) { setBodyText(''); return }
+    const doseLine = rep === 'As needed'
+      ? `${remedy} ${potency} — ${dose} globules, as needed`
+      : `${remedy} ${potency} — ${dose} globules, ${rep}${duration ? `, ${duration} days` : ''}`
+    setBodyText(doseLine)
+  }, [remedy, potency, dose, rep, duration, bodyTouched])
   const [templatesOpen, setTemplatesOpen] = useState(false)
   const [savingTemplate, setSavingTemplate] = useState(false)
   const [templateLabel, setTemplateLabel] = useState('')
@@ -1423,6 +1442,7 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
     setRep(t.repetition)
     if (t.durationDays) setDuration(t.durationDays)
     setPrep(t.preparation)
+    setBodyTouched(false)
     setTemplatesOpen(false)
     toast({ title: `"${t.label}" loaded`, message: 'Review the details, then publish.' })
   }
@@ -1472,6 +1492,7 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
       repetition: rep,
       durationDays: rep === 'As needed' ? null : duration,
       preparation: prep,
+      bodyText: bodyText.trim() || undefined,
       remindersEnabled: rep !== 'As needed',
       reminderTimes: rep === 'Twice daily' ? ['8:00 AM', '8:00 PM'] : ['8:00 PM'],
       sharedVia: ['Patient app', ...channels],
@@ -1623,6 +1644,30 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
           </div>
 
           <div>
+            <div className="flex items-center justify-between">
+              <Label>Prescription · exactly as it will print</Label>
+              {bodyTouched && (
+                <button
+                  onClick={() => setBodyTouched(false)}
+                  className="text-[11px] font-semibold text-brand"
+                >
+                  Reset to auto-filled
+                </button>
+              )}
+            </div>
+            <textarea
+              value={bodyText}
+              onChange={(e) => { setBodyText(e.target.value); setBodyTouched(true) }}
+              rows={3}
+              placeholder="Write it exactly as it should appear on the printed slip — your own shorthand is fine (e.g. Px 200C, 1 dose)"
+              className="mt-2 w-full rounded-[14px] border border-border bg-surface px-3.5 py-2.5 text-[13px] leading-relaxed text-body outline-none placeholder:text-faint focus:border-green-border"
+            />
+            <p className="mt-1.5 text-[11.5px] text-faint">
+              This is the only thing that prints. The fields above are just a quick way to fill it in and still drive dose reminders — write over them freely.
+            </p>
+          </div>
+
+          <div>
             <Label>Preparation · in plain language for the patient</Label>
             <textarea
               value={prep}
@@ -1641,19 +1686,13 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
             </div>
             <div className="space-y-3 p-5">
               <div className="text-[12px] text-muted">{patient.name} · {patient.age} {patient.sex[0]} · {patient.wsCode} · {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
-              <div className="font-display text-[22px] font-bold text-ink">{remedy}</div>
-              <div className="flex flex-wrap gap-1.5">
-                <Badge tone="amber">{potency}</Badge>
-                <Badge tone="green">{dose} globules</Badge>
-                <Badge tone="neutral">{rep}</Badge>
-                {rep !== 'As needed' && <Badge tone="neutral">{duration} days</Badge>}
-              </div>
+              <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-ink">{bodyText || 'Start typing the prescription, or fill in a remedy below to auto-fill it.'}</p>
               <div>
                 <Label>Preparation</Label>
                 <p className="mt-1 text-[13px] leading-relaxed text-body">{prep}</p>
               </div>
               <div className="border-t border-border pt-3 text-[12px] text-faint">
-                Prescribed by {doctor?.name ?? 'Doctor'}{doctor?.qualifications ? ` · ${doctor.qualifications}` : ''}{doctor?.registrationNo ? ` · ${doctor.registrationNo}` : ''}
+                Prescribed by {CLINIC_DETAILS.doctorName} · {CLINIC_DETAILS.credentials}, {CLINIC_DETAILS.registrationNo}
               </div>
             </div>
           </Card>
@@ -1683,9 +1722,12 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
             <div className="flex justify-center">
               <button onClick={async () => {
                 if (!remedy.trim()) { toast({ title: 'Enter a remedy first' }); return }
-                const rx = { id: crypto.randomUUID(), patientId: patient.id, practitionerId: doctor?.id ?? '', remedy: remedy.trim(), potency: potency as any, doseGlobules: dose, repetition: rep as any, durationDays: duration, preparation: prep, publishedAt: new Date().toISOString(), sharedVia: [], remindersEnabled: false, reminderTimes: [] }
+                const rx = { id: crypto.randomUUID(), patientId: patient.id, practitionerId: doctor?.id ?? '', remedy: remedy.trim(), potency: potency as any, doseGlobules: dose, repetition: rep as any, durationDays: duration, preparation: prep, bodyText: bodyText.trim() || undefined, publishedAt: new Date().toISOString(), sharedVia: [], remindersEnabled: false, reminderTimes: [] }
                 const credentials = [doctor?.qualifications, doctor?.registrationNo].filter(Boolean).join(' · ')
-                await exportPrescriptionPdf(rx, patient.name, doctor?.name ?? 'Doctor', undefined, credentials || undefined).catch(() => {})
+                await exportPrescriptionPdf(rx, patient.name, doctor?.name ?? 'Doctor', undefined, credentials || undefined).catch((e) => {
+                  console.error('PDF export failed', e)
+                  toast({ title: 'PDF export failed', message: e instanceof Error ? e.message : 'Please try again.' })
+                })
               }} className="flex items-center gap-1.5 text-[12.5px] font-semibold text-body"><Printer size={14} /> Print / save as PDF</button>
             </div>
           </Card>

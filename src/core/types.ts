@@ -125,6 +125,13 @@ export interface Prescription {
   repetition: Repetition
   durationDays: number | null // null = "until settled"
   preparation: string
+  // What actually prints on the prescription slip — freeform, in the
+  // doctor's own words/shorthand (homeopaths often avoid writing plain
+  // remedy names so patients can't self-medicate). Falls back to the
+  // structured fields above when absent, for prescriptions saved before
+  // this existed. The structured fields still drive dose reminders and
+  // reporting regardless of what's actually printed.
+  bodyText?: string
   publishedAt: string // ISO
   sharedVia: string[] // WhatsApp / SMS / Email / Patient app
   remindersEnabled: boolean

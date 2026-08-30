@@ -81,6 +81,7 @@ export interface PublishRxInput {
   repetition: Repetition
   durationDays: number | null
   preparation: string
+  bodyText?: string
   remindersEnabled: boolean
   reminderTimes: string[]
   sharedVia: string[]
@@ -326,6 +327,7 @@ export const useClinic = create<ClinicState>()(
           repetition: input.repetition,
           durationDays: input.durationDays,
           preparation: input.preparation,
+          bodyText: input.bodyText,
           publishedAt,
           sharedVia: input.sharedVia,
           remindersEnabled: input.remindersEnabled,

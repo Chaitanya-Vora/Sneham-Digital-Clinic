@@ -248,7 +248,10 @@ click-tested as Neha herself — that would need her password.
 - [ ] Decide whether the web console should get its own global Inbox
       (matching mobile) — its per-patient Messages panel is currently the
       only way to message a patient from web, so it wasn't removed.
-- [ ] Small bug found while testing tonight, not yet fixed: a `<button>`
-      nested inside another `<button>` in the web Prescriptions overview
-      screen (invalid HTML, can make clicks behave unpredictably) — spun off
-      as its own task rather than folded in here.
+- [x] Nested `<button>` in the web Prescriptions overview screen — fixed by
+      switching the outer row to `Pressable as="div"` (the same pattern
+      already used everywhere else in the app for a clickable row with an
+      inner action button). Verified live: the validateDOMNesting warning is
+      gone, the row click still opens the patient, and "Write again" still
+      opens the prescription writer directly without also triggering the
+      row's click.

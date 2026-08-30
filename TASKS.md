@@ -6,6 +6,23 @@ done and what's left.
 
 ## Done
 
+- [x] **Reports page rebuilt against the actual design PDF, not memory.** Found
+      it had drifted from spec — a 5-tile stat row that didn't match, plus
+      three whole sections never in the spec (Outcome distribution, a
+      "Weekly revenue" chart that turned out to be fabricated from activity
+      count × a flat fee rather than real payments, and a "Quick stats"
+      block). Rebuilt to the spec's exact 4 tiles (Total visits, New
+      patients, Follow-up adherence, Revenue), corrected Follow-up adherence
+      to measure real attendance instead of "has a reason filled in," and
+      moved Most prescribed / Caseload by practitioner into the sidebar
+      layout the spec actually shows. Commit `e30f67c`.
+- [x] **Duplicate outcome records — root cause fixed, not just deleted.** The
+      Save-outcome button (both mobile and web) had no guard against being
+      pressed more than once. Found 4 near-identical "Partial" records on
+      Chiku Vora's real case (3 within about a minute, a 4th an hour later
+      under a different login) — deleted the 3 duplicates, kept the
+      earliest as the genuine record, and closed the actual mechanism so a
+      repeat tap is now a no-op on both screens. Commit `b80b273`.
 - [x] All 9 critical + 23 other audit findings from `audit-triage.html`
 - [x] Google OAuth "Unable to exchange external code" error — re-verified live
       tonight against production: "Continue with Google" correctly redirects

@@ -30,6 +30,7 @@ export function FollowUp({ patientId, onBack }: { patientId: string; onBack: () 
   const [outcome, setOutcome] = useState<OutcomeKind>('Partial')
   const [note, setNote] = useState('')
   const [handoffOpen, setHandoffOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
 
   const ciTone = checkIn?.marked === 'worse' ? 'amber' as const : checkIn?.marked === 'better' ? 'green' as const : undefined
   const ciLabel = checkIn?.marked === 'worse' ? 'Needs attention' : checkIn?.marked === 'better' ? 'Feeling better' : 'No change'
@@ -40,7 +41,8 @@ export function FollowUp({ patientId, onBack }: { patientId: string; onBack: () 
   if (!patient) return <PatientNotFound onBack={onBack} />
 
   function onSave() {
-    if (!patient) return
+    if (!patient || saving) return
+    setSaving(true)
     saveOutcome({ patientId, practitionerId: doctorId, remedy: patient.currentRemedy ?? '—', outcome, note })
     toast({ title: 'Outcome saved', message: `${outcome} recorded for ${patient.name}.` })
     onBack()
@@ -58,7 +60,7 @@ export function FollowUp({ patientId, onBack }: { patientId: string; onBack: () 
           <Button variant="ghost" size="sm" onClick={() => setHandoffOpen(true)}>
             <Handshake size={15} /> Hand off this follow-up
           </Button>
-          <Button variant="primary" size="sm" onClick={onSave}>
+          <Button variant="primary" size="sm" onClick={onSave} disabled={saving}>
             <FloppyDisk size={15} /> Save outcome
           </Button>
         </div>

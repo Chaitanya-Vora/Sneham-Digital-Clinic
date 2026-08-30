@@ -49,6 +49,7 @@ export function MobileFollowUp({
   )
 
   function save() {
+    if (saved) return
     saveOutcome({ patientId, practitionerId: doctorId, remedy: patient?.currentRemedy ?? '—', outcome, note })
     setSaved(true)
   }
@@ -116,7 +117,7 @@ export function MobileFollowUp({
         <Button variant="ghost" className="flex-1" onClick={() => setHandoff(true)}>
           <Handshake size={16} /> Hand off
         </Button>
-        <Button variant="primary" className="flex-1" onClick={save}>
+        <Button variant="primary" className="flex-1" onClick={save} disabled={saved}>
           <FloppyDisk size={16} /> Save outcome
         </Button>
       </div>

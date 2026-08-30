@@ -61,6 +61,7 @@ export const practitioners: Practitioner[] = [
       'Arnica Montana',
       'Belladonna',
     ],
+    rxTemplates: [],
   },
   {
     id: 'pr-ishwari',
@@ -70,6 +71,7 @@ export const practitioners: Practitioner[] = [
     specialty: 'Chronic · paediatrics',
     openCases: 31,
     remedyList: ['Pulsatilla', 'Chamomilla', 'Calcarea Carb', 'Nux Vomica'],
+    rxTemplates: [],
   },
   {
     id: 'pr-sanjay',
@@ -79,6 +81,7 @@ export const practitioners: Practitioner[] = [
     specialty: 'Skin · allergy',
     openCases: 44,
     remedyList: ['Graphites', 'Sulphur', 'Arsenicum Album'],
+    rxTemplates: [],
   },
   {
     id: 'pr-neha-das',
@@ -88,6 +91,7 @@ export const practitioners: Practitioner[] = [
     specialty: "Women's health",
     openCases: 19,
     remedyList: ['Sepia', 'Pulsatilla', 'Natrum Mur'],
+    rxTemplates: [],
   },
 ]
 

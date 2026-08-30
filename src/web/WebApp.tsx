@@ -42,12 +42,13 @@ import {
   GraduationCap,
   MapPin,
   SignOut,
+  EnvelopeSimple,
 } from '@phosphor-icons/react'
 import { todayISO, formatDayLabel, addDaysISO } from '../core/day'
 import { getSections } from '../core/caseTemplate'
 import { useClinic } from '../core/store'
 import { useAuth } from '../auth/AuthProvider'
-import type { Appointment, Patient, Potency, Repetition } from '../core/types'
+import type { Appointment, Patient, Potency, Repetition, RxTemplate } from '../core/types'
 import { MASTER_REMEDIES } from '../core/remedies'
 import { uploadDocument } from '../core/db'
 import { Avatar, Badge, Button, Card, Chip, Label, Stepper, PatientNotFound } from '../design-system/ui'
@@ -362,6 +363,7 @@ function TodayView({ onOpenPatient, onStartVideo }: { onOpenPatient: (id: string
   const practitioners = useClinic((s) => s.practitioners)
   const toast = useToast()
   const [billingApptId, setBillingApptId] = useState<string | null>(null)
+  const [viewMode, setViewMode] = useState<'mine' | 'everyone'>('mine')
   const inr = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`
   const fmt = (n: number) => String(Math.round(n))
   // Today's own schedule is always scoped to the logged-in practitioner —
@@ -379,6 +381,11 @@ function TodayView({ onOpenPatient, onStartVideo }: { onOpenPatient: (id: string
   const avgValue = paidCount > 0 ? Math.round(revenueToday / paidCount) : 0
   const team = practitioners.filter((p) => p.id !== myId)
   const teamToday = allAppts.filter((a) => a.date === todayISO() && a.practitionerId !== myId)
+  // "Everyone" is Owner-only — a non-Owner's own fetched data is already
+  // scoped to just their own caseload, so there's no wider view to switch to.
+  const scheduleAppts = role === 'Owner' && viewMode === 'everyone'
+    ? allAppts.filter((a) => a.date === todayISO())
+    : todayAppts
   const stats = [
     { label: "Today's appointments", num: todayAppts.length, format: fmt, sub: `${remainingToday} remaining` },
     { label: 'Patients seen', num: seenToday, format: fmt, sub: newToday > 0 ? `${newToday} new` : 'today' },
@@ -412,7 +419,19 @@ function TodayView({ onOpenPatient, onStartVideo }: { onOpenPatient: (id: string
           <h2 className="font-display text-[16px] font-bold text-ink">Today's schedule</h2>
           <div className="flex items-center gap-2">
             <WalkInButton />
-            <Badge tone="neutral">Day view</Badge>
+            {role === 'Owner' && (
+              <div className="inline-flex rounded-pill bg-screen p-0.5">
+                {(['mine', 'everyone'] as const).map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => setViewMode(m)}
+                    className={`rounded-pill px-3 py-1.5 text-[12px] font-semibold transition ${viewMode === m ? 'bg-brand text-screen' : 'text-muted hover:text-body'}`}
+                  >
+                    {m === 'mine' ? 'Mine' : 'Everyone'}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
         <motion.div
@@ -421,7 +440,10 @@ function TodayView({ onOpenPatient, onStartVideo }: { onOpenPatient: (id: string
           initial="hidden"
           animate="show"
         >
-          {todayAppts.map((a) => {
+          {scheduleAppts.length === 0 && (
+            <p className="py-6 text-center text-[13px] text-faint">No appointments {viewMode === 'everyone' ? 'for anyone' : ''} today.</p>
+          )}
+          {scheduleAppts.map((a) => {
             const p = patients.find((x) => x.id === a.patientId)
             return (
               <motion.button
@@ -1075,6 +1097,7 @@ function PatientDetail({ patientId, onPrescribe, onCaseSheet, onFollowUp, onBack
   const docs = useClinic((s) => s.documents.filter((d) => d.patientId === patientId))
   const outcomes = useClinic((s) => s.outcomes.filter((o) => o.patientId === patientId))
   const checkIns = useClinic((s) => s.checkIns.filter((c) => c.patientId === patientId))
+  const handoffs = useClinic((s) => s.handoffs.filter((h) => h.patientId === patientId))
   const appointments = useClinic((s) => s.appointments.filter((a) => a.patientId === patientId))
   const practitioners = useClinic((s) => s.practitioners)
   const doctor = useClinic((s) => s.practitioners.find((p) => p.id === s.currentPractitionerId))
@@ -1141,15 +1164,29 @@ function PatientDetail({ patientId, onPrescribe, onCaseSheet, onFollowUp, onBack
     }).catch(() => {})
   }
 
-  type TimelineEvent = { id: string; date: string; kind: 'visit' | 'prescription' | 'check-in' | 'outcome'; title: string; detail: string; tone: 'green' | 'amber' | 'neutral' }
+  type TimelineEvent = { id: string; date: string; kind: 'visit' | 'prescription' | 'check-in' | 'outcome' | 'handoff'; title: string; detail: string; tone: 'green' | 'amber' | 'neutral' }
   const timeline: TimelineEvent[] = [
     ...rx.map((r) => ({ id: r.id, date: r.publishedAt, kind: 'prescription' as const, title: `${r.remedy} ${r.potency}`, detail: `${r.repetition} · ${r.durationDays ? `${r.durationDays} days` : 'until settled'}`, tone: 'green' as const })),
     ...outcomes.map((o) => ({ id: o.id, date: o.date, kind: 'outcome' as const, title: o.outcome, detail: o.note || o.remedy, tone: o.outcome === 'Clear improvement' ? 'green' as const : o.outcome === 'Partial' ? 'amber' as const : 'neutral' as const })),
     ...checkIns.map((c) => ({ id: c.id, date: c.submittedAt, kind: 'check-in' as const, title: c.marked === 'better' ? 'Feeling better' : c.marked === 'worse' ? 'Feeling worse' : 'No change', detail: c.freeText || `${c.improvementPct}% improvement`, tone: c.marked === 'better' ? 'green' as const : c.marked === 'worse' ? 'amber' as const : 'neutral' as const })),
+    // Every transfer belongs on the record — who, when and why — same as
+    // the spec's own rule for handoffs, not just visible in an inbox somewhere.
+    ...handoffs.map((h) => {
+      const from = practitioners.find((p) => p.id === h.fromPractitionerId)?.name ?? 'Unknown'
+      const to = practitioners.find((p) => p.id === h.toPractitionerId)?.name ?? 'Unknown'
+      return {
+        id: h.id,
+        date: h.createdAt ?? new Date().toISOString(),
+        kind: 'handoff' as const,
+        title: `Handed off: ${from} → ${to}`,
+        detail: h.note.reason || 'No reason given',
+        tone: h.status === 'declined' ? 'amber' as const : 'neutral' as const,
+      }
+    }),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 
-  const kindIcon = (k: TimelineEvent['kind']) => k === 'prescription' ? RxIcon : k === 'outcome' ? ChartLineUp : k === 'check-in' ? CalendarCheck : Clock
-  const kindLabel = (k: TimelineEvent['kind']) => k === 'prescription' ? 'Prescription' : k === 'outcome' ? 'Outcome' : k === 'check-in' ? 'Check-in' : 'Visit'
+  const kindIcon = (k: TimelineEvent['kind']) => k === 'prescription' ? RxIcon : k === 'outcome' ? ChartLineUp : k === 'check-in' ? CalendarCheck : k === 'handoff' ? Handshake : Clock
+  const kindLabel = (k: TimelineEvent['kind']) => k === 'prescription' ? 'Prescription' : k === 'outcome' ? 'Outcome' : k === 'check-in' ? 'Check-in' : k === 'handoff' ? 'Handoff' : 'Visit'
 
   return (
     <div className="space-y-4">
@@ -1379,6 +1416,39 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
   const [rep, setRep] = useState<Repetition>('Once daily · night')
   const [prep, setPrep] = useState("Dissolve under the tongue at night, 15 minutes away from food, drink or mint. Tip into the cap — don't touch the globules.")
   const [channels, setChannels] = useState<string[]>(['WhatsApp'])
+  const [templatesOpen, setTemplatesOpen] = useState(false)
+  const [savingTemplate, setSavingTemplate] = useState(false)
+  const [templateLabel, setTemplateLabel] = useState('')
+
+  const applyTemplate = (t: RxTemplate) => {
+    setRemedy(t.remedy)
+    setPotency(t.potency)
+    setDose(t.doseGlobules)
+    setRep(t.repetition)
+    if (t.durationDays) setDuration(t.durationDays)
+    setPrep(t.preparation)
+    setTemplatesOpen(false)
+    toast({ title: `"${t.label}" loaded`, message: 'Review the details, then publish.' })
+  }
+
+  const saveCurrentAsTemplate = () => {
+    if (!doctor || !templateLabel.trim() || !remedy.trim()) return
+    const t: RxTemplate = {
+      id: crypto.randomUUID(),
+      label: templateLabel.trim(),
+      remedy: remedy.trim(),
+      potency,
+      doseGlobules: dose,
+      repetition: rep,
+      durationDays: rep === 'As needed' ? null : duration,
+      preparation: prep,
+    }
+    updatePractitioner(doctor.id, { rxTemplates: [...(doctor.rxTemplates ?? []), t] })
+    toast({ title: 'Template saved', message: `"${t.label}" is ready to reuse.` })
+    setSavingTemplate(false)
+    setTemplateLabel('')
+    setTemplatesOpen(false)
+  }
 
   const list = useMemo(() => {
     const q = remedy.toLowerCase()
@@ -1444,7 +1514,48 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
           <h1 className="font-display text-[20px] font-bold text-ink">Prescription · {patient.name}</h1>
           <div className="text-[12.5px] text-faint">From your saved remedy list · publishes to her app instantly</div>
         </div>
-        <Button variant="ghost" size="sm" onClick={() => toast({ title: 'No saved templates yet', message: 'Publish a prescription first — you can save it as a template from the publish step.' })}>Saved templates</Button>
+        <div className="relative">
+          <Button variant="ghost" size="sm" onClick={() => setTemplatesOpen((v) => !v)}>Saved templates</Button>
+          {templatesOpen && (
+            <Card className="absolute right-0 top-full z-20 mt-1 w-[280px] p-2 shadow-float">
+              {(doctor?.rxTemplates ?? []).length === 0 && !savingTemplate && (
+                <p className="px-2 py-3 text-center text-[12px] text-faint">No saved templates yet.</p>
+              )}
+              {(doctor?.rxTemplates ?? []).map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => applyTemplate(t)}
+                  className="flex w-full flex-col rounded-[8px] px-3 py-2 text-left transition hover:bg-tint"
+                >
+                  <span className="text-[13px] font-semibold text-ink">{t.label}</span>
+                  <span className="text-[11.5px] text-muted">{t.remedy} {t.potency} · {t.repetition}</span>
+                </button>
+              ))}
+              <div className="mt-1 border-t border-border pt-1">
+                {savingTemplate ? (
+                  <div className="space-y-1.5 p-1.5">
+                    <input
+                      autoFocus
+                      value={templateLabel}
+                      onChange={(e) => setTemplateLabel(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') saveCurrentAsTemplate() }}
+                      placeholder="e.g. Standard cold remedy"
+                      className="w-full rounded-[8px] border border-border bg-surface px-2.5 py-1.5 text-[12.5px] outline-none focus:border-green-border"
+                    />
+                    <Button variant="primary" size="sm" className="w-full" disabled={!templateLabel.trim() || !remedy.trim()} onClick={saveCurrentAsTemplate}>Save</Button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => (remedy.trim() ? setSavingTemplate(true) : toast({ title: 'Enter a remedy first' }))}
+                    className="flex w-full items-center gap-1.5 rounded-[8px] px-3 py-2 text-left text-[12.5px] font-semibold text-brand hover:bg-tint"
+                  >
+                    <Plus size={13} weight="bold" /> Save current as template
+                  </button>
+                )}
+              </div>
+            </Card>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-[1.3fr_1fr] gap-4">
@@ -1557,6 +1668,7 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
               {[
                 ['WhatsApp', WhatsappLogo],
                 ['SMS', DeviceMobile],
+                ['Email', EnvelopeSimple],
               ].map(([c, Icon]: any) => (
                 <button
                   key={c}

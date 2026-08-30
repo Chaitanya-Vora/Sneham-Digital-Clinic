@@ -16,6 +16,7 @@ import {
   Flask,
   X,
   Check,
+  ArrowsClockwise,
   ShareNetwork,
   FilePdf,
   MapPin,
@@ -25,13 +26,9 @@ import {
   Trash,
   Export,
   Smiley,
-  SmileyMeh,
-  SmileySad,
   ChatText,
   FileText,
   Notepad,
-  SmileyWink,
-  SmileyXEyes,
   ChatsCircle,
   SignOut,
 } from '@phosphor-icons/react'
@@ -1012,6 +1009,29 @@ function AppointmentsScreen({ onRefresh, patientId }: { onRefresh: () => Promise
         <BottomSheet open={bookingOpen} onClose={() => setBookingOpen(false)}>
           <h2 className="font-display text-[18px] font-bold text-ink">Book a visit</h2>
 
+          {(() => {
+            const lastVisit = [...appointments].filter((a) => a.status === 'Seen').sort((a, b) => b.date.localeCompare(a.date))[0]
+            const lastDoc = lastVisit ? practitioners.find((p) => p.id === lastVisit.practitionerId) : null
+            if (!lastVisit || !lastDoc) return null
+            return (
+              <Pressable
+                hap="tick"
+                onClick={() => {
+                  setSelectedPractitioner(lastVisit.practitionerId)
+                  setSelectedType(lastVisit.type)
+                  setSelectedSlot(null)
+                }}
+                className="mt-3 flex w-full items-center gap-2.5 rounded-[14px] border border-dashed border-green-border bg-tint px-3.5 py-2.5 text-left"
+              >
+                <ArrowsClockwise size={16} className="text-brand" />
+                <div>
+                  <div className="text-[13px] font-semibold text-ink">Same as last time</div>
+                  <div className="text-[11.5px] text-muted">{lastDoc.name} · {lastVisit.type}</div>
+                </div>
+              </Pressable>
+            )
+          })()}
+
           <Label className="mt-4">Practitioner</Label>
           <div className="mt-2 flex flex-wrap gap-2">
             {practitioners.map((p) => (
@@ -1019,9 +1039,11 @@ function AppointmentsScreen({ onRefresh, patientId }: { onRefresh: () => Promise
                 key={p.id}
                 hap="tick"
                 onClick={() => setSelectedPractitioner(p.id)}
-                className={`rounded-pill border px-3.5 py-2 text-[13px] font-semibold transition ${selectedPractitioner === p.id ? 'border-green-border bg-tint text-ink' : 'border-border bg-surface text-muted'}`}
+                className={`flex items-center gap-1.5 rounded-pill border px-3.5 py-2 text-[13px] font-semibold transition ${selectedPractitioner === p.id ? 'border-green-border bg-tint text-ink' : 'border-border bg-surface text-muted'}`}
               >
+                {p.id === myPractitionerId && <Check size={13} weight="bold" className="text-brand" />}
                 {p.name}
+                {p.id !== myPractitionerId && <span className="text-[11px] font-normal text-faint">Covering</span>}
               </Pressable>
             ))}
           </div>
@@ -1412,13 +1434,20 @@ function DataPrivacyScreen({ back, onRefresh }: { back: () => void; onRefresh: (
 }
 
 // ── CHECK-IN FORM ──
-const FEELING_OPTIONS = [
-  { icon: SmileyWink, label: 'Much better', value: 'better' as const, pct: 80 },
-  { icon: Smiley, label: 'Somewhat better', value: 'better' as const, pct: 60 },
-  { icon: SmileyMeh, label: 'About the same', value: 'same' as const, pct: 40 },
-  { icon: SmileySad, label: 'Worse', value: 'worse' as const, pct: 20 },
-  { icon: SmileyXEyes, label: 'Much worse', value: 'worse' as const, pct: 5 },
-]
+// A continuous 0–100% slider reads truer than five fixed buttons — "a bit
+// better than yesterday" doesn't have to round to one of five buckets.
+// marked (better/same/worse) still derives from the value, since the rest
+// of the app (badges, the doctor's dashboard) reads that three-way signal.
+function feelingForPct(pct: number): 'better' | 'same' | 'worse' {
+  return pct >= 60 ? 'better' : pct <= 40 ? 'worse' : 'same'
+}
+function feelingLabelForPct(pct: number): string {
+  if (pct >= 80) return 'Much better'
+  if (pct >= 60) return 'Somewhat better'
+  if (pct >= 40) return 'About the same'
+  if (pct >= 20) return 'Worse'
+  return 'Much worse'
+}
 
 const SYMPTOM_CHIPS = [
   'Sleeping better', 'Less anxious', 'More energy', 'Appetite improved',
@@ -1437,7 +1466,8 @@ function CheckInScreen({ back, onRefresh, patientId }: { back: () => void; onRef
   const submitCheckIn = useClinic((s) => s.submitCheckIn)
   const rx = prescriptions[0]
 
-  const [selectedFeeling, setSelectedFeeling] = useState<number | null>(null)
+  const [pct, setPct] = useState(50)
+  const [sliderTouched, setSliderTouched] = useState(false)
   const [selectedChips, setSelectedChips] = useState<string[]>([])
   const [freeText, setFreeText] = useState('')
   const [submitted, setSubmitted] = useState(false)
@@ -1446,23 +1476,22 @@ function CheckInScreen({ back, onRefresh, patientId }: { back: () => void; onRef
     setSelectedChips((prev) => prev.includes(chip) ? prev.filter((c) => c !== chip) : [...prev, chip])
   }
 
-  // Only a missing prescription genuinely blocks check-in — not yet picking a
-  // feeling shouldn't freeze the button; it should respond and nudge instead.
+  // Only a missing prescription genuinely blocks check-in — not yet moving
+  // the slider shouldn't freeze the button; it should respond and nudge instead.
   const canSubmit = !!rx
 
   const handleSubmit = () => {
     if (!rx) return
-    if (selectedFeeling === null) {
+    if (!sliderTouched) {
       haptic('warn')
-      toast({ title: 'Select how you\'re feeling', message: 'Choose an option above before submitting your check-in.' })
+      toast({ title: 'Move the slider first', message: 'Show how you\'re feeling before submitting your check-in.' })
       return
     }
-    const opt = FEELING_OPTIONS[selectedFeeling]
     submitCheckIn({
       patientId,
       prescriptionId: rx.id,
-      marked: opt.value,
-      improvementPct: opt.pct,
+      marked: feelingForPct(pct),
+      improvementPct: pct,
       changeChips: selectedChips,
       freeText,
     })
@@ -1514,22 +1543,26 @@ function CheckInScreen({ back, onRefresh, patientId }: { back: () => void; onRef
         )}
 
         <div>
-          <Label>Overall feeling</Label>
-          <div className="mt-2.5 space-y-2">
-            {FEELING_OPTIONS.map((opt, i) => (
-              <Pressable
-                key={opt.label}
-                as="div"
-                hap="tick"
-                scale={0.98}
-                onClick={() => setSelectedFeeling(i)}
-                className={`flex cursor-pointer items-center gap-3 rounded-[16px] border px-4 py-3 transition ${selectedFeeling === i ? 'border-green-border bg-tint' : 'border-border bg-surface'}`}
-              >
-                <opt.icon size={24} weight={selectedFeeling === i ? 'fill' : 'regular'} className={selectedFeeling === i ? 'text-brand' : 'text-faint'} />
-                <span className={`text-[14px] font-semibold ${selectedFeeling === i ? 'text-ink' : 'text-body'}`}>{opt.label}</span>
-              </Pressable>
-            ))}
-          </div>
+          <Label>Overall improvement</Label>
+          <Card className="mt-2.5 p-4">
+            <div className="flex items-baseline gap-2">
+              <span className="font-display text-[32px] font-bold leading-none text-ink">{sliderTouched ? `${pct}%` : '—'}</span>
+              {sliderTouched && <span className="text-[13px] font-semibold text-muted">{feelingLabelForPct(pct)}</span>}
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={pct}
+              onChange={(e) => { setSliderTouched(true); setPct(Number(e.target.value)) }}
+              className="mt-3 w-full accent-brand"
+              aria-label="Overall improvement"
+            />
+            <div className="mt-1 flex justify-between text-[11px] text-faint">
+              <span>No better</span>
+              <span>Much better</span>
+            </div>
+          </Card>
         </div>
 
         <div>

@@ -78,28 +78,89 @@ done and what's left.
       network to Supabase actually blocked, confirmed nothing written, network
       restored, confirmed the queued write landed with no manual retry.
 
-## Gaps found in the PDF comparison, roughly by priority
+## Gaps found in the PDF comparison — all closed
 
-- [ ] Appointment doesn't auto-scope the case sheet to visit type (first visit
-      vs. follow-up vs. acute) — spec's rule 01.
-- [ ] Publishing a prescription doesn't auto-book the follow-up — spec's rule 04.
-- [ ] Reports page tracks outcome-quality metrics instead of the spec's
-      volume/growth ones — no visits-by-month trend, no follow-up-adherence %,
-      no **caseload-by-practitioner** (now genuinely useful with 2 practitioners
-      on staff).
-- [ ] Today's Day/Week/All-practitioners switch is a static label, not a real
-      control; no mini calendar or follow-ups-due list on Today (only a count).
-- [ ] Patient check-in is 5 discrete buttons, not the spec's 0–100% slider
-      (you'd independently flagged the slider as arguably better yourself).
-- [ ] Smaller: no Email share channel on prescriptions (WhatsApp/SMS only), no
-      real "save as template" for prescriptions, no "same as last time" booking
-      shortcut, practitioner picker doesn't mark "your regular" vs "covering",
-      handoffs don't appear on the patient's case timeline.
+- [x] Appointment now auto-scopes the case sheet to visit type (first visit
+      vs. follow-up vs. acute) on both web and practitioner mobile — spec's rule 01.
+- [x] Publishing a prescription now auto-books the follow-up (web and
+      practitioner mobile) — spec's rule 04.
+- [x] Reports page: added new-patients-this-month, a 6-month new-vs-returning
+      visits chart, and a real "Rebalance gently" action — on top of
+      follow-up-rate and caseload-by-practitioner, which turned out to
+      already exist (missed in the first PDF comparison pass).
+- [x] Today's practitioner-switch is now real: schedule is scoped to the
+      logged-in practitioner by default, and the Owner gets a "Mine /
+      Everyone" toggle showing the whole team's actual schedule for the day
+      (not just a follow-up count).
+- [x] Patient check-in is now a continuous 0–100% slider, not 5 discrete buttons.
+- [x] Email added as a third share channel on prescriptions (WhatsApp/SMS/Email).
+- [x] Real "save as template" for prescriptions — practitioners build a
+      library of their own presets (remedy/potency/dose/repetition/duration/
+      prep), one tap loads one back. New `rx_templates` column on
+      `practitioners`, applied and confirmed live.
+- [x] "Same as last time" booking shortcut on the patient app, plus the
+      practitioner picker now marks "your regular doctor" vs. "Covering".
+- [x] Handoffs now appear on the patient's case timeline (who, when, why).
+- [x] Billing: full invoice history + reprint on a patient's profile, "Record
+      payment" flow, PDF export with clinic letterhead (placeholder text
+      letterhead until you provide the real one).
+- [x] Case notes / Prescriptions / Follow-ups are now real standalone screens
+      reachable directly from the sidebar — no longer routed through a
+      patient's profile first.
+- [x] Messages panel on a patient's profile had an unbounded-height bug
+      (looked broken/collapsed) — fixed to a fixed, scrollable height.
+
+**Not yet click-tested in the browser this round — doing that next, before
+committing/deploying, precisely because "billing is done but not visible" bit
+us once already.**
+
+## Row Level Security — status
+
+- [x] **Table-level policies: fixed and confirmed live.** Every table
+      (`patients`, `appointments`, `prescriptions`, all 18 tables) previously
+      had `USING (true)` — any logged-in account could read/write any row.
+      Replaced with real ownership-based policies (Owner sees everything, a
+      practitioner sees their own + unassigned + handed-off-to-them patients,
+      a patient sees only their own records). Verified two ways: simulated-role
+      SQL (`set local role authenticated` + a real JWT claim) and live
+      Supabase advisor check — confirmed `rls_enabled: true` on all 18 tables
+      right now.
+- [ ] **Smaller, separate finding: 7 internal helper functions
+      (`my_patient_id`, `my_practitioner_id`, `my_practitioner_role`,
+      `is_clinic_owner`, `can_access_patient`, `handle_new_user`,
+      `rls_auto_enable`) are still directly callable via
+      `/rest/v1/rpc/<name>`** by anyone logged in (Supabase's security
+      advisor flags this as a WARN, not an error). Tried to close this
+      tonight by revoking direct execute access — that broke RLS entirely for
+      about a minute (every policy calls these same functions internally, and
+      Postgres checks execute-privilege against the querying role even inside
+      a policy, not just the function's owner). Caught it immediately via a
+      live check, reverted, confirmed normal access restored before touching
+      anything else. Real risk if left as-is is low — no patient *data* leaks
+      this way, at most someone logged in could get a true/false "can I
+      access patient X" answer, or read back their own id/role. The correct
+      fix (move these functions to a schema Supabase doesn't expose over the
+      API, which doesn't touch grants at all) needs each function's body
+      checked first — doing that properly is a separate, dedicated pass, not
+      something to rush tonight. Full account in
+      `supabase/migration_v11_lock_down_helper_functions.sql`.
+
+## Master / assistant visibility — status
+
+- [x] Dr. Neha Tripathi's login is `role = 'Owner'` in the database
+      (confirmed directly via query) — she sees her own calendar, plus the
+      "Mine / Everyone" toggle to see the whole team's schedule for the day.
+- [x] Dr. Ishwari's login is `role = 'Practitioner'` — her calendar is scoped
+      to only her own assigned/covering cases, with no toggle to see anyone
+      else's (there's nothing wider for a non-Owner to switch to — RLS
+      already limits what her account can fetch to her own caseload).
 
 ## Still to do
 
+- [ ] Live browser verification of everything in this update (in progress).
 - [ ] Full storage/load-performance audit across case files, documents, audio,
       billing, follow-ups (partially covered by code-splitting so far)
 - [ ] Apply the real clinic letterhead once provided (currently a text-based
       placeholder letterhead in PDF exports)
+- [ ] Commit + push + one final production deploy, once the above is verified
 - [ ] Final confirmation summary once everything above is resolved

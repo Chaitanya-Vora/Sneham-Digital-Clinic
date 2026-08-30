@@ -1,0 +1,40 @@
+-- Migration v11: Attempted to lock down RLS helper functions — reverted
+-- Run this in Supabase SQL Editor
+--
+-- The security advisor flags my_practitioner_id/my_practitioner_role/
+-- my_patient_id/is_clinic_owner/can_access_patient/handle_new_user/
+-- rls_auto_enable as SECURITY DEFINER functions callable directly via
+-- /rest/v1/rpc/<name> by anon/authenticated. v9's revoke on the first five
+-- never actually took effect — it revoked from "anon, authenticated"
+-- specifically, but Postgres grants EXECUTE to PUBLIC by default at
+-- creation, and a role-specific revoke doesn't remove access PUBLIC still
+-- grants everyone.
+--
+-- Revoking from PUBLIC *does* close the direct-RPC path — but it also
+-- breaks RLS entirely: every policy's USING clause calls these same
+-- functions, and Postgres checks EXECUTE privilege against the querying
+-- role (authenticated/anon) when evaluating a policy expression, same as
+-- any other function call in that role's query. Confirmed live: right
+-- after revoking, `select count(*) from patients` as authenticated failed
+-- with "permission denied for function can_access_patient" — every
+-- practitioner and patient would have been locked out of their own data.
+-- Reverted within the same session (re-granted EXECUTE to PUBLIC on all
+-- seven, restored the default privilege) and confirmed normal access
+-- returned before doing anything else.
+--
+-- These functions are staying directly RPC-callable for now. The actual
+-- correct fix — `ALTER FUNCTION ... SET SCHEMA internal` to move them out
+-- of PostgREST's exposed-schema list without touching any grant (existing
+-- policies keep resolving them by OID, so this shouldn't break anything) —
+-- needs each function's body checked first for schema-qualification
+-- assumptions, and deserves its own careful pass rather than being rushed
+-- in alongside everything else tonight. Real risk if left alone: someone
+-- can call can_access_patient(id) directly to get a true/false "can I
+-- access this patient" oracle, or read back their own id/role via the
+-- my_* functions — no patient *data* is exposed this way (actual reads
+-- still go through full RLS), so this is a lower-priority residual, not
+-- a hole in the access control itself.
+
+-- (No SQL runs from this file — the fix it describes was reverted live.
+-- Left in place as the record of what was tried and why, so nobody
+-- re-attempts the same broken approach without reading this first.)

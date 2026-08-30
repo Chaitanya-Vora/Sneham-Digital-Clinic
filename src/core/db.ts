@@ -50,6 +50,7 @@ function toAppPractitioner(r: any): Practitioner {
     registrationNo: r.registration_no ?? undefined,
     openCases: r.open_cases,
     remedyList: r.remedy_list ?? [],
+    rxTemplates: r.rx_templates ?? [],
   }
 }
 
@@ -64,6 +65,7 @@ function toDbPractitioner(p: Practitioner, authUserId?: string) {
     registration_no: p.registrationNo ?? null,
     open_cases: p.openCases,
     remedy_list: p.remedyList,
+    rx_templates: p.rxTemplates,
     ...(authUserId ? { auth_user_id: authUserId } : {}),
   }
 }
@@ -90,6 +92,7 @@ export async function updatePractitionerDb(id: string, patch: Partial<Practition
   if (patch.registrationNo !== undefined) db.registration_no = patch.registrationNo
   if (patch.openCases !== undefined) db.open_cases = patch.openCases
   if (patch.remedyList !== undefined) db.remedy_list = patch.remedyList
+  if (patch.rxTemplates !== undefined) db.rx_templates = patch.rxTemplates
   if (Object.keys(db).length === 0) return true
   const { error } = await supabase.from('practitioners').update(db).eq('id', id)
   if (error) { console.error('updatePractitioner:', error.message); return false }
@@ -125,6 +128,7 @@ export async function ensurePractitioner(userId: string, userName: string): Prom
     specialty: 'Homeopathy',
     openCases: 0,
     remedyList: DEFAULT_PRACTITIONER_REMEDIES,
+    rxTemplates: [],
   }
 
   await supabase.from('practitioners').insert(toDbPractitioner(practitioner, userId))
@@ -439,6 +443,7 @@ function toAppHandoff(r: any): Handoff {
     note: r.note ?? {},
     status: r.status,
     patientNotified: r.patient_notified,
+    createdAt: r.created_at ?? undefined,
   }
 }
 

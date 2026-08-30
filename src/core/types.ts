@@ -56,6 +56,21 @@ export interface Practitioner {
   registrationNo?: string
   openCases: number
   remedyList: string[] // personal list — the only source for Rx autocomplete
+  rxTemplates: RxTemplate[]
+}
+
+// A saved prescription preset — remedy, potency, dose etc. bundled so a
+// common one (e.g. a standard cold remedy) publishes in one tap instead of
+// re-entering every field each time.
+export interface RxTemplate {
+  id: string
+  label: string
+  remedy: string
+  potency: string
+  doseGlobules: number
+  repetition: Repetition
+  durationDays: number | null
+  preparation: string
 }
 
 export interface Patient {
@@ -152,6 +167,7 @@ export interface Handoff {
   }
   status: 'pending' | 'accepted' | 'declined'
   patientNotified: boolean
+  createdAt?: string
 }
 
 export interface Outcome {

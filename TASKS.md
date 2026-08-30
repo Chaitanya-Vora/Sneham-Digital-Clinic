@@ -170,13 +170,62 @@ click-tested as Neha herself — that would need her password.
       https://sneham-clinic.vercel.app — confirmed loading correctly
       post-deploy.
 
+## Storage / performance audit — done
+
+- [x] **19 missing indexes on foreign key columns, added.** `can_access_patient()`
+      runs an `EXISTS` check against `patients`/`handoffs` on almost every RLS
+      check, on every row, on every table, every 15 seconds (the auto-refresh),
+      across all 3 surfaces. Invisible at 1 patient; would have become a real,
+      growing cost as the real patient count grows. Applied and verified live
+      with zero regressions (`migration_v13`).
+- [x] **8 policies were re-evaluating `auth.uid()` per row instead of once per
+      query** — rewritten to Supabase's own documented `(select auth.uid())`
+      pattern (identical result, evaluated once). Same migration, same
+      verification.
+- [x] **5 tables had a redundant `select` policy fully covered by a broader
+      `all` policy** — Postgres was evaluating both on every read for no
+      reason. Dropped the redundant one on each; access is unchanged.
+      Re-ran the security + performance advisors after: all three finding
+      types are gone, zero new warnings.
+- [x] Bundle/code-splitting re-confirmed still real: the 3 surfaces
+      (web/practitioner/patient) are lazily loaded — a patient's phone never
+      downloads the practitioner or web console code — and PDF export +
+      html2canvas are their own separate lazy chunks, only fetched when
+      someone actually exports a PDF.
+- [x] Voice notes: re-checked against the original audit's "recording thrown
+      away" bug — no longer true. `VoiceRecorder` produces a real Blob,
+      `MobileCaseSheet` uploads it via `uploadDocument()` like any other file.
+- [ ] **Biggest real structural finding, not fixed tonight — needs a real
+      decision, not a quick patch:** every hydrate (on login, and every 15
+      seconds on all 3 surfaces) does an unfiltered `select('*')` against
+      every table — messages, documents, case visits, all of it, with no
+      pagination or date window. Invisible right now with 1 patient and a
+      handful of rows everywhere. Will not stay invisible — a clinic running
+      for a year with real patient volume will eventually be pulling its
+      entire history over the wire every 15 seconds, on every open tab, on
+      every surface. Fixing this properly means adding real pagination or
+      switching from polling to Supabase realtime subscriptions — a genuine
+      design choice (how much history stays "hot", and whether it's worth
+      building realtime now vs. later) worth a real conversation before I
+      build it.
+- [ ] **Smaller, lower priority:** documents/images upload with no
+      client-side compression or size warning before hitting Supabase
+      storage (project-wide cap is 50MB/file, so nothing catastrophic can
+      happen, but a large scan or photo uploads exactly as large as it was
+      taken). Worth adding if storage cost or upload speed becomes a real
+      complaint — not urgent today.
+
 ## Still to do
 
 - [ ] Click-test the Owner Mine/Everyone toggle as Neha herself (needs her
       password — everything else about it is confirmed via code + database).
-- [ ] Full storage/load-performance audit across case files, documents, audio,
-      billing, follow-ups (partially covered by code-splitting so far)
 - [ ] Apply the real clinic letterhead once provided (currently a text-based
       placeholder letterhead in PDF exports)
 - [ ] The real fix for the RLS helper-function RPC exposure (schema
-      relocation) — see the Row Level Security section above.
+      relocation) — tried again tonight, broke access a second time in a
+      different way, reverted again. See `migration_v12_move_to_internal_schema.sql`
+      for the full diagnosis — the mechanism works in isolated testing but not
+      against the real functions, for a reason I couldn't pin down without a
+      third live attempt. Recommend either running the fix live in the
+      Supabase SQL Editor together, or leaving this specific low-severity
+      item deferred.

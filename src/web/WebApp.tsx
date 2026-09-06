@@ -37,13 +37,19 @@ import {
   MapPin,
   SignOut,
   EnvelopeSimple,
+  TestTube,
 } from '@phosphor-icons/react'
 import { todayISO, formatDayLabel, addDaysISO } from '../core/day'
 import { getSections } from '../core/caseTemplate'
 import { useClinic } from '../core/store'
 import { useAuth } from '../auth/AuthProvider'
-import type { Appointment, Patient, Potency, Repetition, RxTemplate } from '../core/types'
+import type { Appointment, Patient, Potency, Repetition, RxTemplate, Invoice, InvoiceLineItem, PaymentMode } from '../core/types'
+import { isOneOffRepetition } from '../core/types'
 import { MASTER_REMEDIES } from '../core/remedies'
+import { INVESTIGATION_CATALOG, ALL_INVESTIGATIONS, wordsOf, matchesAllWords } from '../core/investigations'
+import { DEFAULT_CONSULT_FEE, invoiceTotal, invoiceBalance } from '../core/billing'
+import { STANDARD_MEDICINE_INSTRUCTIONS } from '../core/rxInstructions'
+import { shareViaWhatsApp, shareViaSms, shareViaEmail } from '../core/share'
 import { uploadDocument } from '../core/db'
 import { Avatar, Badge, Button, Card, Chip, Label, Stepper, PatientNotFound } from '../design-system/ui'
 import { Pressable } from '../design-system/Pressable'
@@ -58,11 +64,12 @@ import { CommandPalette, type Command } from './CommandPalette'
 import { WebCalendar } from './WebCalendar'
 import { VideoConsult } from '../video/VideoConsult'
 import { ChatThread } from '../components/ChatThread'
-import { exportPrescriptionPdf, exportInvoicePdf } from '../core/pdfExport'
+import { exportPrescriptionPdf, exportInvoicePdf, exportInvestigationOrderPdf } from '../core/pdfExport'
 
-type Screen = 'today' | 'calendar' | 'patients' | 'patient' | 'prescription' | 'casesheet' | 'followup' | 'reports' | 'settings' | 'restricted' | 'prescriptions-all' | 'casenotes-all' | 'followups-all'
-const POTENCIES: Potency[] = ['6C', '12C', '30C', '200C', '1M', '10M', 'Q']
-const REPS: Repetition[] = ['Once daily · night', 'Twice daily', 'Alternate day', 'Weekly', 'As needed']
+type Screen = 'today' | 'calendar' | 'patients' | 'patient' | 'prescription' | 'investigations' | 'casesheet' | 'followup' | 'reports' | 'settings' | 'restricted' | 'prescriptions-all' | 'casenotes-all' | 'followups-all'
+const POTENCIES: Potency[] = ['6C', '12C', '30C', '200C', '1M', '10M', '50M', 'CM', 'LM', 'Q']
+const REPS: Repetition[] = ['Once daily · night', 'Twice daily', 'Alternate day', 'Weekly', 'As needed', 'Once only today']
+const CLINIC_LOCATIONS = ['Chiplun clinic', 'Pune clinic']
 
 const NAV = [
   { id: 'today', icon: SunHorizon, label: 'Today' },
@@ -187,7 +194,7 @@ export function WebApp() {
           >
             <div>
               <div className="text-[13px] font-semibold text-ink">{selectedClinic}</div>
-              <div className="text-[11px] text-faint">2 other locations</div>
+              <div className="text-[11px] text-faint">{CLINIC_LOCATIONS.length - 1} other location{CLINIC_LOCATIONS.length - 1 === 1 ? '' : 's'}</div>
             </div>
             <CaretRight size={14} className={`text-faint transition ${clinicOpen ? 'rotate-90' : ''}`} />
           </button>
@@ -199,7 +206,7 @@ export function WebApp() {
                 exit={{ opacity: 0, y: -4 }}
                 className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-[12px] border border-border bg-surface shadow-modal"
               >
-                {['Chiplun clinic', 'Andheri clinic', 'Thane clinic'].map((c) => (
+                {CLINIC_LOCATIONS.map((c) => (
                   <button
                     key={c}
                     onClick={() => { setSelectedClinic(c); setClinicOpen(false) }}
@@ -302,12 +309,14 @@ export function WebApp() {
                 <PatientDetail
                   patientId={patientId}
                   onPrescribe={() => setScreen('prescription')}
+                  onOrderInvestigations={() => setScreen('investigations')}
                   onCaseSheet={() => setScreen('casesheet')}
                   onFollowUp={() => setScreen('followup')}
                   onBack={() => setScreen('patients')}
                 />
               )}
               {screen === 'prescription' && <PrescriptionWriter patientId={patientId} onDone={() => setScreen('patient')} />}
+              {screen === 'investigations' && <InvestigationWriter patientId={patientId} onDone={() => setScreen('patient')} />}
               {screen === 'casesheet' && (
                 <CaseSheet patientId={patientId} onPrescribe={() => setScreen('prescription')} onBack={() => setScreen('patient')} />
               )}
@@ -353,12 +362,16 @@ export function WebApp() {
 // ── TODAY ──
 function TodayView({ onOpenPatient, onStartVideo }: { onOpenPatient: (id: string) => void; onStartVideo: (apptId: string) => void }) {
   const allAppts = useClinic((s) => s.appointments)
+  const invoices = useClinic((s) => s.invoices)
   const patients = useClinic((s) => s.patients)
   const role = useClinic((s) => s.role)
   const myId = useClinic((s) => s.currentPractitionerId)
   const practitioners = useClinic((s) => s.practitioners)
   const toast = useToast()
-  const [billingApptId, setBillingApptId] = useState<string | null>(null)
+  // null = modal closed. patientId: null = show the patient picker first
+  // (top-level "Quick bill"); a real id = already scoped to that patient
+  // (opened from a specific appointment's "₹ Collect").
+  const [billing, setBilling] = useState<{ patientId: string | null; appointmentId?: string } | null>(null)
   const [viewMode, setViewMode] = useState<'mine' | 'everyone'>('mine')
   const inr = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`
   const fmt = (n: number) => String(Math.round(n))
@@ -371,9 +384,12 @@ function TodayView({ onOpenPatient, onStartVideo }: { onOpenPatient: (id: string
   const remainingToday = todayAppts.filter((a) => a.status === 'Upcoming' || a.status === 'Waiting' || a.status === 'New').length
   const newToday = todayAppts.filter((a) => a.isFirstVisit).length
   const followUpsDue = appts.filter((a) => a.reason?.toLowerCase().includes('follow')).length
-  const CONSULT_FEE = 1500
-  const revenueToday = todayAppts.reduce((sum, a) => sum + (a.paymentStatus === 'paid' ? (a.fee ?? CONSULT_FEE) : 0), 0)
-  const paidCount = todayAppts.filter((a) => a.paymentStatus === 'paid').length
+  // Revenue is billing, not appointments — sourced from invoices (what was
+  // actually received, excluding cancelled bills), same practitioner/today
+  // scope as the rest of this view.
+  const myInvoicesToday = invoices.filter((i) => i.practitionerId === myId && i.date === todayISO() && i.status !== 'cancelled')
+  const revenueToday = myInvoicesToday.reduce((sum, i) => sum + i.amountReceived, 0)
+  const paidCount = myInvoicesToday.filter((i) => i.amountReceived > 0).length
   const avgValue = paidCount > 0 ? Math.round(revenueToday / paidCount) : 0
   const team = practitioners.filter((p) => p.id !== myId)
   const teamToday = allAppts.filter((a) => a.date === todayISO() && a.practitionerId !== myId)
@@ -414,6 +430,12 @@ function TodayView({ onOpenPatient, onStartVideo }: { onOpenPatient: (id: string
         <div className="mb-3 flex items-center justify-between">
           <h2 className="font-display text-[16px] font-bold text-ink">Today's schedule</h2>
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setBilling({ patientId: null })}
+              className="flex items-center gap-1.5 rounded-pill border border-border bg-surface px-3 py-1.5 text-[12px] font-semibold text-body transition hover:border-green-border hover:text-brand"
+            >
+              <CurrencyInr size={14} weight="bold" /> Quick bill
+            </button>
             <WalkInButton />
             {role === 'Owner' && (
               <div className="inline-flex rounded-pill bg-screen p-0.5">
@@ -441,6 +463,7 @@ function TodayView({ onOpenPatient, onStartVideo }: { onOpenPatient: (id: string
           )}
           {scheduleAppts.map((a) => {
             const p = patients.find((x) => x.id === a.patientId)
+            const apptInvoice = invoices.find((i) => i.appointmentId === a.id && i.status !== 'cancelled')
             return (
               <motion.button
                 key={a.id}
@@ -464,15 +487,15 @@ function TodayView({ onOpenPatient, onStartVideo }: { onOpenPatient: (id: string
                     Join call
                   </button>
                 )}
-                {a.status === 'Seen' && a.paymentStatus !== 'paid' && a.paymentStatus !== 'waived' && (
+                {a.status === 'Seen' && !apptInvoice && (
                   <button
-                    onClick={(e) => { e.stopPropagation(); setBillingApptId(a.id) }}
+                    onClick={(e) => { e.stopPropagation(); setBilling({ patientId: a.patientId, appointmentId: a.id }) }}
                     className="flex items-center gap-1 rounded-pill border border-green-border bg-tint px-3 py-1.5 text-[12px] font-semibold text-brand transition hover:bg-accent hover:text-white"
                   >
                     ₹ Collect
                   </button>
                 )}
-                {a.paymentStatus === 'paid' && <Badge tone="green">₹{a.fee ?? CONSULT_FEE}</Badge>}
+                {apptInvoice && apptInvoice.amountReceived > 0 && <Badge tone="green">₹{apptInvoice.amountReceived.toLocaleString('en-IN')}</Badge>}
                 <Badge tone={a.type === 'Video' ? 'amber' : 'green'}>{a.type}</Badge>
                 <Badge tone={a.status === 'In consult' ? 'green' : 'neutral'}>{a.status}</Badge>
               </motion.button>
@@ -525,102 +548,270 @@ function TodayView({ onOpenPatient, onStartVideo }: { onOpenPatient: (id: string
         </Card>
       )}
 
-      <BillingModal apptId={billingApptId} onClose={() => setBillingApptId(null)} />
+      <InvoiceModal
+        open={billing !== null}
+        patientId={billing?.patientId ?? null}
+        appointmentId={billing?.appointmentId}
+        onClose={() => setBilling(null)}
+      />
     </div>
   )
 }
 
 // ── BILLING ──
-// Used to be a single hardcoded ₹1500-Cash button with no way to enter the
-// real fee or payment mode. Now a real editable form, and can print/share an
-// invoice with the clinic's letterhead.
-function BillingModal({ apptId, onClose }: { apptId: string | null; onClose: () => void }) {
-  const appt = useClinic((s) => s.appointments.find((a) => a.id === apptId))
-  const patient = useClinic((s) => s.patients.find((p) => p.id === appt?.patientId))
-  const doctor = useClinic((s) => s.practitioners.find((p) => p.id === s.currentPractitionerId))
-  const recordPayment = useClinic((s) => s.recordPayment)
+// A real itemized invoice — line items, partial payment, edit and cancel
+// (never delete — analytics need the history) — decoupled from needing an
+// appointment at all, so a phone-call quick bill takes just a few taps:
+// pick a patient (or arrives already scoped to one), adjust the one
+// pre-filled "Consultation" line if needed, Save & print.
+const PAYMENT_MODES: PaymentMode[] = ['Cash', 'UPI', 'Card', 'Bank transfer', 'Other']
+const INVOICE_STATUS_TONE = { paid: 'green', partial: 'amber', unpaid: 'amber', waived: 'neutral', cancelled: 'danger' } as const
+const INVOICE_STATUS_LABEL = { paid: 'Paid', partial: 'Partial', unpaid: 'Unpaid', waived: 'Waived', cancelled: 'Cancelled' } as const
+
+function InvoiceModal({
+  open,
+  patientId,
+  appointmentId,
+  existingInvoice,
+  onClose,
+}: {
+  open: boolean
+  patientId: string | null
+  appointmentId?: string
+  existingInvoice?: Invoice
+  onClose: () => void
+}) {
+  const patients = useClinic((s) => s.patients)
+  const ME = useClinic((s) => s.currentPractitionerId)
+  const createInvoice = useClinic((s) => s.createInvoice)
+  const updateInvoice = useClinic((s) => s.updateInvoice)
+  const cancelInvoice = useClinic((s) => s.cancelInvoice)
   const toast = useToast()
-  const [fee, setFee] = useState(1500)
-  const [mode, setMode] = useState<NonNullable<Appointment['paymentMode']>>('Cash')
 
+  const [pickedPatientId, setPickedPatientId] = useState<string | null>(null)
+  const [pickerQuery, setPickerQuery] = useState('')
+  const [items, setItems] = useState<InvoiceLineItem[]>([{ name: 'Consultation', qty: 1, unitPrice: DEFAULT_CONSULT_FEE }])
+  const [amountReceived, setAmountReceived] = useState(DEFAULT_CONSULT_FEE)
+  const [paymentMode, setPaymentMode] = useState<PaymentMode>('Cash')
+  const [waived, setWaived] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  // Reset to the right starting state whenever the modal opens — editing an
+  // existing invoice always initializes from ITS values, never a fresh
+  // default (the exact bug class this billing code had twice before).
   useEffect(() => {
-    if (appt) setFee(appt.fee ?? 1500)
-  }, [appt?.id])
+    if (!open) return
+    setPickedPatientId(null)
+    setPickerQuery('')
+    if (existingInvoice) {
+      setItems(existingInvoice.items)
+      setAmountReceived(existingInvoice.amountReceived)
+      setPaymentMode(existingInvoice.paymentMode)
+      setWaived(existingInvoice.status === 'waived')
+    } else {
+      const total = DEFAULT_CONSULT_FEE
+      setItems([{ name: 'Consultation', qty: 1, unitPrice: DEFAULT_CONSULT_FEE }])
+      setAmountReceived(total)
+      setPaymentMode('Cash')
+      setWaived(false)
+    }
+  }, [open, existingInvoice])
 
-  if (!apptId || !appt || !patient) return null
+  const resolvedPatientId = patientId ?? pickedPatientId
+  const patient = patients.find((p) => p.id === resolvedPatientId)
+  const total = invoiceTotal(items)
 
-  const modes: NonNullable<Appointment['paymentMode']>[] = ['Cash', 'UPI', 'Card', 'Bank transfer', 'Other']
+  // Keep "amount received" following the total when it was already fully
+  // paid (the common instant-payment case) — but never fight the doctor
+  // once she's deliberately typed a different amount.
+  const receivedTouched = useRef(false)
+  useEffect(() => {
+    if (!receivedTouched.current) setAmountReceived(total)
+  }, [total])
 
-  const printInvoice = async (status: 'paid' | 'unpaid') => {
-    const credentials = [doctor?.qualifications, doctor?.registrationNo].filter(Boolean).join(' · ')
-    await exportInvoicePdf({
-      id: appt.id,
-      patientName: patient.name,
-      patientCode: patient.wsCode,
-      doctorName: doctor?.name ?? 'Doctor',
-      doctorCredentials: credentials || undefined,
-      date: new Date().toISOString(),
-      reason: appt.reason,
-      fee,
-      paymentMode: mode,
-      paymentStatus: status,
-    }).catch(() => {})
+  if (!open) return null
+
+  const updateItem = (i: number, patch: Partial<InvoiceLineItem>) =>
+    setItems((its) => its.map((it, idx) => (idx === i ? { ...it, ...patch } : it)))
+  const addItem = () => setItems((its) => [...its, { name: '', qty: 1, unitPrice: 0 }])
+  const removeItem = (i: number) => setItems((its) => (its.length > 1 ? its.filter((_, idx) => idx !== i) : its))
+
+  const patientPickerResults = pickerQuery.trim()
+    ? patients.filter((p) => p.name.toLowerCase().includes(pickerQuery.trim().toLowerCase()))
+    : patients.slice(0, 6)
+
+  async function handleSaveAndPrint() {
+    if (!patient) return
+    if (items.some((it) => !it.name.trim())) { toast({ title: 'Every item needs a name' }); return }
+    setSaving(true)
+    const status = waived ? 'waived' : amountReceived <= 0 ? 'unpaid' : amountReceived >= total ? 'paid' : 'partial'
+    let invoice: Invoice | null
+    if (existingInvoice) {
+      updateInvoice(existingInvoice.id, { items, amountReceived: waived ? 0 : amountReceived, paymentMode, status })
+      invoice = { ...existingInvoice, items, amountReceived: waived ? 0 : amountReceived, paymentMode, status }
+    } else {
+      invoice = await createInvoice({
+        patientId: patient.id,
+        practitionerId: ME,
+        appointmentId,
+        date: todayISO(),
+        items,
+        paymentMode,
+        amountReceived: waived ? 0 : amountReceived,
+        status,
+      })
+    }
+    setSaving(false)
+    if (!invoice) return
+    toast({ title: existingInvoice ? 'Bill updated' : 'Bill saved', message: `₹${total.toLocaleString('en-IN')} · ${patient.name}` })
+    await exportInvoicePdf(invoice, patient).catch((e) => {
+      console.error('Invoice PDF failed', e)
+      toast({ title: 'Saved, but the PDF failed', message: 'You can reprint it from the invoice list.' })
+    })
+    onClose()
+  }
+
+  function handleCancel() {
+    if (!existingInvoice) return
+    cancelInvoice(existingInvoice.id)
+    toast({ title: 'Bill cancelled', message: `Invoice #${existingInvoice.invoiceNo} won’t count toward revenue anymore.` })
+    onClose()
   }
 
   return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-ink/40 backdrop-blur-sm animate-fade" onClick={onClose}>
       <div
         onClick={(e) => e.stopPropagation()}
-        className="relative mx-4 w-full max-w-[400px] rounded-3xl border border-border bg-surface p-6 shadow-modal animate-pop"
+        className="relative mx-4 max-h-[88vh] w-full max-w-[460px] overflow-y-auto rounded-3xl border border-border bg-surface p-6 shadow-modal animate-pop"
       >
         <button onClick={onClose} className="absolute right-4 top-4 rounded-full p-1 text-muted hover:text-body">
           <X size={18} />
         </button>
-        <h2 className="font-display text-[18px] font-bold text-ink">Collect payment</h2>
-        <p className="mt-0.5 text-[13px] text-muted">{patient.name} · {appt.reason ?? 'Consultation'}</p>
+        <h2 className="font-display text-[18px] font-bold text-ink">{existingInvoice ? `Edit invoice #${existingInvoice.invoiceNo}` : 'Quick bill'}</h2>
 
-        <Label className="mt-4">Fee amount</Label>
-        <div className="mt-1.5 flex items-center gap-2 rounded-[12px] border border-border bg-canvas px-3.5 py-2.5">
-          <span className="text-[15px] font-semibold text-muted">₹</span>
-          <input
-            type="number"
-            value={fee}
-            onChange={(e) => setFee(Number(e.target.value) || 0)}
-            className="w-full bg-transparent text-[15px] font-semibold text-ink outline-none"
-          />
-        </div>
+        {!resolvedPatientId ? (
+          <>
+            <p className="mt-0.5 text-[13px] text-muted">Who is this for?</p>
+            <div className="mt-3 flex items-center gap-2 rounded-pill border border-border bg-canvas px-3.5 py-2">
+              <MagnifyingGlass size={15} className="text-faint" />
+              <input
+                autoFocus
+                value={pickerQuery}
+                onChange={(e) => setPickerQuery(e.target.value)}
+                placeholder="Search patients"
+                className="w-full bg-transparent text-[13px] outline-none placeholder:text-faint"
+              />
+            </div>
+            <div className="mt-2 max-h-[280px] space-y-1.5 overflow-y-auto">
+              {patientPickerResults.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => setPickedPatientId(p.id)}
+                  className="flex w-full items-center gap-3 rounded-[14px] border border-border bg-surface px-3 py-2.5 text-left transition hover:bg-surface-hover"
+                >
+                  <Avatar initials={p.initials} size={32} />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[13.5px] font-semibold text-ink">{p.name}</div>
+                    <div className="truncate text-[11.5px] text-muted">{p.age}y · {p.chiefComplaint}</div>
+                  </div>
+                </button>
+              ))}
+              {patientPickerResults.length === 0 && <p className="py-6 text-center text-[13px] text-faint">No patients found.</p>}
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="mt-0.5 text-[13px] text-muted">{patient?.name}</p>
 
-        <Label className="mt-4">Payment mode</Label>
-        <div className="mt-1.5 flex flex-wrap gap-2">
-          {modes.map((m) => (
-            <button
-              key={m}
-              onClick={() => setMode(m)}
-              className={`rounded-pill border px-3.5 py-2 text-[13px] font-semibold transition ${
-                mode === m ? 'border-green-border bg-tint text-ink-deep' : 'border-border bg-surface text-muted'
-              }`}
-            >
-              {m}
+            <Label className="mt-4">Items</Label>
+            <div className="mt-1.5 space-y-2">
+              {items.map((item, i) => (
+                <div key={i} className="flex items-center gap-1.5">
+                  <input
+                    value={item.name}
+                    onChange={(e) => updateItem(i, { name: e.target.value })}
+                    placeholder="e.g. Consultation, Medicine"
+                    className="min-w-0 flex-1 rounded-[10px] border border-border bg-canvas px-2.5 py-2 text-[13px] text-ink outline-none focus:border-green-border"
+                  />
+                  <input
+                    type="number"
+                    value={item.qty}
+                    onChange={(e) => updateItem(i, { qty: Math.max(1, Number(e.target.value) || 1) })}
+                    className="w-12 rounded-[10px] border border-border bg-canvas px-1.5 py-2 text-center text-[13px] text-ink outline-none focus:border-green-border"
+                    title="Quantity"
+                  />
+                  <div className="flex w-24 items-center gap-1 rounded-[10px] border border-border bg-canvas px-2 py-2">
+                    <span className="text-[12px] text-muted">₹</span>
+                    <input
+                      type="number"
+                      value={item.unitPrice}
+                      onChange={(e) => updateItem(i, { unitPrice: Number(e.target.value) || 0 })}
+                      className="w-full bg-transparent text-[13px] text-ink outline-none"
+                      title="Price per unit"
+                    />
+                  </div>
+                  <button onClick={() => removeItem(i)} disabled={items.length === 1} className="p-1 text-faint hover:text-danger disabled:opacity-30">
+                    <X size={14} weight="bold" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <button onClick={addItem} className="mt-2 flex items-center gap-1 text-[12.5px] font-semibold text-brand">
+              <Plus size={13} weight="bold" /> Add item
             </button>
-          ))}
-        </div>
 
-        <div className="mt-6 flex gap-2">
-          <Button variant="ghost" className="flex-1" onClick={() => printInvoice('paid')}>
-            <Printer size={16} /> PDF
-          </Button>
-          <Button
-            variant="accent"
-            className="flex-1"
-            onClick={() => {
-              recordPayment(appt.id, fee, mode, 'paid')
-              toast({ title: 'Payment recorded', message: `₹${fee.toLocaleString('en-IN')} — ${mode}` })
-              onClose()
-            }}
-          >
-            <CurrencyInr size={16} weight="bold" /> Record payment
-          </Button>
-        </div>
+            <div className="mt-3 flex items-center justify-between rounded-[12px] bg-tint px-3.5 py-2.5">
+              <span className="text-[13px] font-semibold text-ink-deep">Total</span>
+              <span className="text-[15px] font-bold text-ink-deep">₹{total.toLocaleString('en-IN')}</span>
+            </div>
+
+            <Label className="mt-4">Amount received</Label>
+            <div className="mt-1.5 flex items-center gap-2 rounded-[12px] border border-border bg-canvas px-3.5 py-2.5">
+              <span className="text-[15px] font-semibold text-muted">₹</span>
+              <input
+                type="number"
+                value={waived ? 0 : amountReceived}
+                disabled={waived}
+                onChange={(e) => { receivedTouched.current = true; setAmountReceived(Number(e.target.value) || 0) }}
+                className="w-full bg-transparent text-[15px] font-semibold text-ink outline-none disabled:opacity-50"
+              />
+              {!waived && amountReceived !== total && (
+                <button onClick={() => { receivedTouched.current = true; setAmountReceived(total) }} className="shrink-0 text-[11.5px] font-semibold text-brand">Paid in full</button>
+              )}
+            </div>
+            <div className="mt-1.5 flex items-center justify-between">
+              <label className="flex items-center gap-1.5 text-[12px] text-muted">
+                <input type="checkbox" checked={waived} onChange={(e) => setWaived(e.target.checked)} className="accent-brand" />
+                Waive this bill (no charge)
+              </label>
+              {!waived && amountReceived < total && <span className="text-[12px] font-semibold text-amber-text">Balance ₹{(total - amountReceived).toLocaleString('en-IN')}</span>}
+            </div>
+
+            <Label className="mt-4">Payment mode</Label>
+            <div className="mt-1.5 flex flex-wrap gap-2">
+              {PAYMENT_MODES.map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setPaymentMode(m)}
+                  className={`rounded-pill border px-3.5 py-2 text-[13px] font-semibold transition ${
+                    paymentMode === m ? 'border-green-border bg-tint text-ink-deep' : 'border-border bg-surface text-muted'
+                  }`}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-6 flex gap-2">
+              {existingInvoice && (
+                <Button variant="ghost" className="!text-danger" onClick={handleCancel}>Cancel bill</Button>
+              )}
+              <Button variant="accent" className="flex-1" disabled={saving} onClick={handleSaveAndPrint}>
+                <CurrencyInr size={16} weight="bold" /> {saving ? 'Saving…' : 'Save & print'}
+              </Button>
+            </div>
+          </>
+        )}
       </div>
     </div>,
     document.body,
@@ -1088,7 +1279,7 @@ function FollowUpsOverview({ onOpenFollowUp }: { onOpenFollowUp: (id: string) =>
 }
 
 // ── PATIENT DETAIL ──
-function PatientDetail({ patientId, onPrescribe, onCaseSheet, onFollowUp, onBack }: { patientId: string; onPrescribe: () => void; onCaseSheet: () => void; onFollowUp: () => void; onBack: () => void }) {
+function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSheet, onFollowUp, onBack }: { patientId: string; onPrescribe: () => void; onOrderInvestigations: () => void; onCaseSheet: () => void; onFollowUp: () => void; onBack: () => void }) {
   const patient = useClinic((s) => s.patients.find((p) => p.id === patientId))
   const rx = useClinic((s) => s.prescriptions.filter((r) => r.patientId === patientId))
   const docs = useClinic((s) => s.documents.filter((d) => d.patientId === patientId))
@@ -1096,13 +1287,14 @@ function PatientDetail({ patientId, onPrescribe, onCaseSheet, onFollowUp, onBack
   const checkIns = useClinic((s) => s.checkIns.filter((c) => c.patientId === patientId))
   const handoffs = useClinic((s) => s.handoffs.filter((h) => h.patientId === patientId))
   const appointments = useClinic((s) => s.appointments.filter((a) => a.patientId === patientId))
+  const invoices = useClinic((s) => s.invoices.filter((i) => i.patientId === patientId))
   const practitioners = useClinic((s) => s.practitioners)
   const doctor = useClinic((s) => s.practitioners.find((p) => p.id === s.currentPractitionerId))
   const assignPatient = useClinic((s) => s.assignPatient)
   const addDocument = useClinic((s) => s.addDocument)
   const toast = useToast()
   const [assignOpen, setAssignOpen] = useState(false)
-  const [billingApptId, setBillingApptId] = useState<string | null>(null)
+  const [billing, setBilling] = useState<{ patientId: string; appointmentId?: string; existingInvoice?: Invoice } | null>(null)
   const [assignPos, setAssignPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
   const assignRef = useRef<HTMLDivElement>(null)
   const assignDropRef = useRef<HTMLDivElement>(null)
@@ -1135,30 +1327,14 @@ function PatientDetail({ patientId, onPrescribe, onCaseSheet, onFollowUp, onBack
     ['Next follow-up', (() => { const fa = appointments.filter(a => a.patientId === patient.id && a.status === 'Upcoming').sort((a, b) => a.time.localeCompare(b.time))[0]; return fa ? `${formatDayLabel(fa.date)} · ${fa.time}` : 'Not scheduled' })()],
   ]
 
-  // Invoice history — every appointment that's had a fee entered, most
-  // recent first. Separate from the "record payment" target below, which
-  // is whichever appointment most likely still needs a bill.
-  const invoices = appointments
-    .filter((a) => a.fee != null)
-    .sort((a, b) => b.date.localeCompare(a.date))
-  const billableAppt =
-    appointments.filter((a) => a.status === 'Seen' && a.paymentStatus !== 'paid' && a.paymentStatus !== 'waived').sort((a, b) => b.date.localeCompare(a.date))[0]
-    ?? appointments.filter((a) => a.status === 'Seen' || a.status === 'In consult').sort((a, b) => b.date.localeCompare(a.date))[0]
+  // Invoice history — real invoices for this patient, most recent first.
+  // Cancelled invoices stay in this list (never deleted) so history and
+  // analytics stay auditable, just excluded from revenue sums elsewhere.
+  const sortedInvoices = [...invoices].sort((a, b) => b.date.localeCompare(a.date) || b.invoiceNo - a.invoiceNo)
 
-  const reprintInvoice = (a: Appointment) => {
-    const credentials = [doctor?.qualifications, doctor?.registrationNo].filter(Boolean).join(' · ')
-    exportInvoicePdf({
-      id: a.id,
-      patientName: patient.name,
-      patientCode: patient.wsCode,
-      doctorName: doctor?.name ?? 'Doctor',
-      doctorCredentials: credentials || undefined,
-      date: a.paidAt ?? a.date,
-      reason: a.reason,
-      fee: a.fee ?? 0,
-      paymentMode: a.paymentMode ?? 'Cash',
-      paymentStatus: a.paymentStatus ?? 'unpaid',
-    }).catch(() => {})
+  const printInvoice = (inv: Invoice) => {
+    if (!patient) return
+    exportInvoicePdf(inv, patient).catch(() => {})
   }
 
   type TimelineEvent = { id: string; date: string; kind: 'visit' | 'prescription' | 'check-in' | 'outcome' | 'handoff'; title: string; detail: string; tone: 'green' | 'amber' | 'neutral' }
@@ -1212,6 +1388,7 @@ function PatientDetail({ patientId, onPrescribe, onCaseSheet, onFollowUp, onBack
         </div>
         <Button variant="ghost" size="sm" onClick={onFollowUp}><ArrowsClockwise size={15} /> Follow-up</Button>
         <Button variant="ghost" size="sm" onClick={onCaseSheet}><Notebook size={15} /> Open case sheet</Button>
+        <Button variant="ghost" size="sm" onClick={onOrderInvestigations}><TestTube size={15} /> Order investigations</Button>
         <Button variant="primary" size="sm" onClick={onPrescribe}><RxIcon size={15} weight="fill" /> Write prescription</Button>
       </Card>
 
@@ -1278,37 +1455,40 @@ function PatientDetail({ patientId, onPrescribe, onCaseSheet, onFollowUp, onBack
           <Card className="p-5">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="font-display text-[15px] font-bold text-ink">Billing</h2>
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={!billableAppt}
-                onClick={() => billableAppt && setBillingApptId(billableAppt.id)}
-                title={billableAppt ? undefined : 'No consult ready to bill yet'}
-              >
-                <CurrencyInr size={14} weight="bold" /> Record payment
+              <Button variant="ghost" size="sm" onClick={() => setBilling({ patientId })}>
+                <CurrencyInr size={14} weight="bold" /> Quick bill
               </Button>
             </div>
-            {invoices.length === 0 ? (
+            {sortedInvoices.length === 0 ? (
               <p className="py-3 text-center text-[12.5px] text-faint">No invoices yet.</p>
             ) : (
               <div className="space-y-2.5">
-                {invoices.map((a) => (
-                  <div key={a.id} className="flex items-center gap-3 rounded-[14px] border border-border bg-surface px-4 py-3">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-tint text-brand">
-                      <CurrencyInr size={17} weight="bold" />
+                {sortedInvoices.map((inv) => {
+                  const total = invoiceTotal(inv.items)
+                  const cancelled = inv.status === 'cancelled'
+                  return (
+                    <div key={inv.id} className={`flex items-center gap-3 rounded-[14px] border border-border bg-surface px-4 py-3 ${cancelled ? 'opacity-60' : ''}`}>
+                      <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-tint text-brand">
+                        <CurrencyInr size={17} weight="bold" />
+                      </div>
+                      <div className="flex-1">
+                        <div className={`font-display text-[14px] font-semibold text-ink ${cancelled ? 'line-through' : ''}`}>
+                          ₹{total.toLocaleString('en-IN')} <span className="font-body text-[11.5px] font-normal text-faint">#{inv.invoiceNo}</span>
+                        </div>
+                        <div className="text-[12px] text-muted">{formatDayLabel(inv.date)} · {inv.items[0]?.name ?? 'Consultation'}{inv.items.length > 1 ? ` +${inv.items.length - 1} more` : ''} · {inv.paymentMode}</div>
+                      </div>
+                      <Badge tone={INVOICE_STATUS_TONE[inv.status]}>{INVOICE_STATUS_LABEL[inv.status]}</Badge>
+                      {!cancelled && (
+                        <button onClick={() => setBilling({ patientId, appointmentId: inv.appointmentId, existingInvoice: inv })} title="Edit invoice" className="text-faint hover:text-body">
+                          <PencilSimple size={16} />
+                        </button>
+                      )}
+                      <button onClick={() => printInvoice(inv)} title="Print / save PDF" className="text-faint hover:text-body">
+                        <Printer size={16} />
+                      </button>
                     </div>
-                    <div className="flex-1">
-                      <div className="font-display text-[14px] font-semibold text-ink">₹{(a.fee ?? 0).toLocaleString('en-IN')}</div>
-                      <div className="text-[12px] text-muted">{formatDayLabel(a.date)} · {a.reason ?? 'Consultation'}{a.paymentMode ? ` · ${a.paymentMode}` : ''}</div>
-                    </div>
-                    <Badge tone={a.paymentStatus === 'paid' ? 'green' : a.paymentStatus === 'waived' ? 'neutral' : 'amber'}>
-                      {a.paymentStatus === 'paid' ? 'Paid' : a.paymentStatus === 'waived' ? 'Waived' : 'Unpaid'}
-                    </Badge>
-                    <button onClick={() => reprintInvoice(a)} title="Print / save PDF" className="text-faint hover:text-body">
-                      <Printer size={16} />
-                    </button>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </Card>
@@ -1388,7 +1568,13 @@ function PatientDetail({ patientId, onPrescribe, onCaseSheet, onFollowUp, onBack
           </Card>
         </div>
       </div>
-      <BillingModal apptId={billingApptId} onClose={() => setBillingApptId(null)} />
+      <InvoiceModal
+        open={billing !== null}
+        patientId={billing?.patientId ?? null}
+        appointmentId={billing?.appointmentId}
+        existingInvoice={billing?.existingInvoice}
+        onClose={() => setBilling(null)}
+      />
     </div>
   )
 }
@@ -1412,7 +1598,10 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
   const [duration, setDuration] = useState(14)
   const [rep, setRep] = useState<Repetition>('Once daily · night')
   const [prep, setPrep] = useState("Dissolve under the tongue at night, 15 minutes away from food, drink or mint. Tip into the cap — don't touch the globules.")
-  const [channels, setChannels] = useState<string[]>(['WhatsApp'])
+  // Starts empty — a channel only ever gets marked "shared" (see the chip
+  // handler below) once the real external share for it actually fired, never
+  // as a pre-selected default with nothing sent yet.
+  const [channels, setChannels] = useState<string[]>([])
 
   // What actually prints on the slip — in the doctor's own words/shorthand,
   // not necessarily the plain remedy name (many homeopaths deliberately
@@ -1426,8 +1615,8 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
   useEffect(() => {
     if (bodyTouched) return
     if (!remedy.trim()) { setBodyText(''); return }
-    const doseLine = rep === 'As needed'
-      ? `${remedy} ${potency} — ${dose} globules, as needed`
+    const doseLine = isOneOffRepetition(rep)
+      ? `${remedy} ${potency} — ${dose} globules, ${rep.toLowerCase()}`
       : `${remedy} ${potency} — ${dose} globules, ${rep}${duration ? `, ${duration} days` : ''}`
     setBodyText(doseLine)
   }, [remedy, potency, dose, rep, duration, bodyTouched])
@@ -1456,7 +1645,7 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
       potency,
       doseGlobules: dose,
       repetition: rep,
-      durationDays: rep === 'As needed' ? null : duration,
+      durationDays: isOneOffRepetition(rep) ? null : duration,
       preparation: prep,
     }
     updatePractitioner(doctor.id, { rxTemplates: [...(doctor.rxTemplates ?? []), t] })
@@ -1478,6 +1667,23 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
   const toggleChannel = (c: string) =>
     setChannels((cs) => (cs.includes(c) ? cs.filter((x) => x !== c) : [...cs, c]))
 
+  // Tapping an on chip is just a tracking correction — there's no "unsend".
+  // Tapping an off chip actually fires the external share right now, built
+  // from the current form state (same as the Print button below), and only
+  // marks the channel as shared once that share genuinely went out.
+  function shareChannel(c: string) {
+    if (channels.includes(c)) { toggleChannel(c); return }
+    if (!patient) return
+    if (!remedy.trim()) { toast({ title: 'Enter a remedy first' }); return }
+    const message = `Prescription from ${CLINIC_DETAILS.doctorName} for ${patient.name}:\n${bodyText.trim() || `${remedy} ${potency}`}${prep.trim() ? `\nPreparation: ${prep.trim()}` : ''}`
+    let sent = true
+    if (c === 'WhatsApp') sent = shareViaWhatsApp(patient.phone, message)
+    else if (c === 'SMS') sent = shareViaSms(patient.phone, message)
+    else if (c === 'Email') shareViaEmail(undefined, `Prescription for ${patient.name}`, message)
+    if (!sent) { toast({ title: 'No phone number on file', message: `Add a phone number for ${patient.name} first.` }); return }
+    toggleChannel(c)
+  }
+
   if (!patient) return <PatientNotFound onBack={onDone} />
 
   function onPublish() {
@@ -1490,10 +1696,10 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
       potency,
       doseGlobules: dose,
       repetition: rep,
-      durationDays: rep === 'As needed' ? null : duration,
+      durationDays: isOneOffRepetition(rep) ? null : duration,
       preparation: prep,
       bodyText: bodyText.trim() || undefined,
-      remindersEnabled: rep !== 'As needed',
+      remindersEnabled: !isOneOffRepetition(rep),
       reminderTimes: rep === 'Twice daily' ? ['8:00 AM', '8:00 PM'] : ['8:00 PM'],
       sharedVia: ['Patient app', ...channels],
       origin: 'web',
@@ -1503,7 +1709,7 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
     // checking back on it is the exact gap a follow-up reminder exists to
     // close. "As needed" has no natural end date, so it's skipped.
     let followUpNote = ''
-    if (rep !== 'As needed' && duration > 0) {
+    if (!isOneOffRepetition(rep) && duration > 0) {
       const followUpDate = addDaysISO(todayISO(), duration)
       scheduleFollowUp({
         patientId,
@@ -1668,7 +1874,12 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
           </div>
 
           <div>
-            <Label>Preparation · in plain language for the patient</Label>
+            <div className="flex items-center justify-between">
+              <Label>Preparation · in plain language for the patient</Label>
+              <button type="button" onClick={() => setPrep(STANDARD_MEDICINE_INSTRUCTIONS)} className="text-[11.5px] font-semibold text-brand hover:text-accent-deep">
+                Insert standard instructions
+              </button>
+            </div>
             <textarea
               value={prep}
               onChange={(e) => setPrep(e.target.value)}
@@ -1707,7 +1918,7 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
               ].map(([c, Icon]: any) => (
                 <button
                   key={c}
-                  onClick={() => toggleChannel(c)}
+                  onClick={() => shareChannel(c)}
                   className={`flex flex-1 items-center justify-center gap-1.5 rounded-pill border px-3 py-2 text-[13px] font-semibold transition ${
                     channels.includes(c) ? 'border-green-border bg-tint text-ink-deep' : 'border-border bg-surface text-muted'
                   }`}
@@ -1723,8 +1934,7 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
               <button onClick={async () => {
                 if (!remedy.trim()) { toast({ title: 'Enter a remedy first' }); return }
                 const rx = { id: crypto.randomUUID(), patientId: patient.id, practitionerId: doctor?.id ?? '', remedy: remedy.trim(), potency: potency as any, doseGlobules: dose, repetition: rep as any, durationDays: duration, preparation: prep, bodyText: bodyText.trim() || undefined, publishedAt: new Date().toISOString(), sharedVia: [], remindersEnabled: false, reminderTimes: [] }
-                const credentials = [doctor?.qualifications, doctor?.registrationNo].filter(Boolean).join(' · ')
-                await exportPrescriptionPdf(rx, patient.name, doctor?.name ?? 'Doctor', undefined, credentials || undefined).catch((e) => {
+                await exportPrescriptionPdf(rx, patient).catch((e) => {
                   console.error('PDF export failed', e)
                   toast({ title: 'PDF export failed', message: e instanceof Error ? e.message : 'Please try again.' })
                 })
@@ -1732,6 +1942,156 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
             </div>
           </Card>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ── INVESTIGATION ORDER (lab tests / scans) ──
+// Same real letterhead as prescriptions (the practice has no separate
+// format for this) — a search-only picker, not a category checklist, per
+// the client's explicit instruction: type the start of a word and matching
+// tests surface to add, no browse/select-all UI.
+function InvestigationWriter({ patientId, onDone }: { patientId: string; onDone: () => void }) {
+  const patient = useClinic((s) => s.patients.find((p) => p.id === patientId))
+  const doctor = useClinic((s) => s.practitioners.find((p) => p.id === s.currentPractitionerId))
+  const createOrder = useClinic((s) => s.createInvestigationOrder)
+  const toast = useToast()
+
+  const [query, setQuery] = useState('')
+  const [selected, setSelected] = useState<string[]>([])
+  const [notes, setNotes] = useState('')
+  const [searchOpen, setSearchOpen] = useState(false)
+  const searchRef = useRef<HTMLDivElement>(null)
+  const searchDropRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!searchOpen) return
+    const onClick = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (searchRef.current?.contains(t) || searchDropRef.current?.contains(t)) return
+      setSearchOpen(false)
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [searchOpen])
+
+  // Deliberately prefix-of-word matching (see `matchesAllWords` in
+  // core/investigations.ts — shared with the practitioner-app picker so a
+  // fix like multi-word queries never needs to be made twice).
+  const matches = useMemo(() => {
+    const queryWords = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+    if (queryWords.length === 0) return []
+    const selectedSet = new Set(selected)
+    const fromCategory = INVESTIGATION_CATALOG
+      .filter((c) => matchesAllWords(queryWords, wordsOf(c.category)))
+      .flatMap((c) => c.tests.map((test) => ({ test, category: c.category })))
+    const fromTest = ALL_INVESTIGATIONS.filter(({ test }) => matchesAllWords(queryWords, wordsOf(test)))
+    const seen = new Set<string>()
+    return [...fromCategory, ...fromTest]
+      .filter(({ test }) => !seen.has(test) && !selectedSet.has(test) && (seen.add(test), true))
+      .slice(0, 12)
+  }, [query, selected])
+
+  const toggleTest = (test: string) =>
+    setSelected((s) => (s.includes(test) ? s.filter((t) => t !== test) : [...s, test]))
+
+  if (!patient) return <PatientNotFound onBack={onDone} />
+
+  async function handleGenerate() {
+    if (!patient) return
+    if (selected.length === 0) { toast({ title: 'Add at least one investigation' }); return }
+    const order = createOrder({ patientId, practitionerId: doctor?.id ?? '', tests: selected, notes: notes.trim() })
+    await exportInvestigationOrderPdf(order, patient).catch((e) => {
+      console.error('PDF export failed', e)
+      toast({ title: 'PDF export failed', message: e instanceof Error ? e.message : 'Please try again.' })
+    })
+    toast({
+      title: 'Investigation slip generated',
+      message: `${selected.length} test${selected.length === 1 ? '' : 's'} for ${patient.name}.`,
+      action: { label: 'Back to patient', onClick: onDone },
+    })
+    onDone()
+  }
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h1 className="font-display text-[20px] font-bold text-ink">Investigations · {patient.name}</h1>
+        <div className="text-[12.5px] text-faint">Same letterhead as prescriptions · prints as a requisition slip</div>
+      </div>
+
+      <div className="grid grid-cols-[1.3fr_1fr] gap-4">
+        <Card className="space-y-5 p-5">
+          <div className="relative" ref={searchRef}>
+            <Label>Add investigation</Label>
+            <div className="mt-2 flex items-center gap-2 rounded-pill border border-border bg-surface px-3.5 py-2">
+              <MagnifyingGlass size={15} className="text-faint" />
+              <input
+                value={query}
+                onChange={(e) => { setQuery(e.target.value); setSearchOpen(true) }}
+                onFocus={() => setSearchOpen(true)}
+                placeholder="Start typing — CBC, thyroid, vitamin d…"
+                className="w-full bg-transparent text-[13.5px] outline-none placeholder:text-faint"
+              />
+            </div>
+            {searchOpen && matches.length > 0 && (
+              <div ref={searchDropRef} className="absolute left-0 right-0 top-full z-20 mt-1">
+                <Card className="max-h-[280px] overflow-y-auto p-1.5 shadow-float">
+                  {matches.map(({ test, category }) => (
+                    <button
+                      key={test}
+                      onClick={() => { toggleTest(test); setQuery('') }}
+                      className="flex w-full items-center justify-between gap-3 rounded-[8px] px-3 py-2 text-left transition hover:bg-tint"
+                    >
+                      <span className="text-[13px] font-semibold text-ink">{test}</span>
+                      <span className="shrink-0 text-[11px] text-faint">{category}</span>
+                    </button>
+                  ))}
+                </Card>
+              </div>
+            )}
+          </div>
+
+          <div>
+            <Label>Selected{selected.length > 0 ? ` (${selected.length})` : ''}</Label>
+            {selected.length === 0 ? (
+              <p className="mt-2 text-[12.5px] text-faint">Nothing added yet — search above to add tests.</p>
+            ) : (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {selected.map((test) => (
+                  <span key={test} className="flex items-center gap-1.5 rounded-pill border border-border bg-tint px-3 py-1.5 text-[12.5px] font-semibold text-ink-deep">
+                    {test}
+                    <button onClick={() => toggleTest(test)} className="text-faint hover:text-danger">
+                      <X size={12} weight="bold" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <Label>What&apos;s this for? (prints as &quot;Diagnosis&quot; on the slip)</Label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Optional — leave blank to use the patient's chief complaint"
+              rows={2}
+              className="mt-2 w-full resize-none rounded-[14px] border border-border bg-surface px-3.5 py-2.5 text-[13px] outline-none focus:border-green-border"
+            />
+          </div>
+        </Card>
+
+        <Card className="space-y-3 p-5">
+          <Label>Ready to print</Label>
+          <p className="text-[12.5px] text-muted">
+            Generates a requisition slip on the real letterhead with the selected test{selected.length === 1 ? '' : 's'}, grouped by category, under {patient.name}&apos;s details.
+          </p>
+          <Button variant="primary" className="w-full" disabled={selected.length === 0} onClick={handleGenerate}>
+            <Printer size={16} /> Generate &amp; save PDF
+          </Button>
+        </Card>
       </div>
     </div>
   )
@@ -1803,13 +2163,14 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
   const appointments = useClinic((s) => s.appointments)
   const prescriptions = useClinic((s) => s.prescriptions)
   const practitioners = useClinic((s) => s.practitioners)
+  const invoices = useClinic((s) => s.invoices)
 
   const inr = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`
 
-  const CONSULT_FEE = 1500
   const seenCount = appointments.filter((a) => a.status === 'Seen' || a.status === 'In consult').length
-  const paidAppts = appointments.filter((a) => a.paymentStatus === 'paid')
-  const totalRevenue = paidAppts.reduce((sum, a) => sum + (a.fee ?? CONSULT_FEE), 0)
+  // Revenue is billing, not appointments — sourced from invoices (what was
+  // actually received, excluding cancelled bills), clinic-wide/all-time.
+  const totalRevenue = invoices.filter((i) => i.status !== 'cancelled').reduce((sum, i) => sum + i.amountReceived, 0)
 
   // Adherence = of follow-ups that have actually come due (seen or cancelled —
   // not still upcoming), what fraction were kept vs. missed. Null rather than

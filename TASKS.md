@@ -275,22 +275,139 @@ click-tested as Neha herself — that would need her password.
       taken). Worth adding if storage cost or upload speed becomes a real
       complaint — not urgent today.
 
+## Done (this session)
+
+- [x] **Prescription letterhead font size + spacing fixed.** The overlay text
+      was 24pt against the template's own actual 22.31pt (measured directly
+      off its embedded font, not assumed) — now matches exactly. Date and Sex
+      were printing jammed against their labels ("Date:31 Aug 2026") because
+      the source document has no space there (unlike Patient Name/Age/
+      Diagnosis, which do) — nudged just those two x-positions to match.
+      Patient Name and Diagnosis now shrink-to-fit their printed line instead
+      of running off the end for a long value, down to a 13pt floor.
+- [x] **Diagnosed and fixed the recurring "keeps crashing, have to click
+      Restart app" bug.** Root cause: every deploy renames the app's JS chunk
+      files; a browser tab open since before the latest deploy 404s the next
+      time it tries to load a screen it hasn't already loaded, crashing to
+      the manual "Something went wrong" screen. `ErrorBoundary.tsx` now
+      auto-reloads once on that specific failure (silently picks up the
+      current build) instead of showing an error, falling back to the manual
+      restart screen only if a reload doesn't actually fix it.
+- [x] **Investigation orders (lab tests/scans) — built and verified live.**
+      Same real letterhead as prescriptions (client's explicit call — she has
+      no separate format for this). Search-only picker per her instruction
+      (no checkbox/category browser): typing the start of a word — including
+      a category name like "thyroid" — surfaces matching tests to add;
+      multi-word queries like "vitamin d" work too. New `investigation_orders`
+      table (migration v16, applied), full store/db wiring, PDF export
+      reusing the prescription template's placeholder logic. Web console only
+      so far — reachable from a patient's page via "Order investigations".
+- [x] Free-text prescription body ported to practitioner mobile's Quick Rx —
+      same auto-fill-then-freeform pattern as the web console, verified live.
+- [x] Click-tested the Owner Mine/Everyone toggle as Neha herself (now have
+      her login). Confirmed on **web**: switching to "Everyone" shows a
+      "Your team today" section with Dr Ishwari's schedule underneath — the
+      master practitioner does see assistants' schedules there.
+- [x] Investigation orders brought to the practitioner mobile app too —
+      "Order investigations" now on the patient detail screen's action row,
+      same search-only picker and PDF export as web (shared matching logic
+      now lives in `core/investigations.ts` so both stay in sync). Verified
+      live on mobile: multi-word search, category-name search, and a
+      generated PDF all confirmed correct.
+- [x] "Tabs redirect to select-a-patient" report — confirmed resolved by you,
+      closing out. (Never found an independent repro or root cause myself —
+      noting that honestly rather than claiming a specific fix.)
+
+- [x] **Team schedule brought to practitioner mobile too, matching web.**
+      `TodayGrid.tsx` was pulling every practitioner's appointments with no
+      filter at all — worse than "not visible," it was always-shown and
+      unlabeled, with Start/End/Reschedule/No-show all live on every row
+      regardless of whose appointment it was (Neha's phone could show
+      Ishwari's active consult with a working "End" button on it). Fixed:
+      her own schedule is the default everywhere (stats, the active-consult
+      banner, the grid) with a new Mine/Everyone toggle (Owner-only,
+      matching web) to merge in the team's appointments; a teammate's
+      appointment shows their name as a tag and is tap-to-view only, no
+      action buttons. Added the same "Your team today" card as web, placed
+      below her own schedule + Block time. Verified live as Neha: toggle
+      switches correctly, team card renders both teammates.
+- [x] **Add Patient tested end-to-end on practitioner mobile**, per your ask
+      — search sheet's "+" → validation (blocked empty submit with inline
+      errors) → registered → landed on the new patient's case sheet →
+      confirmed searchable afterward. Created one real test record in the
+      process: "ZZTEST Delete Me" — flagging it, not deleting it without
+      you asking.
+- [x] Found and fixed a real bug while testing: Add Patient's Location field
+      defaulted to a pre-filled "Bandra" (not just a placeholder — an actual
+      value that would submit if untouched). Now starts blank with
+      "Chiplun" as an example placeholder only.
+
+- [x] **Full billing/invoicing module — web + practitioner mobile, built and
+      live-verified end to end.** New `Invoice` entity (its own table,
+      migration v17, real sequential invoice numbers via a Postgres identity
+      column, decoupled from appointments so a phone-call quick bill needs
+      no visit behind it). Itemized lines, partial payment, edit and cancel
+      (cancel never deletes — stays visible in history, excluded from
+      revenue). "Quick bill" reachable from Today on both surfaces and from
+      a patient's own page. Reports and Today's revenue stat now sum real
+      `amountReceived` from invoices instead of a derived appointment fee.
+      PDF rewritten to match her actual bill format — itemized table, amount
+      in words, bank/UPI details, a real scannable QR (decoded it back
+      during testing to confirm the exact amount/invoice number encoded).
+      Verified live: multi-item partial-payment bill created, edited,
+      cancelled — confirmed revenue updates correctly at each step, then
+      cleaned up the test invoices from the real DB afterward.
+- [x] **Found and fixed a real bug during that testing: ₹ printed as a
+      garbled superscript character on every invoice PDF.** The PDF
+      library's default font has no Rupee glyph and was silently
+      substituting something else instead of erroring. Fixed by embedding a
+      real font (subset to just the glyphs the invoice needs, ~16KB) and
+      confirmed correct on a fresh render.
+- [x] **WhatsApp / SMS / Email share buttons wired up for real** — on the web
+      prescription writer and mobile Quick Rx, these used to only toggle a
+      local tag with zero actual effect. Now they open the real WhatsApp/
+      SMS/email link, prefilled, and only mark themselves "sent" if a phone
+      number was actually on file (with a toast when it isn't) — verified
+      both the no-phone-on-file case and the successful-send case.
+- [x] Consultation fee default corrected to ₹950 (was a placeholder 1500).
+- [x] Prescription potency chips: added 50M, CM, LM. Repetition: added "Once
+      only today" (treated everywhere the same way "As needed" already is —
+      no forced duration, no auto-booked follow-up, dose reminders off).
+- [x] Modality field labels corrected: "Better for" / "Worse for" →
+      "Better by" / "Worse by", across all three case templates (chronic,
+      acute, first-visit).
+- [x] Added an "Insert standard instructions" shortcut to the prescription's
+      Preparation field (web + mobile) that fills in her standard
+      medicine-instructions text (dosing, SOS, the avoid-list) — she still
+      edits in the bottle-specific remedy/potency per patient.
+- [x] Clinic-location switcher (sidebar, web) was showing three fake
+      hardcoded names ("Andheri clinic", "Thane clinic" — never real, never
+      wired to anything). Corrected to her actual two locations, Chiplun and
+      Pune. Note: this switcher still doesn't filter anything by location —
+      it never did — just the names were wrong before. Making it actually
+      filter appointments/patients by location would be a real follow-up
+      feature, not a bug fix, if you want it.
+- [x] **Found and fixed a real data-loss bug: case notes could appear to
+      "delete what you just typed."** Root cause wasn't the spacebar itself —
+      the 15-second background refresh could land mid-edit (before the
+      ~1 second autosave finished) and snap the field back to the
+      last-saved server copy. Most visible right after finishing a word,
+      which is why it read as "the spacebar deletes it." Now any patient
+      with an unconfirmed edit in flight keeps their local text through that
+      refresh instead of being overwritten.
+- [x] Diagnosed the Android paste-popup glitch (blank white box with an icon,
+      appearing on long-press-to-paste) — a known Android WebView bug where
+      a CSS transform on an ancestor of a text field corrupts the native
+      paste popup's position. Fixed on all four auth screens (Login, Signup,
+      Forgot/Reset password) by dropping their entrance animation's
+      slide-transform in favor of opacity-only (matching this app's own
+      established motion convention elsewhere). If it still shows up on a
+      screen reached by sliding in from the side (e.g. Add Patient), that's
+      the same root cause in the navigation-transition system — a separate,
+      larger fix, flagging rather than guessing at it under time pressure.
+
 ## Still to do
 
-- [ ] **Lab test order PDF feature — approved, not started.** From the
-      "INV- DR NEHA" file: a huge categorised lab-test checklist (Haematology,
-      Diabetic Profile, Lipid Profile, Thyroid, Scans, etc. — ~150 tests
-      across 17 categories). New feature: a practitioner picks tests for a
-      patient and generates a requisition slip on the same real letterhead.
-      Needs its own data model (new table), store action, UI, and PDF export.
-- [ ] Bring the free-text prescription body to practitioner mobile's Quick Rx
-      (web console has it; mobile still only has the structured fields).
-- [ ] Still unresolved: the "tabs redirect to select-a-patient" report from
-      earlier — couldn't reproduce it on the 3 main sidebar tabs or Cmd+K as
-      Ishwari; never got exact repro steps (which tab, which login, how you
-      got there).
-- [ ] Click-test the Owner Mine/Everyone toggle as Neha herself (needs her
-      password — everything else about it is confirmed via code + database).
 - [ ] Hydrate-everything-every-15-seconds architecture — explicitly not a
       priority right now (your call). Revisit once real data volume makes it
       worth doing.

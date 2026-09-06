@@ -16,9 +16,11 @@ import {
   ChatCircleDots,
   CurrencyInr,
   Printer,
+  PencilSimple,
+  TestTube,
 } from '@phosphor-icons/react'
 import { useClinic, selPrescriptionsFor, selDosesFor } from '../core/store'
-import type { Appointment, Patient } from '../core/types'
+import type { Appointment, Patient, Invoice, InvoiceLineItem, PaymentMode } from '../core/types'
 import { Avatar, Badge, BottomSheet, Button, Card, Chip, Label } from '../design-system/ui'
 import { Pressable } from '../design-system/Pressable'
 import { haptic } from '../design-system/haptics'
@@ -27,6 +29,11 @@ import { CountUp, ProgressBar } from '../design-system/feedback'
 import { PullToRefresh } from '../design-system/gestures'
 import { useToast } from '../design-system/toast'
 import { exportInvoicePdf } from '../core/pdfExport'
+import { DEFAULT_CONSULT_FEE, invoiceTotal } from '../core/billing'
+
+const PAYMENT_MODES: PaymentMode[] = ['Cash', 'UPI', 'Card', 'Bank transfer', 'Other']
+const INVOICE_STATUS_TONE = { paid: 'green', partial: 'amber', unpaid: 'amber', waived: 'neutral', cancelled: 'danger' } as const
+const INVOICE_STATUS_LABEL = { paid: 'Paid', partial: 'Partial', unpaid: 'Unpaid', waived: 'Waived', cancelled: 'Cancelled' } as const
 
 /** `Patient.lastSeen` is a free-form display label ("Today", "10 Jul", "04 Jul") — not
  *  an ISO date — so it can't be sorted lexicographically. This resolves it to a
@@ -181,16 +188,19 @@ export function PatientDetailScreen({
   onOpenCase,
   onOpenFollowUp,
   onPrescribe,
+  onOrderInvestigations,
 }: {
   patientId: string
   onBack: () => void
   onOpenCase: (patientId: string) => void
   onOpenFollowUp: (patientId: string) => void
   onPrescribe: () => void
+  onOrderInvestigations: () => void
 }) {
   const patient = useClinic((s) => s.patients.find((p) => p.id === patientId))
   const appointments = useClinic((s) => s.appointments.filter((a) => a.patientId === patientId))
   const allAppointments = useClinic((s) => s.appointments)
+  const invoices = useClinic((s) => s.invoices.filter((i) => i.patientId === patientId))
   const prescriptions = useClinic(selPrescriptionsFor(patientId))
   const doses = useClinic(selDosesFor(patientId))
   const outcomes = useClinic((s) => s.outcomes.filter((o) => o.patientId === patientId))
@@ -200,7 +210,7 @@ export function PatientDetailScreen({
   const scheduleFollowUpAction = useClinic((s) => s.scheduleFollowUp)
   const [tab, setTab] = useState<DetailTab>('overview')
   const [followUpOpen, setFollowUpOpen] = useState(false)
-  const [billingOpen, setBillingOpen] = useState(false)
+  const [billing, setBilling] = useState<{ appointmentId?: string; existingInvoice?: Invoice } | null>(null)
   // null = showing the preset list; a date string = the "Custom" picker is open
   const [customDate, setCustomDate] = useState<string | null>(null)
 
@@ -316,8 +326,11 @@ export function PatientDetailScreen({
           <Pressable hap="tick" onClick={onPrescribe} className="flex items-center justify-center gap-1.5 rounded-pill border border-border bg-surface py-2.5 text-[13px] font-semibold text-body">
             <Prescription size={16} weight="fill" /> Prescribe
           </Pressable>
-          <Pressable hap="tick" onClick={() => setBillingOpen(true)} className="flex items-center justify-center gap-1.5 rounded-pill border border-border bg-surface py-2.5 text-[13px] font-semibold text-body">
+          <Pressable hap="tick" onClick={() => setBilling({})} className="flex items-center justify-center gap-1.5 rounded-pill border border-border bg-surface py-2.5 text-[13px] font-semibold text-body">
             <CurrencyInr size={16} weight="bold" /> Bill
+          </Pressable>
+          <Pressable hap="tick" onClick={onOrderInvestigations} className="col-span-2 flex items-center justify-center gap-1.5 rounded-pill border border-border bg-surface py-2.5 text-[13px] font-semibold text-body">
+            <TestTube size={16} weight="fill" /> Order investigations
           </Pressable>
         </div>
       </div>
@@ -404,6 +417,42 @@ export function PatientDetailScreen({
                 )}
               </Card>
             )}
+
+            <Card className="px-4 py-3">
+              <div className="mb-1 flex items-center justify-between">
+                <Label>Billing</Label>
+                <Pressable hap="tick" onClick={() => setBilling({})} className="text-[12px] font-semibold text-brand">Quick bill</Pressable>
+              </div>
+              {invoices.length === 0 ? (
+                <p className="py-3 text-center text-[12.5px] text-faint">No invoices yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {[...invoices].sort((a, b) => b.date.localeCompare(a.date) || b.invoiceNo - a.invoiceNo).map((inv) => {
+                    const total = invoiceTotal(inv.items)
+                    const cancelled = inv.status === 'cancelled'
+                    return (
+                      <div key={inv.id} className={`flex items-center gap-2.5 rounded-[14px] border border-border bg-surface px-3 py-2.5 ${cancelled ? 'opacity-60' : ''}`}>
+                        <div className="flex-1">
+                          <div className={`font-display text-[13.5px] font-semibold text-ink ${cancelled ? 'line-through' : ''}`}>
+                            ₹{total.toLocaleString('en-IN')} <span className="font-body text-[11px] font-normal text-faint">#{inv.invoiceNo}</span>
+                          </div>
+                          <div className="text-[11.5px] text-muted">{formatDayLabel(inv.date)} · {inv.items[0]?.name ?? 'Consultation'}{inv.items.length > 1 ? ` +${inv.items.length - 1} more` : ''}</div>
+                        </div>
+                        <Badge tone={INVOICE_STATUS_TONE[inv.status]}>{INVOICE_STATUS_LABEL[inv.status]}</Badge>
+                        {!cancelled && (
+                          <Pressable hap="tick" onClick={() => setBilling({ appointmentId: inv.appointmentId, existingInvoice: inv })} className="text-faint">
+                            <PencilSimple size={16} />
+                          </Pressable>
+                        )}
+                        <Pressable hap="tick" onClick={() => exportInvoicePdf(inv, patient).catch(() => {})} className="text-faint">
+                          <Printer size={16} />
+                        </Pressable>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </Card>
           </div>
         )}
 
@@ -526,100 +575,209 @@ export function PatientDetailScreen({
         )}
       </BottomSheet>
 
-      <BillingSheet patientId={patientId} open={billingOpen} onClose={() => setBillingOpen(false)} />
+      <InvoiceSheet
+        patientId={patientId}
+        open={billing !== null}
+        appointmentId={billing?.appointmentId}
+        existingInvoice={billing?.existingInvoice}
+        onClose={() => setBilling(null)}
+      />
     </div>
   )
 }
 
 // ── BILLING (mobile) ──
-// A doctor seeing a quick walk-in (e.g. a cold) can collect payment and
-// print/share an invoice with the clinic's letterhead directly from her
-// phone — this used to only exist on the web console.
-function BillingSheet({ patientId, open, onClose }: { patientId: string; open: boolean; onClose: () => void }) {
+// A doctor seeing a quick walk-in (e.g. a cold) can bill and print/share an
+// invoice with the clinic's letterhead directly from her phone, no
+// appointment required — same real Invoice model as the web console, so a
+// bill made here shows up correctly in Reports on either surface. Also
+// reused to edit or cancel an existing invoice (existingInvoice set).
+export function InvoiceSheet({
+  patientId,
+  open,
+  appointmentId,
+  existingInvoice,
+  onClose,
+}: {
+  patientId: string | null
+  open: boolean
+  appointmentId?: string
+  existingInvoice?: Invoice
+  onClose: () => void
+}) {
   const patient = useClinic((s) => s.patients.find((p) => p.id === patientId))
-  const appt = useClinic((s) => {
-    const mine = s.appointments.filter((a) => a.patientId === patientId)
-    if (mine.length === 0) return undefined
-    const billable = mine.filter((a) => a.status === 'Seen' || a.status === 'In consult')
-    const pool = billable.length > 0 ? billable : mine
-    return [...pool].sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time))[0]
-  })
-  const doctor = useClinic((s) => s.practitioners.find((p) => p.id === s.currentPractitionerId))
-  const recordPayment = useClinic((s) => s.recordPayment)
+  const ME = useClinic((s) => s.currentPractitionerId)
+  const createInvoice = useClinic((s) => s.createInvoice)
+  const updateInvoice = useClinic((s) => s.updateInvoice)
+  const cancelInvoice = useClinic((s) => s.cancelInvoice)
   const toast = useToast()
-  const [fee, setFee] = useState(1500)
-  const [mode, setMode] = useState<NonNullable<Appointment['paymentMode']>>('Cash')
 
+  const [items, setItems] = useState<InvoiceLineItem[]>([{ name: 'Consultation', qty: 1, unitPrice: DEFAULT_CONSULT_FEE }])
+  const [amountReceived, setAmountReceived] = useState(DEFAULT_CONSULT_FEE)
+  const [paymentMode, setPaymentMode] = useState<PaymentMode>('Cash')
+  const [waived, setWaived] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const receivedTouched = useRef(false)
+
+  // Editing an existing invoice always initializes from ITS values, never a
+  // fresh default (the exact bug class this billing code had before — a
+  // hardcoded fee default that ignored what was actually on the bill).
   useEffect(() => {
-    if (open && appt) setFee(appt.fee ?? 1500)
-  }, [open, appt?.id])
+    if (!open) return
+    receivedTouched.current = false
+    if (existingInvoice) {
+      setItems(existingInvoice.items)
+      setAmountReceived(existingInvoice.amountReceived)
+      setPaymentMode(existingInvoice.paymentMode)
+      setWaived(existingInvoice.status === 'waived')
+    } else {
+      setItems([{ name: 'Consultation', qty: 1, unitPrice: DEFAULT_CONSULT_FEE }])
+      setAmountReceived(DEFAULT_CONSULT_FEE)
+      setPaymentMode('Cash')
+      setWaived(false)
+    }
+  }, [open, existingInvoice])
 
-  const modes: NonNullable<Appointment['paymentMode']>[] = ['Cash', 'UPI', 'Card', 'Bank transfer', 'Other']
+  const total = invoiceTotal(items)
 
-  const printInvoice = async (status: 'paid' | 'unpaid') => {
+  // Keep "amount received" following the total for the common instant-
+  // payment case — but never fight the doctor once she's typed her own figure.
+  useEffect(() => {
+    if (open && !receivedTouched.current) setAmountReceived(total)
+  }, [open, total])
+
+  if (!open || !patientId) return null
+
+  const updateItem = (i: number, patch: Partial<InvoiceLineItem>) =>
+    setItems((its) => its.map((it, idx) => (idx === i ? { ...it, ...patch } : it)))
+  const addItem = () => setItems((its) => [...its, { name: '', qty: 1, unitPrice: 0 }])
+  const removeItem = (i: number) => setItems((its) => (its.length > 1 ? its.filter((_, idx) => idx !== i) : its))
+
+  async function handleSaveAndPrint() {
     if (!patient) return
-    const credentials = [doctor?.qualifications, doctor?.registrationNo].filter(Boolean).join(' · ')
-    await exportInvoicePdf({
-      id: appt?.id ?? patient.id,
-      patientName: patient.name,
-      patientCode: patient.wsCode,
-      doctorName: doctor?.name ?? 'Doctor',
-      doctorCredentials: credentials || undefined,
-      date: new Date().toISOString(),
-      reason: appt?.reason ?? 'Consultation',
-      fee,
-      paymentMode: mode,
-      paymentStatus: status,
-    }).catch(() => {})
+    if (items.some((it) => !it.name.trim())) { toast({ title: 'Every item needs a name' }); return }
+    setSaving(true)
+    const status = waived ? 'waived' : amountReceived <= 0 ? 'unpaid' : amountReceived >= total ? 'paid' : 'partial'
+    let invoice: Invoice | null
+    if (existingInvoice) {
+      updateInvoice(existingInvoice.id, { items, amountReceived: waived ? 0 : amountReceived, paymentMode, status })
+      invoice = { ...existingInvoice, items, amountReceived: waived ? 0 : amountReceived, paymentMode, status }
+    } else {
+      invoice = await createInvoice({
+        patientId: patient.id,
+        practitionerId: ME,
+        appointmentId,
+        date: todayISO(),
+        items,
+        paymentMode,
+        amountReceived: waived ? 0 : amountReceived,
+        status,
+      })
+    }
+    setSaving(false)
+    if (!invoice) return
+    haptic('success')
+    toast({ title: existingInvoice ? 'Bill updated' : 'Bill saved', message: `₹${total.toLocaleString('en-IN')} · ${patient.name}` })
+    await exportInvoicePdf(invoice, patient).catch(() => {
+      toast({ title: 'Saved, but the PDF failed', message: 'You can reprint it from the invoice list.' })
+    })
+    onClose()
+  }
+
+  function handleCancel() {
+    if (!existingInvoice) return
+    cancelInvoice(existingInvoice.id)
+    haptic('impact')
+    toast({ title: 'Bill cancelled', message: `Invoice #${existingInvoice.invoiceNo} won’t count toward revenue anymore.` })
+    onClose()
   }
 
   return (
     <BottomSheet open={open} onClose={onClose}>
-      <div className="font-display text-[17px] font-bold text-ink">Collect payment</div>
-      {patient && <div className="mt-0.5 text-[12.5px] text-muted">{patient.name}{appt ? ` · ${appt.reason ?? 'Consultation'}` : ''}</div>}
+      <div className="font-display text-[17px] font-bold text-ink">{existingInvoice ? `Edit invoice #${existingInvoice.invoiceNo}` : 'Quick bill'}</div>
+      {patient && <div className="mt-0.5 text-[12.5px] text-muted">{patient.name}</div>}
 
-      {!appt && (
-        <Card className="mt-3 px-4 py-3 text-[13px] text-muted">
-          No appointment on record yet for this patient — you can still print an invoice below, but recording a payment needs a visit first.
-        </Card>
-      )}
+      <Label className="mt-4">Items</Label>
+      <div className="mt-1.5 space-y-2">
+        {items.map((item, i) => (
+          <div key={i} className="flex items-center gap-1.5">
+            <input
+              value={item.name}
+              onChange={(e) => updateItem(i, { name: e.target.value })}
+              placeholder="e.g. Consultation, Medicine"
+              className="min-w-0 flex-1 rounded-[10px] border border-border bg-surface px-2.5 py-2 text-[13px] text-ink outline-none focus:border-green-border"
+              data-selectable="true"
+            />
+            <input
+              type="number"
+              value={item.qty}
+              onChange={(e) => updateItem(i, { qty: Math.max(1, Number(e.target.value) || 1) })}
+              className="w-11 rounded-[10px] border border-border bg-surface px-1 py-2 text-center text-[13px] text-ink outline-none focus:border-green-border"
+              title="Quantity"
+              data-selectable="true"
+            />
+            <div className="flex w-[84px] items-center gap-1 rounded-[10px] border border-border bg-surface px-2 py-2">
+              <span className="text-[12px] text-muted">₹</span>
+              <input
+                type="number"
+                value={item.unitPrice}
+                onChange={(e) => updateItem(i, { unitPrice: Number(e.target.value) || 0 })}
+                className="w-full bg-transparent text-[13px] text-ink outline-none"
+                title="Price per unit"
+                data-selectable="true"
+              />
+            </div>
+            <Pressable hap="tick" onClick={() => removeItem(i)} className={`p-1 text-faint ${items.length === 1 ? 'opacity-30' : ''}`}>
+              <X size={14} weight="bold" />
+            </Pressable>
+          </div>
+        ))}
+      </div>
+      <Pressable hap="tick" onClick={addItem} className="mt-2 flex items-center gap-1 text-[12.5px] font-semibold text-brand">
+        <Plus size={13} weight="bold" /> Add item
+      </Pressable>
 
-      <Label className="mt-4">Fee amount</Label>
+      <div className="mt-3 flex items-center justify-between rounded-[12px] bg-tint px-3.5 py-2.5">
+        <span className="text-[13px] font-semibold text-ink-deep">Total</span>
+        <span className="text-[15px] font-bold text-ink-deep">₹{total.toLocaleString('en-IN')}</span>
+      </div>
+
+      <Label className="mt-4">Amount received</Label>
       <div className="mt-1.5 flex items-center gap-2 rounded-[14px] border border-border bg-surface px-3.5 py-2.5">
         <span className="text-[14px] font-semibold text-muted">₹</span>
         <input
           type="number"
-          value={fee}
-          onChange={(e) => setFee(Number(e.target.value) || 0)}
-          className="w-full bg-transparent text-[14px] font-semibold text-ink outline-none"
+          value={waived ? 0 : amountReceived}
+          disabled={waived}
+          onChange={(e) => { receivedTouched.current = true; setAmountReceived(Number(e.target.value) || 0) }}
+          className="w-full bg-transparent text-[14px] font-semibold text-ink outline-none disabled:opacity-50"
           data-selectable="true"
         />
+        {!waived && amountReceived !== total && (
+          <Pressable hap="tick" onClick={() => { receivedTouched.current = true; setAmountReceived(total) }} className="shrink-0 text-[11.5px] font-semibold text-brand">Paid in full</Pressable>
+        )}
+      </div>
+      <div className="mt-1.5 flex items-center justify-between">
+        <label className="flex items-center gap-1.5 text-[12px] text-muted">
+          <input type="checkbox" checked={waived} onChange={(e) => setWaived(e.target.checked)} className="accent-brand" />
+          Waive this bill (no charge)
+        </label>
+        {!waived && amountReceived < total && <span className="text-[12px] font-semibold text-amber-text">Balance ₹{(total - amountReceived).toLocaleString('en-IN')}</span>}
       </div>
 
       <Label className="mt-4">Payment mode</Label>
       <div className="mt-1.5 flex flex-wrap gap-2">
-        {modes.map((m) => (
-          <Chip key={m} selected={mode === m} onClick={() => { haptic('select'); setMode(m) }}>{m}</Chip>
+        {PAYMENT_MODES.map((m) => (
+          <Chip key={m} selected={paymentMode === m} onClick={() => { haptic('select'); setPaymentMode(m) }}>{m}</Chip>
         ))}
       </div>
 
       <div className="mt-5 flex gap-2">
-        <Button variant="ghost" className="flex-1" onClick={() => printInvoice(appt ? 'paid' : 'unpaid')}>
-          <Printer size={16} /> PDF
-        </Button>
-        <Button
-          variant="accent"
-          className="flex-1"
-          disabled={!appt}
-          onClick={() => {
-            if (!appt) return
-            recordPayment(appt.id, fee, mode, 'paid')
-            haptic('success')
-            toast({ title: 'Payment recorded', message: `₹${fee.toLocaleString('en-IN')} — ${mode}` })
-            onClose()
-          }}
-        >
-          <CurrencyInr size={16} weight="bold" /> Record
+        {existingInvoice && (
+          <Button variant="ghost" className="!text-danger" onClick={handleCancel}>Cancel bill</Button>
+        )}
+        <Button variant="accent" className="flex-1" disabled={saving} onClick={handleSaveAndPrint}>
+          <CurrencyInr size={16} weight="bold" /> {saving ? 'Saving…' : 'Save & print'}
         </Button>
       </div>
     </BottomSheet>
@@ -647,7 +805,7 @@ export function AddPatientSheet({
   const [sex, setSex] = useState<'Female' | 'Male' | 'Other'>('Female')
   const [phone, setPhone] = useState('')
   const [complaint, setComplaint] = useState('')
-  const [location, setLocation] = useState('Bandra')
+  const [location, setLocation] = useState('')
   const [nameError, setNameError] = useState('')
   const [ageError, setAgeError] = useState('')
 
@@ -657,7 +815,7 @@ export function AddPatientSheet({
     setSex('Female')
     setPhone('')
     setComplaint('')
-    setLocation('Bandra')
+    setLocation('')
     setNameError('')
     setAgeError('')
   }
@@ -737,7 +895,7 @@ export function AddPatientSheet({
 
         <div>
           <Label>Location</Label>
-          <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Bandra" className={`mt-1.5 ${inputCls}`} data-selectable="true" />
+          <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Chiplun" className={`mt-1.5 ${inputCls}`} data-selectable="true" />
         </div>
       </div>
 

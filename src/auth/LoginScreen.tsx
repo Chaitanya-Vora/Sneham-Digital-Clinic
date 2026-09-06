@@ -37,9 +37,13 @@ export function LoginScreen({ onSwitch }: Props) {
 
   return (
     <div className="flex min-h-[100dvh] items-center justify-center bg-canvas px-6">
+      {/* Opacity-only, deliberately no y-transform: a CSS transform on an
+          ancestor of the password field corrupts Android WebView's native
+          long-press paste popup into a blank box (real device bug, not a
+          dev-preview issue). Don't reintroduce a translate here. */}
       <motion.div
-        initial={{ opacity: 0, y: 24 }}
-        animate={{ opacity: 1, y: 0 }}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
         transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
         className="w-full max-w-[380px]"
       >

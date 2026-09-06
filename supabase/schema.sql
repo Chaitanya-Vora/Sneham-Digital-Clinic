@@ -123,6 +123,54 @@ create policy "Authenticated users can read prescriptions" on prescriptions for 
 create policy "Authenticated users can manage prescriptions" on prescriptions for all to authenticated using (true);
 
 
+-- ─── Investigation Orders ───
+create table if not exists investigation_orders (
+  id text primary key,
+  patient_id text not null references patients(id),
+  practitioner_id text not null references practitioners(id),
+  tests text[] not null default '{}',
+  notes text not null default '',
+  created_at timestamptz not null default now()
+);
+
+alter table investigation_orders enable row level security;
+create policy "Authenticated users can read investigation orders" on investigation_orders for select to authenticated using (true);
+create policy "Authenticated users can manage investigation orders" on investigation_orders for all to authenticated using (true);
+
+create index if not exists investigation_orders_patient_id_idx on investigation_orders(patient_id);
+create index if not exists investigation_orders_practitioner_id_idx on investigation_orders(practitioner_id);
+
+
+-- ─── Invoices ───
+-- Its own table, decoupled from appointments — a quick phone-call bill has
+-- no appointment behind it. Cancelling never deletes (status: 'cancelled'),
+-- so history and analytics stay auditable.
+create table if not exists invoices (
+  id text primary key,
+  invoice_no bigint generated always as identity,
+  patient_id text not null references patients(id),
+  practitioner_id text not null references practitioners(id),
+  appointment_id text references appointments(id),
+  date text not null,
+  items jsonb not null default '[]',
+  payment_mode text not null default 'Cash',
+  amount_received numeric not null default 0,
+  status text not null default 'unpaid' check (status in ('unpaid','paid','partial','waived','cancelled')),
+  notes text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  cancelled_at timestamptz
+);
+
+alter table invoices enable row level security;
+create policy "Authenticated users can read invoices" on invoices for select to authenticated using (true);
+create policy "Authenticated users can manage invoices" on invoices for all to authenticated using (true);
+
+create index if not exists invoices_patient_id_idx on invoices(patient_id);
+create index if not exists invoices_practitioner_id_idx on invoices(practitioner_id);
+create index if not exists invoices_appointment_id_idx on invoices(appointment_id);
+
+
 -- ─── Dose Reminders ───
 create table if not exists dose_reminders (
   id text primary key,

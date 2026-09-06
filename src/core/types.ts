@@ -26,6 +26,15 @@ export type Repetition =
   | 'Alternate day'
   | 'Weekly'
   | 'As needed'
+  | 'Once only today'
+
+// Repetitions with no ongoing daily schedule — a single or occasional dose,
+// not a multi-day course. Duration, day-count reminders, and auto-booked
+// follow-ups don't apply to these — both are treated identically everywhere
+// this used to only check for 'As needed'.
+export function isOneOffRepetition(rep: Repetition): boolean {
+  return rep === 'As needed' || rep === 'Once only today'
+}
 
 export type ConsultType = 'In person' | 'Video'
 
@@ -109,10 +118,35 @@ export interface Appointment {
   tag?: string // e.g. "Nux Vomica 200C"
   reason?: string
   isFirstVisit?: boolean
-  fee?: number
-  paymentStatus?: PaymentStatus
-  paymentMode?: PaymentMode
-  paidAt?: string
+}
+
+// Billing lives entirely on its own — never required an appointment to
+// exist (a phone-call quick bill has none), and cancelling one keeps the
+// record (status: 'cancelled') rather than deleting it, so history and
+// analytics stay auditable.
+export type InvoiceStatus = 'unpaid' | 'paid' | 'partial' | 'waived' | 'cancelled'
+
+export interface InvoiceLineItem {
+  name: string
+  qty: number
+  unitPrice: number
+}
+
+export interface Invoice {
+  id: string
+  invoiceNo: number // DB-generated sequential — the real, human-facing number
+  patientId: string
+  practitionerId: string
+  appointmentId?: string // optional — omitted for quick/phone bills
+  date: ISODate
+  items: InvoiceLineItem[]
+  paymentMode: PaymentMode
+  amountReceived: number
+  status: InvoiceStatus
+  notes?: string
+  createdAt: string
+  updatedAt: string
+  cancelledAt?: string
 }
 
 export interface Prescription {
@@ -136,6 +170,18 @@ export interface Prescription {
   sharedVia: string[] // WhatsApp / SMS / Email / Patient app
   remindersEnabled: boolean
   reminderTimes: string[] // ["8:00 AM", "8:00 PM"]
+}
+
+// A set of investigations (lab tests / scans) the practitioner is asking
+// the patient to get done — printed as a requisition slip, not filled by
+// the patient in the app.
+export interface InvestigationOrder {
+  id: string
+  patientId: string
+  practitionerId: string
+  tests: string[] // flat list of test names, e.g. ["CBC", "HbA1c"]
+  notes: string // optional clinical note (e.g. "fasting sample required")
+  createdAt: string // ISO
 }
 
 export interface DoseReminder {

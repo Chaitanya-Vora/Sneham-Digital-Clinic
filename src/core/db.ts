@@ -8,6 +8,8 @@ import type {
   ClinicDocument,
   DoseReminder,
   Handoff,
+  InvestigationOrder,
+  Invoice,
   Outcome,
   Patient,
   Practitioner,
@@ -240,10 +242,6 @@ function toAppAppointment(r: any): Appointment {
     tag: r.tag ?? undefined,
     reason: r.reason ?? undefined,
     isFirstVisit: r.is_first_visit ?? undefined,
-    fee: r.fee ?? undefined,
-    paymentStatus: r.payment_status ?? undefined,
-    paymentMode: r.payment_mode ?? undefined,
-    paidAt: r.paid_at ?? undefined,
   }
 }
 
@@ -260,10 +258,6 @@ function toDbAppointment(a: Appointment) {
     tag: a.tag ?? null,
     reason: a.reason ?? null,
     is_first_visit: a.isFirstVisit ?? false,
-    fee: a.fee ?? null,
-    payment_status: a.paymentStatus ?? null,
-    payment_mode: a.paymentMode ?? null,
-    paid_at: a.paidAt ?? null,
   }
 }
 
@@ -341,6 +335,108 @@ export async function insertPrescription(p: Prescription): Promise<boolean> {
 export async function updatePrescriptionDb(id: string, patch: Record<string, unknown>): Promise<boolean> {
   const { error } = await supabase.from('prescriptions').update(patch).eq('id', id)
   if (error) { console.error('updatePrescription:', error.message); return false }
+  return true
+}
+
+
+// ── Investigation Order ──────────────────────────────────────
+
+function toAppInvestigationOrder(r: any): InvestigationOrder {
+  return {
+    id: r.id,
+    patientId: r.patient_id,
+    practitionerId: r.practitioner_id,
+    tests: r.tests ?? [],
+    notes: r.notes ?? '',
+    createdAt: r.created_at,
+  }
+}
+
+function toDbInvestigationOrder(o: InvestigationOrder) {
+  return {
+    id: o.id,
+    patient_id: o.patientId,
+    practitioner_id: o.practitionerId,
+    tests: o.tests,
+    notes: o.notes,
+    created_at: o.createdAt,
+  }
+}
+
+export async function fetchInvestigationOrders(): Promise<InvestigationOrder[]> {
+  const { data, error } = await supabase.from('investigation_orders').select('*').order('created_at', { ascending: false })
+  if (error) { console.error('fetchInvestigationOrders:', error.message); _hydrateErrors++; return [] }
+  return (data ?? []).map(toAppInvestigationOrder)
+}
+
+export async function insertInvestigationOrder(o: InvestigationOrder): Promise<boolean> {
+  const { error } = await supabase.from('investigation_orders').insert(toDbInvestigationOrder(o))
+  if (error) { console.error('insertInvestigationOrder:', error.message); return false }
+  return true
+}
+
+
+// ── Invoice ───────────────────────────────────────────────────
+
+function toAppInvoice(r: any): Invoice {
+  return {
+    id: r.id,
+    invoiceNo: r.invoice_no,
+    patientId: r.patient_id,
+    practitionerId: r.practitioner_id,
+    appointmentId: r.appointment_id ?? undefined,
+    date: r.date,
+    items: r.items ?? [],
+    paymentMode: r.payment_mode,
+    amountReceived: Number(r.amount_received),
+    status: r.status,
+    notes: r.notes ?? undefined,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+    cancelledAt: r.cancelled_at ?? undefined,
+  }
+}
+
+// invoice_no is intentionally never written — it's a DB-generated identity
+// column, the one genuinely sequential, collision-proof number in the app
+// (replacing today's mobile bug where two unbilled quick-bills for the same
+// patient print an identical "invoice number" derived from an id).
+function toDbInvoice(inv: Invoice) {
+  return {
+    id: inv.id,
+    patient_id: inv.patientId,
+    practitioner_id: inv.practitionerId,
+    appointment_id: inv.appointmentId ?? null,
+    date: inv.date,
+    items: inv.items,
+    payment_mode: inv.paymentMode,
+    amount_received: inv.amountReceived,
+    status: inv.status,
+    notes: inv.notes ?? '',
+    created_at: inv.createdAt,
+    updated_at: inv.updatedAt,
+    cancelled_at: inv.cancelledAt ?? null,
+  }
+}
+
+export async function fetchInvoices(): Promise<Invoice[]> {
+  const { data, error } = await supabase.from('invoices').select('*').order('created_at', { ascending: false })
+  if (error) { console.error('fetchInvoices:', error.message); _hydrateErrors++; return [] }
+  return (data ?? []).map(toAppInvoice)
+}
+
+// Returns the DB-assigned invoiceNo, or null on failure — the caller can't
+// know this number ahead of time, so creating an invoice is the one billing
+// write that must be awaited before it's shown as saved.
+export async function insertInvoice(inv: Invoice): Promise<number | null> {
+  const { data, error } = await supabase.from('invoices').insert(toDbInvoice(inv)).select('invoice_no').single()
+  if (error) { console.error('insertInvoice:', error.message); return null }
+  return data.invoice_no
+}
+
+export async function updateInvoiceDb(id: string, patch: Record<string, unknown>): Promise<boolean> {
+  const { error } = await supabase.from('invoices').update(patch).eq('id', id)
+  if (error) { console.error('updateInvoiceDb:', error.message); return false }
   return true
 }
 
@@ -916,6 +1012,8 @@ export interface HydratedData {
   patients: Patient[]
   appointments: Appointment[]
   prescriptions: Prescription[]
+  investigationOrders: InvestigationOrder[]
+  invoices: Invoice[]
   doseReminders: DoseReminder[]
   checkIns: CheckIn[]
   handoffs: Handoff[]
@@ -943,6 +1041,8 @@ export async function hydrateAll(userId: string, userName: string, isPatientSurf
     patients,
     appointments,
     prescriptions,
+    investigationOrders,
+    invoices,
     doseReminders,
     checkIns,
     handoffs,
@@ -960,6 +1060,8 @@ export async function hydrateAll(userId: string, userName: string, isPatientSurf
     fetchPatients(),
     fetchAppointments(),
     fetchPrescriptions(),
+    fetchInvestigationOrders(),
+    fetchInvoices(),
     fetchDoseReminders(),
     fetchCheckIns(),
     fetchHandoffs(),
@@ -982,6 +1084,8 @@ export async function hydrateAll(userId: string, userName: string, isPatientSurf
     patients,
     appointments,
     prescriptions,
+    investigationOrders,
+    invoices,
     doseReminders,
     checkIns,
     handoffs,

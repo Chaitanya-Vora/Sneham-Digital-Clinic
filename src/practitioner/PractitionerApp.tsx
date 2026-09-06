@@ -32,13 +32,20 @@ import {
   CaretLeft,
   Printer,
   CurrencyInr,
+  TestTube,
+  X,
+  WhatsappLogo,
+  DeviceMobile,
+  EnvelopeSimple,
 } from '@phosphor-icons/react'
 import { todayISO, toISO, formatDayLabel, addDaysISO } from '../core/day'
 import { useClinic } from '../core/store'
 import { useAuth } from '../auth/AuthProvider'
 import { useShell, exitToLauncher } from '../core/shell'
 import type { Potency, Repetition } from '../core/types'
+import { isOneOffRepetition } from '../core/types'
 import { MASTER_REMEDIES } from '../core/remedies'
+import { INVESTIGATION_CATALOG, ALL_INVESTIGATIONS, wordsOf, matchesAllWords } from '../core/investigations'
 import { Avatar, Badge, BottomSheet, Card, Chip, Label, Stepper } from '../design-system/ui'
 import { Pressable } from '../design-system/Pressable'
 import { haptic } from '../design-system/haptics'
@@ -46,11 +53,13 @@ import { spring, springSoft, tabVariants, pushVariants, listContainer, listItem 
 import { CountUp } from '../design-system/feedback'
 import { PullToRefresh, useHorizontalSwipe, EdgeSwipeBack } from '../design-system/gestures'
 import { useToast } from '../design-system/toast'
-import { exportPrescriptionPdf, exportInvoicePdf } from '../core/pdfExport'
+import { shareViaWhatsApp, shareViaSms, shareViaEmail } from '../core/share'
+import { STANDARD_MEDICINE_INSTRUCTIONS } from '../core/rxInstructions'
+import { exportPrescriptionPdf, exportInvoicePdf, exportInvestigationOrderPdf } from '../core/pdfExport'
 import { MobileCaseSheet } from './MobileCaseSheet'
 import { MobileFollowUp } from './MobileFollowUp'
 import { CalendarScreen } from './Calendar'
-import { PatientSearchSheet, PatientDetailScreen, AddPatientSheet } from './PatientSearch'
+import { PatientSearchSheet, PatientDetailScreen, AddPatientSheet, InvoiceSheet } from './PatientSearch'
 import { TodayGrid } from './TodayGrid'
 import { VideoConsult } from '../video/VideoConsult'
 import { ChatThread } from '../components/ChatThread'
@@ -58,10 +67,10 @@ import { ChatThread } from '../components/ChatThread'
 // ME is resolved from store inside the component
 type Tab = 'today' | 'calendar' | 'followups' | 'rx' | 'inbox'
 const TAB_ORDER: Tab[] = ['today', 'calendar', 'followups', 'rx', 'inbox']
-type Overlay = { kind: 'case' | 'compare' | 'patient-detail'; patientId: string } | { kind: 'chat'; patientId: string; patientName: string } | { kind: 'video'; appointmentId: string } | null
+type Overlay = { kind: 'case' | 'compare' | 'patient-detail' | 'investigations'; patientId: string } | { kind: 'chat'; patientId: string; patientName: string } | { kind: 'video'; appointmentId: string } | null
 
-const POTENCIES: Potency[] = ['6C', '12C', '30C', '200C', '1M', '10M', 'Q']
-const REPS: Repetition[] = ['Once daily · night', 'Twice daily', 'Alternate day', 'Weekly', 'As needed']
+const POTENCIES: Potency[] = ['6C', '12C', '30C', '200C', '1M', '10M', '50M', 'CM', 'LM', 'Q']
+const REPS: Repetition[] = ['Once daily · night', 'Twice daily', 'Alternate day', 'Weekly', 'As needed', 'Once only today']
 
 const refresh = async () => {
   const s = useClinic.getState()
@@ -76,6 +85,8 @@ export function PractitionerApp() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [addPatientOpen, setAddPatientOpen] = useState(false)
   const [rxPatientId, setRxPatientId] = useState<string | null>(null)
+  const [billSearchOpen, setBillSearchOpen] = useState(false)
+  const [billPatientId, setBillPatientId] = useState<string | null>(null)
 
   const ME = useClinic((s) => s.currentPractitionerId)
   const doctor = useClinic((s) => s.practitioners.find((p) => p.id === s.currentPractitionerId))
@@ -164,7 +175,7 @@ export function PractitionerApp() {
                 <CalendarScreen onOpenPatient={(id) => setOverlay({ kind: 'patient-detail', patientId: id })} />
               ) : (
                 <PullToRefresh onRefresh={refresh} className="h-full px-[18px] pb-[120px] pt-2">
-                  {tab === 'today' && <TodayGrid openCase={(id) => setOverlay({ kind: 'case', patientId: id })} goRx={goToRx} startVideo={(apptId) => setOverlay({ kind: 'video', appointmentId: apptId })} />}
+                  {tab === 'today' && <TodayGrid openCase={(id) => setOverlay({ kind: 'case', patientId: id })} goRx={goToRx} startVideo={(apptId) => setOverlay({ kind: 'video', appointmentId: apptId })} onQuickBill={() => setBillSearchOpen(true)} />}
                   {tab === 'followups' && <FollowupsScreen openCompare={(id) => setOverlay({ kind: 'compare', patientId: id })} />}
                   {tab === 'rx' && <QuickRxScreen patientId={rxPatientId} onPatientPicked={setRxPatientId} />}
                   {tab === 'inbox' && <InboxScreen onOpenPatient={(id) => setOverlay({ kind: 'patient-detail', patientId: id })} onOpenChat={(id, name) => setOverlay({ kind: 'chat', patientId: id, patientName: name })} />}
@@ -190,6 +201,8 @@ export function PractitionerApp() {
                 <MobileFollowUp patientId={overlay.patientId} onBack={() => setOverlay(null)} onDone={() => setOverlay(null)} />
               ) : overlay.kind === 'chat' ? (
                 <ChatOverlay patientId={overlay.patientId} patientName={overlay.patientName} onBack={() => setOverlay(null)} />
+              ) : overlay.kind === 'investigations' ? (
+                <QuickInvestigationScreen patientId={overlay.patientId} onBack={() => setOverlay(null)} />
               ) : (
                 <PatientDetailScreen
                   patientId={overlay.patientId}
@@ -197,6 +210,7 @@ export function PractitionerApp() {
                   onOpenCase={(id) => setOverlay({ kind: 'case', patientId: id })}
                   onOpenFollowUp={(id) => setOverlay({ kind: 'compare', patientId: id })}
                   onPrescribe={() => { setOverlay(null); goToRx(overlay.patientId) }}
+                  onOrderInvestigations={() => setOverlay({ kind: 'investigations', patientId: overlay.patientId })}
                 />
               )}
             </EdgeSwipeBack>
@@ -215,6 +229,17 @@ export function PractitionerApp() {
         open={addPatientOpen}
         onClose={() => setAddPatientOpen(false)}
         onAdded={(id) => { setAddPatientOpen(false); setOverlay({ kind: 'case', patientId: id }) }}
+      />
+      <PatientSearchSheet
+        open={billSearchOpen}
+        onClose={() => setBillSearchOpen(false)}
+        onSelect={(id) => { setBillSearchOpen(false); setBillPatientId(id) }}
+        onAddPatient={() => { setBillSearchOpen(false); setAddPatientOpen(true) }}
+      />
+      <InvoiceSheet
+        patientId={billPatientId}
+        open={billPatientId !== null}
+        onClose={() => setBillPatientId(null)}
       />
     </div>
   )
@@ -356,9 +381,13 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
   const publish = useClinic((s) => s.publishPrescription)
   const updatePractitioner = useClinic((s) => s.updatePractitioner)
   const scheduleFollowUp = useClinic((s) => s.scheduleFollowUp)
+  const markPrescriptionShared = useClinic((s) => s.markPrescriptionShared)
   const patients = useClinic((s) => s.patients)
+  const toast = useToast()
 
   const [pickerQuery, setPickerQuery] = useState('')
+  const [publishedRxId, setPublishedRxId] = useState<string | null>(null)
+  const publishedRx = useClinic((s) => s.prescriptions.find((r) => r.id === publishedRxId))
   const currentPatient = patients.find((p) => p.id === patientId)
 
   // Nothing pre-selected: a real remedy, patient and dose must be chosen
@@ -377,6 +406,20 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
   const [rep, setRep] = useState<Repetition>('Once daily · night')
   const [prep, setPrep] = useState('')
   const [done, setDone] = useState(false)
+
+  // What actually prints on the slip — in the doctor's own words/shorthand,
+  // same pattern as the web console's prescription writer. Auto-fills from
+  // the structured fields until she edits it directly, then her words win.
+  const [bodyText, setBodyText] = useState('')
+  const [bodyTouched, setBodyTouched] = useState(false)
+  useEffect(() => {
+    if (bodyTouched) return
+    if (!remedy.trim()) { setBodyText(''); return }
+    const doseLine = isOneOffRepetition(rep)
+      ? `${remedy} ${potency} — ${dose} globules, ${rep.toLowerCase()}`
+      : `${remedy} ${potency} — ${dose} globules, ${rep}${duration ? `, ${duration} days` : ''}`
+    setBodyText(doseLine)
+  }, [remedy, potency, dose, rep, duration, bodyTouched])
 
   const remedyList = doctor?.remedyList ?? []
   const list = useMemo(() => {
@@ -399,19 +442,39 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
     setDuration(14)
     setRep('Once daily · night')
     setPrep('')
+    setBodyText('')
+    setBodyTouched(false)
+    setPublishedRxId(null)
+  }
+
+  // Fires the real external share for the just-published prescription and
+  // only then marks the channel shared — same "no fake success" rule as the
+  // web console's chips. WhatsApp/SMS need a phone on file; Email always
+  // opens (blank-recipient compose is still useful — she picks the recipient).
+  function shareRx(channel: 'WhatsApp' | 'SMS' | 'Email') {
+    if (!publishedRxId || !currentPatient) return
+    const message = `Prescription from ${doctor?.name ?? 'your doctor'} for ${currentPatient.name}:\n${bodyText.trim() || `${remedy} ${potency}`}${prep.trim() ? `\nPreparation: ${prep.trim()}` : ''}`
+    let sent = true
+    if (channel === 'WhatsApp') sent = shareViaWhatsApp(currentPatient.phone, message)
+    else if (channel === 'SMS') sent = shareViaSms(currentPatient.phone, message)
+    else shareViaEmail(undefined, `Prescription for ${currentPatient.name}`, message)
+    if (!sent) { toast({ title: 'No phone number on file', message: `Add a phone number for ${currentPatient.name} first.` }); return }
+    haptic('success')
+    markPrescriptionShared(publishedRxId, channel)
   }
 
   function onPublish() {
     if (!canPublish || !currentPatient || !remedy.trim()) return
-    publish({
+    const rx = publish({
       patientId: currentPatient.id, practitionerId: ME, remedy: remedy.trim(), potency, doseGlobules: dose, repetition: rep,
-      durationDays: rep === 'As needed' ? null : duration, preparation: prep,
-      remindersEnabled: rep !== 'As needed', reminderTimes: rep === 'Twice daily' ? ['8:00 AM', '8:00 PM'] : ['8:00 PM'],
-      sharedVia: ['Patient app', 'WhatsApp'], origin: 'practitioner',
+      durationDays: isOneOffRepetition(rep) ? null : duration, preparation: prep, bodyText: bodyText.trim() || undefined,
+      remindersEnabled: !isOneOffRepetition(rep), reminderTimes: rep === 'Twice daily' ? ['8:00 AM', '8:00 PM'] : ['8:00 PM'],
+      sharedVia: ['Patient app'], origin: 'practitioner',
     })
+    setPublishedRxId(rx.id)
     // Publishing books the review too, same as the web console — a course
     // that ends without anyone checking back is exactly what this closes.
-    if (rep !== 'As needed' && duration > 0) {
+    if (!isOneOffRepetition(rep) && duration > 0) {
       scheduleFollowUp({
         patientId: currentPatient.id,
         practitionerId: ME,
@@ -537,7 +600,27 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
       </div>
 
       <div>
-        <Label>Preparation note</Label>
+        <Label>Prescription · exactly as it will print</Label>
+        <textarea
+          value={bodyText}
+          onChange={(e) => { setBodyText(e.target.value); setBodyTouched(true) }}
+          rows={3}
+          placeholder="Write it exactly as it should appear on the printed slip — your own shorthand is fine (e.g. Px 200C, 1 dose)"
+          data-selectable="true"
+          className="mt-2 w-full rounded-[14px] border border-border bg-surface px-3.5 py-2.5 text-[13px] leading-relaxed text-body outline-none placeholder:text-faint focus:border-green-border"
+        />
+        <p className="mt-1.5 text-[11.5px] text-faint">
+          This is the only thing that prints. The fields above are just a quick way to fill it in and still drive dose reminders — write over them freely.
+        </p>
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between">
+          <Label>Preparation note</Label>
+          <Pressable hap="tick" onClick={() => setPrep(STANDARD_MEDICINE_INSTRUCTIONS)} className="text-[11.5px] font-semibold text-brand">
+            Insert standard instructions
+          </Pressable>
+        </div>
         <textarea value={prep} onChange={(e) => setPrep(e.target.value)} rows={3} placeholder="e.g. Dissolve under the tongue at night, 15 minutes away from food or drink." data-selectable="true" className="mt-2 w-full rounded-[14px] border border-border bg-surface px-3.5 py-2.5 text-[13px] leading-relaxed text-body outline-none focus:border-green-border" />
       </div>
 
@@ -558,19 +641,31 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
           </motion.div>
           <div className="mt-3 font-display text-[19px] font-bold text-ink">Prescription published</div>
           <div className="mt-1 px-4 text-[13px] text-muted">
-            {remedy} {potency} &middot; {rep} &mdash; sent to {currentPatient.name}{"'"}s app and WhatsApp.
-            {rep !== 'As needed' && <> Follow-up auto-booked for {formatDayLabel(addDaysISO(todayISO(), duration))}.</>}
+            {remedy} {potency} &middot; {rep} &mdash; sent to {currentPatient.name}{"'"}s app.
+            {!isOneOffRepetition(rep) && <> Follow-up auto-booked for {formatDayLabel(addDaysISO(todayISO(), duration))}.</>}
           </div>
+
+          <div className="mt-4 flex w-full gap-2">
+            {([['WhatsApp', WhatsappLogo], ['SMS', DeviceMobile], ['Email', EnvelopeSimple]] as const).map(([c, Icon]) => (
+              <Pressable
+                key={c}
+                hap="tick"
+                onClick={() => shareRx(c)}
+                className={`flex flex-1 flex-col items-center gap-1 rounded-[14px] border px-2 py-2.5 text-[11.5px] font-semibold ${
+                  publishedRx?.sharedVia.includes(c) ? 'border-green-border bg-tint text-ink-deep' : 'border-border bg-surface text-muted'
+                }`}
+              >
+                <Icon size={17} weight="fill" />
+                {c}
+              </Pressable>
+            ))}
+          </div>
+
           <Pressable
             hap="tick"
             onClick={async () => {
-              const credentials = [doctor?.qualifications, doctor?.registrationNo].filter(Boolean).join(' · ')
-              const rx = {
-                id: crypto.randomUUID(), patientId: currentPatient.id, practitionerId: ME, remedy, potency,
-                doseGlobules: dose, repetition: rep, durationDays: rep === 'As needed' ? null : duration, preparation: prep,
-                publishedAt: new Date().toISOString(), sharedVia: [], remindersEnabled: false, reminderTimes: [],
-              }
-              await exportPrescriptionPdf(rx, currentPatient.name, doctor?.name ?? 'Doctor', undefined, credentials || undefined).catch(() => {})
+              if (!publishedRx) return
+              await exportPrescriptionPdf(publishedRx, currentPatient).catch(() => {})
             }}
             className="mt-3 flex items-center gap-1.5 text-[12.5px] font-semibold text-body"
           >
@@ -582,6 +677,144 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
           </div>
         </div>
       </BottomSheet>
+    </div>
+  )
+}
+
+// ── QUICK INVESTIGATION ORDER (lab tests / scans) ──
+// Same real letterhead as prescriptions, same search-only picker as the web
+// console's InvestigationWriter — matching logic lives in
+// core/investigations.ts so both stay in sync.
+function QuickInvestigationScreen({ patientId, onBack }: { patientId: string; onBack: () => void }) {
+  const patient = useClinic((s) => s.patients.find((p) => p.id === patientId))
+  const ME = useClinic((s) => s.currentPractitionerId)
+  const createOrder = useClinic((s) => s.createInvestigationOrder)
+  const toast = useToast()
+
+  const [query, setQuery] = useState('')
+  const [selected, setSelected] = useState<string[]>([])
+  const [notes, setNotes] = useState('')
+
+  const matches = useMemo(() => {
+    const queryWords = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+    if (queryWords.length === 0) return []
+    const selectedSet = new Set(selected)
+    const fromCategory = INVESTIGATION_CATALOG
+      .filter((c) => matchesAllWords(queryWords, wordsOf(c.category)))
+      .flatMap((c) => c.tests.map((test) => ({ test, category: c.category })))
+    const fromTest = ALL_INVESTIGATIONS.filter(({ test }) => matchesAllWords(queryWords, wordsOf(test)))
+    const seen = new Set<string>()
+    return [...fromCategory, ...fromTest]
+      .filter(({ test }) => !seen.has(test) && !selectedSet.has(test) && (seen.add(test), true))
+      .slice(0, 12)
+  }, [query, selected])
+
+  const toggleTest = (test: string) => {
+    haptic('select')
+    setSelected((s) => (s.includes(test) ? s.filter((t) => t !== test) : [...s, test]))
+  }
+
+  if (!patient) return (
+    <div className="flex h-full items-center justify-center bg-screen">
+      <div className="text-center">
+        <div className="text-[14px] text-muted">Patient not found</div>
+        <button onClick={onBack} className="mt-3 text-[13px] font-semibold text-brand">Go back</button>
+      </div>
+    </div>
+  )
+
+  async function handleGenerate() {
+    if (!patient) return
+    if (selected.length === 0) return
+    const order = createOrder({ patientId, practitionerId: ME, tests: selected, notes: notes.trim() })
+    haptic('success')
+    await exportInvestigationOrderPdf(order, patient).catch(() => {
+      toast({ title: 'PDF export failed', message: 'Please try again.' })
+    })
+    toast({ title: 'Investigation slip generated', message: `${selected.length} test${selected.length === 1 ? '' : 's'} for ${patient.name}.` })
+    onBack()
+  }
+
+  return (
+    <div className="flex h-full flex-col bg-screen">
+      <div className="px-[18px] pb-2 pt-[var(--app-top)]">
+        <button onClick={onBack} className="flex items-center gap-1 text-[13px] font-semibold text-brand">
+          <CaretLeft size={15} weight="bold" /> Back
+        </button>
+        <div className="mt-1 font-display text-[18px] font-bold text-ink">Investigations</div>
+        <div className="text-[12px] text-faint">{patient.name} · same letterhead as prescriptions</div>
+      </div>
+
+      <div className="flex-1 space-y-4 overflow-y-auto px-[18px] pb-[120px] pt-2">
+        <div>
+          <Label>Add investigation</Label>
+          <div className="mt-2 flex items-center gap-2 rounded-pill border border-border bg-surface px-3.5 py-2">
+            <MagnifyingGlass size={16} className="text-faint" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Start typing — CBC, thyroid, vitamin d…"
+              className="w-full bg-transparent text-[13px] outline-none placeholder:text-faint"
+              data-selectable="true"
+            />
+          </div>
+          {matches.length > 0 && (
+            <div className="mt-2 space-y-1.5">
+              {matches.map(({ test, category }) => (
+                <Pressable
+                  key={test}
+                  hap="none"
+                  onClick={() => { toggleTest(test); setQuery('') }}
+                  className="flex w-full items-center justify-between gap-3 rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-left"
+                >
+                  <span className="text-[13px] font-semibold text-ink">{test}</span>
+                  <span className="shrink-0 text-[11px] text-faint">{category}</span>
+                </Pressable>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div>
+          <Label>Selected{selected.length > 0 ? ` (${selected.length})` : ''}</Label>
+          {selected.length === 0 ? (
+            <p className="mt-2 text-[12.5px] text-faint">Nothing added yet — search above to add tests.</p>
+          ) : (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {selected.map((test) => (
+                <span key={test} className="flex items-center gap-1.5 rounded-pill border border-border bg-tint px-3 py-1.5 text-[12.5px] font-semibold text-ink-deep">
+                  {test}
+                  <button onClick={() => toggleTest(test)} className="text-faint">
+                    <X size={12} weight="bold" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div>
+          <Label>What&apos;s this for? (prints as &quot;Diagnosis&quot; on the slip)</Label>
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Optional — leave blank to use the patient's chief complaint"
+            rows={2}
+            data-selectable="true"
+            className="mt-2 w-full resize-none rounded-[14px] border border-border bg-surface px-3.5 py-2.5 text-[13px] leading-relaxed text-body outline-none placeholder:text-faint focus:border-green-border"
+          />
+        </div>
+
+        <Pressable
+          hap="none"
+          onClick={handleGenerate}
+          className={`flex w-full items-center justify-center gap-2 rounded-pill py-3 font-display text-[15px] font-semibold text-white shadow-float transition ${
+            selected.length > 0 ? 'bg-accent' : 'bg-accent/40 pointer-events-none'
+          }`}
+        >
+          <TestTube size={18} weight="fill" /> Generate &amp; save PDF
+        </Pressable>
+      </div>
     </div>
   )
 }

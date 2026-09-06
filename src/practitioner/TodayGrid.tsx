@@ -18,6 +18,7 @@ import {
   DotsSixVertical,
   Warning,
   CalendarBlank,
+  CurrencyInr,
 } from '@phosphor-icons/react'
 import { todayISO, toISO, formatDayLabel, firstAvailableMorningSlot, isPastISO, isTodayISO } from '../core/day'
 import { useClinic } from '../core/store'
@@ -64,15 +65,17 @@ export function TodayGrid({
   openCase,
   goRx,
   startVideo,
+  onQuickBill,
 }: {
   openCase: (id: string) => void
   goRx: (patientId: string) => void
   startVideo?: (appointmentId: string) => void
+  onQuickBill: () => void
 }) {
   const dbError = useClinic((s) => s.dbError)
-  const appts = useClinic((s) => s.appointments)
+  const allAppts = useClinic((s) => s.appointments)
+  const allTimeBlocks = useClinic((s) => s.timeBlocks)
   const patients = useClinic((s) => s.patients)
-  const timeBlocks = useClinic((s) => s.timeBlocks)
   const checkIns = useClinic((s) => s.checkIns)
   const doseReminders = useClinic((s) => s.doseReminders)
   const startConsult = useClinic((s) => s.startConsult)
@@ -83,10 +86,17 @@ export function TodayGrid({
   const addTimeBlock = useClinic((s) => s.addTimeBlock)
   const removeTimeBlock = useClinic((s) => s.removeTimeBlock)
   const ME = useClinic((s) => s.currentPractitionerId)
+  const role = useClinic((s) => s.role)
+  const practitioners = useClinic((s) => s.practitioners)
   const pFind = (id: string) => patients.find((p) => p.id === id)
   const toast = useToast()
 
   const [view, setView] = useState<DayView>('day')
+  // Owner-only — everyone else's fetched data is already scoped to their own
+  // caseload. Mirrors the web console's Today toggle exactly, including
+  // defaulting to "mine": a practitioner's own day first, not the whole
+  // clinic merged into one grid with no indication of whose slot is whose.
+  const [viewMode, setViewMode] = useState<'mine' | 'everyone'>('mine')
   const [endConsultSheet, setEndConsultSheet] = useState<string | null>(null)
   const [followUpSheet, setFollowUpSheet] = useState<string | null>(null)
   const [noShowSheet, setNoShowSheet] = useState<string | null>(null)
@@ -99,17 +109,28 @@ export function TodayGrid({
 
   const gridRef = useRef<HTMLDivElement>(null)
 
-  const activeAppt = appts.find((a) => a.status === 'In consult')
+  // Own schedule, always — the active-consult banner and stats below have
+  // direct actions (End, Prescribe, Start) that only ever make sense for
+  // your own consult, never a teammate's, so they stay "mine" regardless of
+  // the toggle. Only the grid/list display (further down) responds to it.
+  const myAppts = allAppts.filter((a) => a.practitionerId === ME)
+  const appts = role === 'Owner' && viewMode === 'everyone' ? allAppts : myAppts
+  const timeBlocks = role === 'Owner' && viewMode === 'everyone' ? allTimeBlocks : allTimeBlocks.filter((b) => b.practitionerId === ME)
+  const team = practitioners.filter((p) => p.id !== ME)
+  const teamToday = allAppts.filter((a) => isTodayISO(a.date) && a.practitionerId !== ME)
+
+  const activeAppt = myAppts.find((a) => a.status === 'In consult')
   const activePatient = activeAppt ? pFind(activeAppt.patientId) : null
   const activeCheckIn = activeAppt ? checkIns.find((c) => c.patientId === activeAppt.patientId) : null
   const activeDoses = activeAppt ? doseReminders.filter((d) => d.patientId === activeAppt.patientId) : []
   const adherencePct = activeDoses.length > 0 ? Math.round((activeDoses.filter((d) => d.loggedToday).length / activeDoses.length) * 100) : null
 
   const todayOnlyAppts = appts.filter((a) => isTodayISO(a.date))
-  const todayAppts = appts.filter((a) => !isPastISO(a.date))
-  const seen = todayOnlyAppts.filter((a) => a.status === 'Seen').length
-  const waiting = todayAppts.filter((a) => a.status === 'Waiting' || a.status === 'New').length
-  const upcoming = todayAppts.filter((a) => a.status === 'Upcoming').length
+  const myTodayAppts = myAppts.filter((a) => isTodayISO(a.date))
+  const myFutureAppts = myAppts.filter((a) => !isPastISO(a.date))
+  const seen = myTodayAppts.filter((a) => a.status === 'Seen').length
+  const waiting = myFutureAppts.filter((a) => a.status === 'Waiting' || a.status === 'New').length
+  const upcoming = myFutureAppts.filter((a) => a.status === 'Upcoming').length
 
   // consult timer
   const [elapsed, setElapsed] = useState(0)
@@ -215,6 +236,34 @@ export function TodayGrid({
           <span className="text-[13px] font-medium text-danger">Could not reach the database — data below may be incomplete</span>
         </div>
       )}
+      {/* schedule header — Quick bill always available; Mine/Everyone is Owner only, mirrors the web console exactly */}
+      <div className="flex items-center justify-between">
+        <Label>Today's schedule</Label>
+        <div className="flex items-center gap-2">
+          <Pressable
+            hap="tick"
+            onClick={onQuickBill}
+            className="flex items-center gap-1 rounded-pill border border-border bg-surface px-2.5 py-1 text-[12px] font-semibold text-body"
+          >
+            <CurrencyInr size={13} weight="bold" /> Quick bill
+          </Pressable>
+          {role === 'Owner' && (
+            <div className="inline-flex rounded-pill border border-border bg-surface p-0.5">
+              {(['mine', 'everyone'] as const).map((m) => (
+                <Pressable
+                  key={m}
+                  hap="tick"
+                  onClick={() => setViewMode(m)}
+                  className={`rounded-pill px-3 py-1 text-[12px] font-semibold transition ${viewMode === m ? 'bg-brand text-screen' : 'text-muted'}`}
+                >
+                  {m === 'mine' ? 'Mine' : 'Everyone'}
+                </Pressable>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* header row: stats + view toggle */}
       <div className="flex items-center gap-3">
         <div className="grid flex-1 grid-cols-3 gap-2">
@@ -287,6 +336,8 @@ export function TodayGrid({
           appts={todayOnlyAppts}
           timeBlocks={timeBlocks}
           patients={patients}
+          practitioners={practitioners}
+          myId={ME}
           activeAppt={activeAppt ?? null}
           selectedAppt={selectedAppt}
           dragTarget={dragTarget}
@@ -302,6 +353,8 @@ export function TodayGrid({
         <ListView
           appts={todayOnlyAppts}
           patients={patients}
+          practitioners={practitioners}
+          myId={ME}
           activeAppt={activeAppt ?? null}
           onStartConsult={(id) => { startConsult(id); startTimer(); haptic('success'); const a = appts.find((x) => x.id === id); toast({ title: `Consult started · ${pFind(a?.patientId ?? '')?.name}` }); if (a?.type === 'Video' && startVideo) startVideo(id) }}
           onNoShow={(id) => setNoShowSheet(id)}
@@ -319,20 +372,67 @@ export function TodayGrid({
         <Prohibit size={15} /> Block time
       </Pressable>
 
+      {/* team card — Owner only, below her own schedule, matching web */}
+      {role === 'Owner' && team.length > 0 && (
+        <Card className="p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <div className="font-display text-[15px] font-bold text-ink">Your team today</div>
+            <Badge tone="neutral">{teamToday.length} appointment{teamToday.length !== 1 ? 's' : ''}</Badge>
+          </div>
+          <div className="space-y-3.5">
+            {team.map((p) => {
+              const rows = teamToday.filter((a) => a.practitionerId === p.id)
+              return (
+                <div key={p.id}>
+                  <div className="mb-1.5 flex items-center gap-2">
+                    <Avatar initials={p.initials} size={22} />
+                    <span className="text-[13px] font-semibold text-ink">{p.name}</span>
+                    <span className="text-[11.5px] text-faint">{rows.length} today</span>
+                  </div>
+                  {rows.length === 0 ? (
+                    <p className="pl-7 text-[12px] text-faint">Nothing scheduled today.</p>
+                  ) : (
+                    <div className="space-y-1 pl-7">
+                      {rows.map((a) => {
+                        const pt = pFind(a.patientId)
+                        return (
+                          <Pressable
+                            key={a.id}
+                            hap="tick"
+                            onClick={() => openCase(a.patientId)}
+                            className="flex w-full items-center gap-2.5 rounded-[10px] px-2 py-1.5 text-left"
+                          >
+                            <span className="w-14 shrink-0 text-[12px] font-semibold text-body">{a.time}</span>
+                            <span className="min-w-0 flex-1 truncate text-[12px] text-ink">{pt?.name ?? 'Patient'}</span>
+                            <Badge tone={a.status === 'In consult' ? 'green' : 'neutral'}>{a.status}</Badge>
+                          </Pressable>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </Card>
+      )}
+
       {/* bottom sheets */}
       <EndConsultSheet open={endConsultSheet !== null} timerStr={timerStr} onClose={() => setEndConsultSheet(null)} onConfirm={() => endConsultSheet && handleEndConsult(endConsultSheet)} />
       <FollowUpSheet open={followUpSheet !== null} patientName={followUpSheet ? pFind(followUpSheet)?.name ?? 'patient' : ''} onClose={() => setFollowUpSheet(null)} onSelect={(p) => followUpSheet && handleScheduleFollowUp(followUpSheet, p)} />
-      <NoShowSheet open={noShowSheet !== null} appts={appts} pFind={pFind} noShowId={noShowSheet} onClose={() => setNoShowSheet(null)} onConfirm={() => noShowSheet && handleNoShow(noShowSheet)} />
+      <NoShowSheet open={noShowSheet !== null} appts={allAppts} pFind={pFind} noShowId={noShowSheet} onClose={() => setNoShowSheet(null)} onConfirm={() => noShowSheet && handleNoShow(noShowSheet)} />
       <BlockTimeSheet open={blockOpen} startHour={blockStartHour} duration={blockDuration} reason={blockReason} onStartHourChange={setBlockStartHour} onDurationChange={setBlockDuration} onReasonChange={setBlockReason} onClose={() => setBlockOpen(false)} onConfirm={handleBlockTime} />
     </div>
   )
 }
 
 // ── DAY GRID VIEW ──
-function DayGridView({ appts, timeBlocks, patients, activeAppt, selectedAppt, onStartConsult, onEndConsult, onNoShow, onOpenCase, onSelectForReschedule, onGridTap, onRemoveBlock }: {
+function DayGridView({ appts, timeBlocks, patients, practitioners, myId, activeAppt, selectedAppt, onStartConsult, onEndConsult, onNoShow, onOpenCase, onSelectForReschedule, onGridTap, onRemoveBlock }: {
   appts: Appointment[]
   timeBlocks: TimeBlock[]
   patients: { id: string; name: string; initials: string }[]
+  practitioners: { id: string; name: string }[]
+  myId: string
   activeAppt: Appointment | null
   selectedAppt: string | null
   dragTarget: number | null
@@ -345,6 +445,7 @@ function DayGridView({ appts, timeBlocks, patients, activeAppt, selectedAppt, on
   onRemoveBlock: (id: string) => void
 }) {
   const pFind = (id: string) => patients.find((p) => p.id === id)
+  const prFind = (id: string) => practitioners.find((p) => p.id === id)
 
   const nowHour = new Date().getHours() + new Date().getMinutes() / 60
 
@@ -424,7 +525,8 @@ function DayGridView({ appts, timeBlocks, patients, activeAppt, selectedAppt, on
                   const blockH = (a.durationMin / 60) * HOUR_HEIGHT
                   const isActive = activeAppt?.id === a.id
                   const isSelected = selectedAppt === a.id
-                  const canStart = (a.status === 'Waiting' || a.status === 'New' || a.status === 'Upcoming') && !activeAppt
+                  const isMine = a.practitionerId === myId
+                  const canStart = isMine && (a.status === 'Waiting' || a.status === 'New' || a.status === 'Upcoming') && !activeAppt
                   const isSeen = a.status === 'Seen'
 
                   return (
@@ -446,6 +548,7 @@ function DayGridView({ appts, timeBlocks, patients, activeAppt, selectedAppt, on
                           <div className="flex items-center gap-1.5">
                             <span className="truncate text-[12px] font-semibold text-ink">{p.name}</span>
                             {a.type === 'Video' && <VideoCamera size={11} weight="fill" className="shrink-0 text-brand" />}
+                            {!isMine && <Badge tone="neutral" className="!px-1.5 !py-0 !text-[9px]">{prFind(a.practitionerId)?.name ?? 'Team'}</Badge>}
                           </div>
                           <div className="truncate text-[10px] text-muted">{a.time} · {a.reason ?? ''}</div>
                         </div>
@@ -455,12 +558,12 @@ function DayGridView({ appts, timeBlocks, patients, activeAppt, selectedAppt, on
                               <Play size={9} weight="fill" /> Start
                             </Pressable>
                           )}
-                          {isActive && (
+                          {isActive && isMine && (
                             <Pressable hap="tick" onClick={() => onEndConsult(a.id)} className="flex items-center gap-0.5 rounded-pill bg-danger/10 px-2 py-1 text-[10px] font-semibold text-danger">
                               <Stop size={9} weight="fill" /> End
                             </Pressable>
                           )}
-                          {!isSeen && !isActive && (
+                          {!isSeen && !isActive && isMine && (
                             <Pressable hap="tick" onClick={() => onSelectForReschedule(a.id)} className="rounded-full p-1 text-faint hover:bg-raised">
                               <DotsSixVertical size={13} weight="bold" />
                             </Pressable>
@@ -483,6 +586,8 @@ function DayGridView({ appts, timeBlocks, patients, activeAppt, selectedAppt, on
 function ListView({
   appts,
   patients,
+  practitioners,
+  myId,
   activeAppt,
   onStartConsult,
   onNoShow,
@@ -491,6 +596,8 @@ function ListView({
 }: {
   appts: Appointment[]
   patients: { id: string; name: string; initials: string }[]
+  practitioners: { id: string; name: string }[]
+  myId: string
   activeAppt: Appointment | null
   onStartConsult: (id: string) => void
   onNoShow: (id: string) => void
@@ -498,6 +605,7 @@ function ListView({
   onSelectForReschedule: (id: string) => void
 }) {
   const pFind = (id: string) => patients.find((p) => p.id === id)
+  const prFind = (id: string) => practitioners.find((p) => p.id === id)
   const restOfDay = appts.filter((a) => a.status !== 'In consult')
 
   if (restOfDay.length === 0) {
@@ -517,7 +625,8 @@ function ListView({
       {restOfDay.map((a) => {
         const p = pFind(a.patientId)
         if (!p) return null
-        const canStart = (a.status === 'Waiting' || a.status === 'New' || a.status === 'Upcoming') && !activeAppt
+        const isMine = a.practitionerId === myId
+        const canStart = isMine && (a.status === 'Waiting' || a.status === 'New' || a.status === 'Upcoming') && !activeAppt
         const isSeen = a.status === 'Seen'
         return (
           <motion.div key={a.id} variants={listItem}>
@@ -528,7 +637,10 @@ function ListView({
               </div>
               <Avatar initials={p.initials} size={38} />
               <div className="min-w-0 flex-1">
-                <div className="truncate font-display text-[14px] font-semibold text-ink">{p.name}</div>
+                <div className="flex items-center gap-1.5">
+                  <div className="truncate font-display text-[14px] font-semibold text-ink">{p.name}</div>
+                  {!isMine && <Badge tone="neutral" className="shrink-0">{prFind(a.practitionerId)?.name ?? 'Team'}</Badge>}
+                </div>
                 <div className="flex items-center gap-1.5 truncate text-[12px] text-muted">
                   {a.type === 'Video' && <VideoCamera size={12} weight="fill" className="text-brand" />}
                   {a.tag ?? a.reason}

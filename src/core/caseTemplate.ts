@@ -63,14 +63,14 @@ export const CASE_SECTIONS: CaseSectionDef[] = [
     fields: [
       {
         key: 'better',
-        label: 'Better for',
+        label: 'Better by',
         type: 'chips',
         multi: true,
         options: ['Warmth', 'Rest', 'Quiet', 'Open air', 'Firm pressure', 'Company', 'Eating'],
       },
       {
         key: 'worse',
-        label: 'Worse for',
+        label: 'Worse by',
         type: 'chips',
         multi: true,
         options: ['Cold air', 'Coffee', 'Late nights', 'Noise', 'Before storms', 'Lying on left', 'Alcohol'],
@@ -149,8 +149,8 @@ export const ACUTE_SECTIONS: CaseSectionDef[] = [
     short: 'Modalities',
     icon: 'ph-arrows-left-right',
     fields: [
-      { key: 'better', label: 'Better for', type: 'chips', multi: true, options: ['Warmth', 'Rest', 'Cold application', 'Pressure', 'Open air', 'Bending double', 'Motion'] },
-      { key: 'worse', label: 'Worse for', type: 'chips', multi: true, options: ['Touch', 'Motion', 'Cold', 'Heat', 'Night', 'Jarring', 'Lying on affected side'] },
+      { key: 'better', label: 'Better by', type: 'chips', multi: true, options: ['Warmth', 'Rest', 'Cold application', 'Pressure', 'Open air', 'Bending double', 'Motion'] },
+      { key: 'worse', label: 'Worse by', type: 'chips', multi: true, options: ['Touch', 'Motion', 'Cold', 'Heat', 'Night', 'Jarring', 'Lying on affected side'] },
       { key: 'timeAgg', label: 'Time of aggravation', type: 'textarea', placeholder: 'e.g. worse at 3am, evening, after midnight' },
     ],
   },
@@ -266,8 +266,8 @@ export const FIRST_VISIT_SECTIONS: CaseSectionDef[] = [
     short: 'Modalities',
     icon: 'ph-arrows-left-right',
     fields: [
-      { key: 'better', label: 'Better for', type: 'chips', multi: true, options: ['Warmth', 'Rest', 'Quiet', 'Open air', 'Firm pressure', 'Company', 'Eating', 'Motion'] },
-      { key: 'worse', label: 'Worse for', type: 'chips', multi: true, options: ['Cold air', 'Coffee', 'Late nights', 'Noise', 'Before storms', 'Lying on left', 'Alcohol', 'Morning', 'Evening'] },
+      { key: 'better', label: 'Better by', type: 'chips', multi: true, options: ['Warmth', 'Rest', 'Quiet', 'Open air', 'Firm pressure', 'Company', 'Eating', 'Motion'] },
+      { key: 'worse', label: 'Worse by', type: 'chips', multi: true, options: ['Cold air', 'Coffee', 'Late nights', 'Noise', 'Before storms', 'Lying on left', 'Alcohol', 'Morning', 'Evening'] },
       { key: 'timeAgg', label: 'Time of aggravation', type: 'textarea', placeholder: 'e.g. worse 3–5am' },
     ],
   },

@@ -9,11 +9,16 @@ import type {
   ClinicDocument,
   DoseReminder,
   Handoff,
+  InvestigationOrder,
+  Invoice,
+  InvoiceLineItem,
+  InvoiceStatus,
   AppNotification,
   MessageSender,
   Outcome,
   OutcomeKind,
   Patient,
+  PaymentMode,
   Potency,
   Practitioner,
   Prescription,
@@ -37,6 +42,9 @@ import {
   updateAppointmentDb,
   insertPrescription,
   updatePrescriptionDb,
+  insertInvestigationOrder,
+  insertInvoice,
+  updateInvoiceDb,
   insertDoseReminder,
   updateDoseReminderDb,
   insertCheckIn,
@@ -64,13 +72,17 @@ const caseTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const caseVisitTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 // A write that couldn't reach the database while offline, kept around to
-// retry on reconnect. Deliberately just these two kinds — case notes and
-// prescriptions are the two the offline guarantee is actually about; other
+// retry on reconnect. Deliberately just these kinds — case notes and
+// prescriptions were the two the offline guarantee was originally about;
+// invoice *edits* (not creation — a new invoice needs a server-assigned
+// number, so creating one requires being online) joined them because this
+// is real money and a silent single failure toast isn't enough. Other
 // writes still fire-and-report-error as before rather than growing this into
 // a generic everything-queue.
 export type PendingWrite =
   | { id: string; kind: 'caseData'; patientId: string; queuedAt: string }
   | { id: string; kind: 'prescription'; rx: Prescription; queuedAt: string }
+  | { id: string; kind: 'invoice'; invoiceId: string; patch: Record<string, unknown>; queuedAt: string }
 
 export interface PublishRxInput {
   patientId: string
@@ -88,11 +100,34 @@ export interface PublishRxInput {
   origin: Surface
 }
 
+export interface CreateInvestigationOrderInput {
+  patientId: string
+  practitionerId: string
+  tests: string[]
+  notes: string
+}
+
+export interface CreateInvoiceInput {
+  patientId: string
+  practitionerId: string
+  appointmentId?: string
+  date: string
+  items: InvoiceLineItem[]
+  paymentMode: PaymentMode
+  amountReceived: number
+  status: InvoiceStatus
+  notes?: string
+}
+
+export type UpdateInvoiceInput = Partial<Pick<Invoice, 'date' | 'items' | 'paymentMode' | 'amountReceived' | 'status' | 'notes'>>
+
 interface ClinicState {
   practitioners: Practitioner[]
   patients: Patient[]
   appointments: Appointment[]
   prescriptions: Prescription[]
+  investigationOrders: InvestigationOrder[]
+  invoices: Invoice[]
   doseReminders: DoseReminder[]
   checkIns: CheckIn[]
   handoffs: Handoff[]
@@ -122,8 +157,13 @@ interface ClinicState {
   setOffline: (v: boolean) => void
   retryPendingWrites: () => Promise<void>
   publishPrescription: (input: PublishRxInput) => Prescription
+  createInvestigationOrder: (input: CreateInvestigationOrderInput) => InvestigationOrder
+  createInvoice: (input: CreateInvoiceInput) => Promise<Invoice | null>
+  updateInvoice: (id: string, patch: UpdateInvoiceInput) => void
+  cancelInvoice: (id: string) => void
   toggleDoseLogged: (id: string) => void
   setRemindersEnabled: (prescriptionId: string, enabled: boolean) => void
+  markPrescriptionShared: (prescriptionId: string, channel: string) => void
   pushNotification: (n: Omit<AppNotification, 'id' | 'read'>) => void
   markNotificationRead: (id: string) => void
   dismissNotification: (id: string) => void
@@ -149,7 +189,6 @@ interface ClinicState {
   submitCheckIn: (input: { patientId: string; prescriptionId: string; marked: CheckIn['marked']; improvementPct: number; changeChips: string[]; freeText: string }) => void
   updatePractitioner: (id: string, patch: Partial<Practitioner>) => void
   assignPatient: (patientId: string, practitionerId: string) => void
-  recordPayment: (appointmentId: string, fee: number, mode: Appointment['paymentMode'], status: Appointment['paymentStatus']) => void
   addDocument: (doc: ClinicDocument) => void
   snapshotCaseVisit: (patientId: string, appointmentId?: string, template?: string) => void
   updateCaseVisit: (id: string, patch: { sections?: Record<string, unknown>; remedy?: string; outcome?: string }) => void
@@ -206,6 +245,8 @@ const emptyState = () => ({
   patients: [] as Patient[],
   appointments: [] as Appointment[],
   prescriptions: [] as Prescription[],
+  investigationOrders: [] as InvestigationOrder[],
+  invoices: [] as Invoice[],
   doseReminders: [] as DoseReminder[],
   checkIns: [] as CheckIn[],
   handoffs: [] as Handoff[],
@@ -254,8 +295,27 @@ export const useClinic = create<ClinicState>()(
 
           const today = new Date().toDateString()
           const needsReset = get().lastDoseResetDate !== today
+          // This 15s poll can land mid-keystroke — a case-note edit is only
+          // in the store, not the DB yet, for the ~1s autosave debounce plus
+          // however long the write itself takes. Blindly overwriting
+          // caseData with this fetch would snap the field back to the
+          // last-persisted copy, reading as "the word I just typed vanished"
+          // (it was most visible right after the space between words, the
+          // natural typing pause — not because space itself does anything).
+          // Keep the local copy for any patient whose edit hasn't been
+          // confirmed saved yet; only a plain 'saved' status (or no edit
+          // this session at all) lets the fetched copy win.
+          const priorCaseData = get().caseData
+          const saveStatus = get().caseSaveStatus
+          const caseData = { ...data.caseData }
+          for (const patientId of Object.keys(priorCaseData)) {
+            if (saveStatus[patientId] && saveStatus[patientId] !== 'saved') {
+              caseData[patientId] = priorCaseData[patientId]
+            }
+          }
           set({
             ...data,
+            caseData,
             doseReminders: needsReset
               ? data.doseReminders.map((d) => ({ ...d, loggedToday: false }))
               : data.doseReminders,
@@ -307,8 +367,11 @@ export const useClinic = create<ClinicState>()(
                 caseSaveStatus: { ...s.caseSaveStatus, [w.patientId]: 'saved' },
               }))
             }
-          } else {
+          } else if (w.kind === 'prescription') {
             const ok = await insertPrescription(w.rx)
+            if (ok) set((s) => ({ pendingWrites: s.pendingWrites.filter((p) => p.id !== w.id) }))
+          } else {
+            const ok = await updateInvoiceDb(w.invoiceId, w.patch)
             if (ok) set((s) => ({ pendingWrites: s.pendingWrites.filter((p) => p.id !== w.id) }))
           }
         }
@@ -385,6 +448,92 @@ export const useClinic = create<ClinicState>()(
         return rx
       },
 
+      createInvestigationOrder: (input) => {
+        const order: InvestigationOrder = {
+          id: newId(),
+          patientId: input.patientId,
+          practitionerId: input.practitionerId,
+          tests: input.tests,
+          notes: input.notes,
+          createdAt: new Date().toISOString(),
+        }
+        set((s) => ({ investigationOrders: [order, ...s.investigationOrders] }))
+        writeThrough(insertInvestigationOrder(order), 'The investigation order may not have saved.')
+        return order
+      },
+
+      // Unlike every other "create" action in this store, this one must be
+      // awaited before it's shown as saved — invoiceNo is a DB-generated
+      // sequential number (the fix for today's duplicate-invoice-number bug
+      // on mobile), so it genuinely can't be known client-side ahead of the
+      // insert. Requires being online; a new bill can't be queued for later
+      // the way an edit can, since there'd be no real number to print yet.
+      createInvoice: async (input) => {
+        if (get().offline) {
+          useToasts.getState().show({ title: 'You are offline', message: 'Reconnect to create a new bill — it needs a server-assigned invoice number.' })
+          return null
+        }
+        const now = new Date().toISOString()
+        const draft: Invoice = {
+          id: newId(),
+          invoiceNo: 0, // placeholder — replaced with the real DB-assigned number below
+          patientId: input.patientId,
+          practitionerId: input.practitionerId,
+          appointmentId: input.appointmentId,
+          date: input.date,
+          items: input.items,
+          paymentMode: input.paymentMode,
+          amountReceived: input.amountReceived,
+          status: input.status,
+          notes: input.notes,
+          createdAt: now,
+          updatedAt: now,
+        }
+        const invoiceNo = await insertInvoice(draft)
+        if (invoiceNo == null) {
+          useToasts.getState().show({ title: 'Could not save', message: 'The bill may not have saved. Please try again.' })
+          return null
+        }
+        const invoice: Invoice = { ...draft, invoiceNo }
+        set((s) => ({ invoices: [invoice, ...s.invoices] }))
+        return invoice
+      },
+
+      updateInvoice: (id, patch) => {
+        const updatedAt = new Date().toISOString()
+        set((s) => ({
+          invoices: s.invoices.map((inv) => (inv.id === id ? { ...inv, ...patch, updatedAt } : inv)),
+        }))
+        const dbPatch: Record<string, unknown> = { updated_at: updatedAt }
+        if (patch.date !== undefined) dbPatch.date = patch.date
+        if (patch.items !== undefined) dbPatch.items = patch.items
+        if (patch.paymentMode !== undefined) dbPatch.payment_mode = patch.paymentMode
+        if (patch.amountReceived !== undefined) dbPatch.amount_received = patch.amountReceived
+        if (patch.status !== undefined) dbPatch.status = patch.status
+        if (patch.notes !== undefined) dbPatch.notes = patch.notes
+
+        if (get().offline) {
+          set((s) => ({ pendingWrites: [...s.pendingWrites, { id: newId(), kind: 'invoice', invoiceId: id, patch: dbPatch, queuedAt: new Date().toISOString() }] }))
+          useToasts.getState().show({ title: 'Saved — will sync once back online', message: 'This bill is queued and will update automatically as soon as you’re reconnected.' })
+        } else {
+          writeThrough(updateInvoiceDb(id, dbPatch), 'This bill’s changes may not have saved.')
+        }
+      },
+
+      cancelInvoice: (id) => {
+        const cancelledAt = new Date().toISOString()
+        set((s) => ({
+          invoices: s.invoices.map((inv) => (inv.id === id ? { ...inv, status: 'cancelled', cancelledAt, updatedAt: cancelledAt } : inv)),
+        }))
+        const dbPatch = { status: 'cancelled', cancelled_at: cancelledAt, updated_at: cancelledAt }
+        if (get().offline) {
+          set((s) => ({ pendingWrites: [...s.pendingWrites, { id: newId(), kind: 'invoice', invoiceId: id, patch: dbPatch, queuedAt: new Date().toISOString() }] }))
+          useToasts.getState().show({ title: 'Saved — will sync once back online', message: 'This cancellation is queued and will sync automatically as soon as you’re reconnected.' })
+        } else {
+          writeThrough(updateInvoiceDb(id, dbPatch), 'This cancellation may not have saved.')
+        }
+      },
+
       toggleDoseLogged: (id) => {
         const dr = get().doseReminders.find((d) => d.id === id)
         if (!dr) return
@@ -404,6 +553,18 @@ export const useClinic = create<ClinicState>()(
           ),
         }))
         writeThrough(updatePrescriptionDb(prescriptionId, { reminders_enabled: enabled }), 'Reminder setting may not have saved.')
+      },
+
+      // Marks a channel as shared only once the real external share for it
+      // actually fired (see share.ts) — never a guess made at publish time.
+      markPrescriptionShared: (prescriptionId, channel) => {
+        const rx = get().prescriptions.find((r) => r.id === prescriptionId)
+        if (!rx || rx.sharedVia.includes(channel)) return
+        const sharedVia = [...rx.sharedVia, channel]
+        set((s) => ({
+          prescriptions: s.prescriptions.map((r) => (r.id === prescriptionId ? { ...r, sharedVia } : r)),
+        }))
+        writeThrough(updatePrescriptionDb(prescriptionId, { shared_via: sharedVia }), 'Share history may not have saved.')
       },
 
       pushNotification: (n) => {
@@ -910,19 +1071,6 @@ export const useClinic = create<ClinicState>()(
       deleteCaseTemplate: (id) => {
         set((s) => ({ caseTemplates: s.caseTemplates.filter((t) => t.id !== id) }))
         writeThrough(deleteCaseTemplateDb(id), 'Template deletion may not have saved.')
-      },
-
-      recordPayment: (appointmentId, fee, mode, status) => {
-        const paidAt = status === 'paid' ? new Date().toISOString() : undefined
-        set((s) => ({
-          appointments: s.appointments.map((a) =>
-            a.id === appointmentId ? { ...a, fee, paymentMode: mode, paymentStatus: status, paidAt } : a,
-          ),
-        }))
-        writeThrough(
-          updateAppointmentDb(appointmentId, { fee, payment_mode: mode, payment_status: status, paid_at: paidAt ?? null }),
-          'Payment record may not have saved.',
-        )
       },
 
       resetDailyDoses: () => {

@@ -406,16 +406,6 @@ click-tested as Neha herself — that would need her password.
       the same root cause in the navigation-transition system — a separate,
       larger fix, flagging rather than guessing at it under time pressure.
 
-## Still to do
-
-- [ ] Hydrate-everything-every-15-seconds architecture — explicitly not a
-      priority right now (your call). Revisit once real data volume makes it
-      worth doing.
-- [ ] Document/image compression before upload — lower priority, see the
-      storage/performance audit above.
-- [ ] Decide whether the web console should get its own global Inbox
-      (matching mobile) — its per-patient Messages panel is currently the
-      only way to message a patient from web, so it wasn't removed.
 - [x] Nested `<button>` in the web Prescriptions overview screen — fixed by
       switching the outer row to `Pressable as="div"` (the same pattern
       already used everywhere else in the app for a clickable row with an
@@ -423,3 +413,90 @@ click-tested as Neha herself — that would need her password.
       gone, the row click still opens the patient, and "Write again" still
       opens the prescription writer directly without also triggering the
       row's click.
+
+## Done (2026-09-06, launch-readiness pass)
+
+- [x] **Web console got its own dedicated Messages section** (decided: option
+      2 of 2 offered). New top-level "Messages" nav item — a real two-pane
+      inbox (conversation list + open thread), matching mobile's Inbox tab
+      but using the desktop console's extra width instead of squeezing the
+      same chat widget into a narrow sidebar card. The old per-patient
+      Messages card is now a lightweight preview (last message + unread
+      count) that deep-links into the real conversation. Verified live:
+      nav badge, opening a conversation, and the patient-page "open
+      conversation" link all confirmed working end to end.
+- [x] **Reports page compared page-by-page against the actual design PDF
+      again** (`Sneham Design Web and App - F.pdf`, page 8) — found two real
+      gaps the first two comparison passes missed: no Month/Year toggle (all
+      4 stats were silently all-time, never actually scoped to a period), and
+      no Export button at all (the spec's own caption literally says
+      "exportable for the accountant"). Both built: a working Month/Year
+      toggle that genuinely re-scopes Total visits/New patients/Revenue/
+      Follow-up adherence/Most-prescribed to the selected period (Caseload by
+      practitioner stays a live snapshot, not period-scoped — "open cases
+      right now" isn't a historical metric); real period-over-period deltas
+      on each stat tile, but only shown when there's an actual prior-period
+      baseline to compare against — never a fabricated/infinite swing for a
+      new clinic with no history yet.
+- [x] **CSV export added — doubles as your "back up patient data" ask.** The
+      new Export button (Patients / Appointments / Prescriptions / Invoices,
+      each its own CSV) is exactly where the design spec always intended an
+      export to live, so this was the natural, unobtrusive place for it
+      rather than a separate new "backup" feature. Opens cleanly in Excel
+      (UTF-8 BOM so ₹ and names don't mangle). Web console only for now.
+- [x] **Re-verified the full audit-triage list (48 findings) against the
+      current code, not old notes** — dispatched 4 independent checks
+      covering identity/sync, Quick Rx/Today/Calendar, RLS/security/Jitsi/
+      timer-leak, and the remaining findings 15-48. Result: everything
+      checked out fixed **except** the 3 items below, which are real.
+- [x] **Found and fixed: a failed case-data fetch could still silently wipe
+      case histories from view.** The poll-race fix from earlier only
+      protected patients with an edit actively in flight — `fetchAllCaseData`
+      itself was the one fetch function (of 19) that didn't increment the
+      shared hydrate-error counter on failure, so a fetch that failed for
+      just that one table looked like a clean hydrate to the rest of the
+      app and quietly replaced every *already-saved* patient's case data
+      with nothing. One-line fix in `src/core/db.ts`, now consistent with
+      every other fetch function.
+- [ ] **Found, NOT yet applied — needs a real decision/action from you:**
+      `invoices` and `investigation_orders` (added in migrations v17/v16,
+      after the RLS hardening pass) still ship the original blanket
+      `using (true)` policy — any logged-in account could read or write any
+      patient's bills or lab orders. Every other patient-linked table was
+      already scoped by `can_access_patient()`; these two were missed.
+      Fix written: `supabase/migration_v18_lock_down_invoices_and_investigations.sql`.
+      **Not applied to the live database** — my Supabase connection dropped
+      mid-session (ENOTFOUND, likely transient) with no fallback credentials
+      available locally. Either run that file's SQL in the Supabase
+      Dashboard's SQL Editor yourself, or ask me to apply it once the
+      connection is back.
+- [ ] **Smaller, found but not fixed this round:** a few write paths
+      (notification inserts, `markMessagesRead`) are still fire-and-forget
+      with nothing surfaced on failure — lower severity than the writes that
+      already got this (case notes, prescriptions, invoices). Practitioner
+      mobile's grid view has no no-show action wired on a card (list view
+      does). Tap-target sizing (44px min) was only fixed on the patient app —
+      practitioner mobile and web still have several sub-44px controls
+      (Toggle, Stepper, Chip in the shared design system).
+- [x] Jitsi double-join (the original audio-howl bug) re-confirmed fixed by
+      reading the actual guard in `VideoConsult.tsx` directly — native join
+      is gated by a `hasOpenedRef` that survives a React StrictMode
+      mount→cleanup→mount, and the native vs. web(iframe) paths are mutually
+      exclusive branches so they can't double-join each other either. Not
+      click-tested live this round (would need a real second participant to
+      confirm no audio doubling) — code-level guard is unambiguous, so
+      treating this as solid without a live redo.
+
+## Still to do
+
+- [ ] Hydrate-everything-every-15-seconds architecture — explicitly not a
+      priority right now (your call). Revisit once real data volume makes it
+      worth doing.
+- [ ] Document/image compression before upload — lower priority, see the
+      storage/performance audit above.
+- [ ] **Apply `migration_v18_lock_down_invoices_and_investigations.sql` to
+      the live database** — see above, this is the one real open item before
+      real patient billing/lab data should go live.
+- [ ] Fire-and-forget writes on notifications/`markMessagesRead`; grid-view
+      no-show action; tap-target sizing outside the patient app — all lower
+      severity, listed above.

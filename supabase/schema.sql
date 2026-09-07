@@ -37,6 +37,7 @@ create table if not exists practitioners (
   name text not null,
   initials text not null,
   role text not null default 'Practitioner',
+  status text not null default 'pending' check (status in ('pending', 'active')),
   specialty text not null default 'Homeopathy',
   qualifications text,
   registration_no text,
@@ -224,6 +225,30 @@ create policy "Authenticated users can read handoffs" on handoffs for select to 
 create policy "Authenticated users can manage handoffs" on handoffs for all to authenticated using (true);
 
 
+-- ─── Second Opinions ───
+-- Read-only case sharing with a colleague, with a question attached.
+-- Ownership of the case never changes — unlike a handoff, which transfers
+-- coverage, this is a request + response.
+create table if not exists second_opinions (
+  id text primary key,
+  patient_id text not null references patients(id),
+  from_practitioner_id text not null references practitioners(id),
+  to_practitioner_id text not null references practitioners(id),
+  question text not null default '',
+  response text,
+  status text not null default 'pending' check (status in ('pending', 'answered')),
+  created_at timestamptz not null default now(),
+  answered_at timestamptz
+);
+
+alter table second_opinions enable row level security;
+create policy "Authenticated users can read second opinions" on second_opinions for select to authenticated using (true);
+create policy "Authenticated users can manage second opinions" on second_opinions for all to authenticated using (true);
+
+create index if not exists second_opinions_patient_id_idx on second_opinions(patient_id);
+create index if not exists second_opinions_to_practitioner_id_idx on second_opinions(to_practitioner_id);
+
+
 -- ─── Outcomes ───
 create table if not exists outcomes (
   id text primary key,
@@ -275,8 +300,14 @@ create table if not exists notifications (
 );
 
 alter table notifications enable row level security;
-create policy "Users can read own notifications" on notifications for select using (user_id = auth.uid() or user_id is null);
-create policy "Authenticated users can manage notifications" on notifications for all to authenticated using (true);
+-- INSERT is deliberately permissive (any authenticated user, any target
+-- user_id) — a notification's entire point is the sender creating a row
+-- for the RECIPIENT, never their own auth.uid(). SELECT/UPDATE/DELETE stay
+-- restricted to your own so nobody can read or manage someone else's.
+create policy "read own notifications" on notifications for select using (user_id = auth.uid() or user_id is null);
+create policy "insert any notification" on notifications for insert to authenticated with check (true);
+create policy "update own notifications" on notifications for update using (user_id = auth.uid() or user_id is null);
+create policy "delete own notifications" on notifications for delete using (user_id = auth.uid() or user_id is null);
 
 
 -- ─── Time Blocks ───

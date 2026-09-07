@@ -54,12 +54,20 @@ export type OutcomeKind =
   | 'Aggravation'
   | 'Changed remedy'
 
+// 'pending' means signed up but not yet approved by the Owner — RLS denies
+// them all patient-data access until they're 'active' (see
+// migration_v19_practitioner_approval_gate.sql). The clinic's very first
+// signup ever starts 'active' (no one exists yet to approve them);
+// everyone after that starts 'pending'.
+export type PractitionerStatus = 'pending' | 'active'
+
 export interface Practitioner {
   id: string
   authUserId?: string
   name: string
   initials: string
   role: Role
+  status: PractitionerStatus
   specialty: string
   qualifications?: string
   registrationNo?: string
@@ -184,6 +192,21 @@ export interface InvestigationOrder {
   createdAt: string // ISO
 }
 
+// A read-only case share with a colleague, with a question attached.
+// Ownership of the case never changes — this is a request + response,
+// not a handoff (see Handoff below, which does transfer coverage).
+export interface SecondOpinion {
+  id: string
+  patientId: string
+  fromPractitionerId: string
+  toPractitionerId: string
+  question: string
+  response?: string
+  status: 'pending' | 'answered'
+  createdAt: string
+  answeredAt?: string
+}
+
 export interface DoseReminder {
   id: string
   prescriptionId: string
@@ -273,6 +296,7 @@ export interface ChatMessage {
 export type NotifKind =
   | 'prescription'
   | 'handoff'
+  | 'second_opinion'
   | 'booking'
   | 'overdue'
   | 'low_stock'

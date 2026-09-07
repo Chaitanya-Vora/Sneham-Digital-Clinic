@@ -9,6 +9,7 @@ import type {
   DoseReminder,
   Handoff,
   InvestigationOrder,
+  SecondOpinion,
   Invoice,
   Outcome,
   Patient,
@@ -47,6 +48,7 @@ function toAppPractitioner(r: any): Practitioner {
     name: r.name,
     initials: r.initials,
     role: r.role,
+    status: r.status ?? 'active',
     specialty: r.specialty,
     qualifications: r.qualifications ?? undefined,
     registrationNo: r.registration_no ?? undefined,
@@ -62,6 +64,7 @@ function toDbPractitioner(p: Practitioner, authUserId?: string) {
     name: p.name,
     initials: p.initials,
     role: p.role,
+    status: p.status,
     specialty: p.specialty,
     qualifications: p.qualifications ?? null,
     registration_no: p.registrationNo ?? null,
@@ -89,6 +92,7 @@ export async function updatePractitionerDb(id: string, patch: Partial<Practition
   if (patch.name !== undefined) db.name = patch.name
   if (patch.initials !== undefined) db.initials = patch.initials
   if (patch.role !== undefined) db.role = patch.role
+  if (patch.status !== undefined) db.status = patch.status
   if (patch.specialty !== undefined) db.specialty = patch.specialty
   if (patch.qualifications !== undefined) db.qualifications = patch.qualifications
   if (patch.registrationNo !== undefined) db.registration_no = patch.registrationNo
@@ -101,14 +105,36 @@ export async function updatePractitionerDb(id: string, patch: Partial<Practition
   return true
 }
 
+// Rejecting a pending signup — RLS already blocks them from ever seeing
+// patient data while pending, so this is a clean, complete "no" rather than
+// a security-critical action: if they ever sign in again, ensurePractitioner
+// just creates a fresh pending row and they re-enter the approval queue.
+export async function deletePractitionerDb(id: string): Promise<boolean> {
+  const { error } = await supabase.from('practitioners').delete().eq('id', id)
+  if (error) { console.error('deletePractitioner:', error.message); return false }
+  return true
+}
+
 export async function ensurePractitioner(userId: string, userName: string): Promise<Practitioner> {
-  const { data } = await supabase
+  // Deliberately not .maybeSingle() — that errors out (and this call site
+  // used to silently swallow the error, reading it as "no row") the moment
+  // more than one row ever matched, which is exactly the condition that
+  // once let this function create an ever-growing pile of duplicates: each
+  // failed check misread "too many rows" as "none", so it created another.
+  // Ordering by created_at and taking the first is a fixed point — however
+  // many rows exist, this always converges on the same one and never adds another.
+  const { data, error } = await supabase
     .from('practitioners')
     .select('*')
     .eq('auth_user_id', userId)
-    .maybeSingle()
+    .order('created_at', { ascending: true })
+    .limit(1)
 
-  if (data) return toAppPractitioner(data)
+  if (error) console.error('ensurePractitioner lookup:', error.message)
+  if (data && data.length > 0) {
+    if (data.length > 1) console.warn(`ensurePractitioner: ${data.length} rows matched auth_user_id ${userId}, using the oldest`)
+    return toAppPractitioner(data[0])
+  }
 
   const id = newId()
   const cleanName = userName.replace(/^Dr\.?\s*/i, '')
@@ -116,17 +142,22 @@ export async function ensurePractitioner(userId: string, userName: string): Prom
   const initials = words.map(w => w[0]).join('').toUpperCase().slice(0, 2) || 'DR'
 
   // The very first practitioner for a clinic has no one to grant them
-  // Owner, so they default to it; anyone joining an existing clinic
-  // defaults to a regular practitioner instead — otherwise every new
-  // signup would silently become a second master login.
+  // Owner, so they default to it (and to 'active' — there's no one to
+  // approve them either); anyone joining an existing clinic defaults to a
+  // regular practitioner, 'pending' until the Owner approves them in
+  // Settings — otherwise every new signup would silently become both a
+  // second master login AND get instant real patient-data access.
   const { count } = await supabase.from('practitioners').select('id', { count: 'exact', head: true })
-  const role: Practitioner['role'] = count && count > 0 ? 'Practitioner' : 'Owner'
+  const isFirstEver = !count || count === 0
+  const role: Practitioner['role'] = isFirstEver ? 'Owner' : 'Practitioner'
+  const status: Practitioner['status'] = isFirstEver ? 'active' : 'pending'
 
   const practitioner: Practitioner = {
     id,
     name: userName,
     initials,
     role,
+    status,
     specialty: 'Homeopathy',
     openCases: 0,
     remedyList: DEFAULT_PRACTITIONER_REMEDIES,
@@ -372,6 +403,52 @@ export async function fetchInvestigationOrders(): Promise<InvestigationOrder[]> 
 export async function insertInvestigationOrder(o: InvestigationOrder): Promise<boolean> {
   const { error } = await supabase.from('investigation_orders').insert(toDbInvestigationOrder(o))
   if (error) { console.error('insertInvestigationOrder:', error.message); return false }
+  return true
+}
+
+function toAppSecondOpinion(r: any): SecondOpinion {
+  return {
+    id: r.id,
+    patientId: r.patient_id,
+    fromPractitionerId: r.from_practitioner_id,
+    toPractitionerId: r.to_practitioner_id,
+    question: r.question ?? '',
+    response: r.response ?? undefined,
+    status: r.status,
+    createdAt: r.created_at,
+    answeredAt: r.answered_at ?? undefined,
+  }
+}
+
+function toDbSecondOpinion(o: SecondOpinion) {
+  return {
+    id: o.id,
+    patient_id: o.patientId,
+    from_practitioner_id: o.fromPractitionerId,
+    to_practitioner_id: o.toPractitionerId,
+    question: o.question,
+    response: o.response ?? null,
+    status: o.status,
+    created_at: o.createdAt,
+    answered_at: o.answeredAt ?? null,
+  }
+}
+
+export async function fetchSecondOpinions(): Promise<SecondOpinion[]> {
+  const { data, error } = await supabase.from('second_opinions').select('*').order('created_at', { ascending: false })
+  if (error) { console.error('fetchSecondOpinions:', error.message); _hydrateErrors++; return [] }
+  return (data ?? []).map(toAppSecondOpinion)
+}
+
+export async function insertSecondOpinion(o: SecondOpinion): Promise<boolean> {
+  const { error } = await supabase.from('second_opinions').insert(toDbSecondOpinion(o))
+  if (error) { console.error('insertSecondOpinion:', error.message); return false }
+  return true
+}
+
+export async function answerSecondOpinionDb(id: string, response: string, answeredAt: string): Promise<boolean> {
+  const { error } = await supabase.from('second_opinions').update({ response, status: 'answered', answered_at: answeredAt }).eq('id', id)
+  if (error) { console.error('answerSecondOpinionDb:', error.message); return false }
   return true
 }
 
@@ -646,8 +723,11 @@ export async function uploadDocument(file: File, patientId: string): Promise<Cli
   const { error: uploadErr } = await supabase.storage.from('clinic-documents').upload(path, file)
   if (uploadErr) { console.error('uploadDocument storage:', uploadErr.message); return null }
 
-  const { data: urlData } = supabase.storage.from('clinic-documents').getPublicUrl(path)
-  const fileUrl = urlData?.publicUrl ?? ''
+  // clinic-documents is a private bucket — getPublicUrl() would happily
+  // build a URL that Storage then refuses to serve. Store the storage path
+  // itself; getDocumentUrl() below mints a short-lived signed URL from it
+  // at the moment someone actually opens the document.
+  const fileUrl = path
 
   const sizeStr = file.size < 1024 * 1024
     ? `${Math.round(file.size / 1024)} KB`
@@ -679,6 +759,12 @@ export async function uploadDocument(file: File, patientId: string): Promise<Cli
   if (insertErr) { console.error('insertDocument:', insertErr.message); return null }
 
   return doc
+}
+
+export async function getDocumentUrl(path: string): Promise<string | null> {
+  const { data, error } = await supabase.storage.from('clinic-documents').createSignedUrl(path, 300)
+  if (error) { console.error('getDocumentUrl:', error.message); return null }
+  return data?.signedUrl ?? null
 }
 
 
@@ -813,7 +899,7 @@ export async function fetchRemedyStock(): Promise<RemedyStock[]> {
 
 export async function fetchAllCaseData(): Promise<Record<string, CaseState>> {
   const { data, error } = await supabase.from('case_data').select('*')
-  if (error) { console.error('fetchCaseData:', error.message); return {} }
+  if (error) { console.error('fetchCaseData:', error.message); _hydrateErrors++; return {} }
   const result: Record<string, CaseState> = {}
   for (const row of data ?? []) {
     result[row.patient_id] = row.sections as CaseState
@@ -1026,6 +1112,7 @@ export interface HydratedData {
   caseVisits: CaseVisit[]
   messages: ChatMessage[]
   caseTemplates: CustomCaseTemplate[]
+  secondOpinions: SecondOpinion[]
   currentPractitionerId: string
 }
 
@@ -1055,6 +1142,7 @@ export async function hydrateAll(userId: string, userName: string, isPatientSurf
     caseVisits,
     messages,
     caseTemplates,
+    secondOpinions,
   ] = await Promise.all([
     fetchPractitioners(),
     fetchPatients(),
@@ -1074,6 +1162,7 @@ export async function hydrateAll(userId: string, userName: string, isPatientSurf
     fetchCaseVisits(),
     fetchMessages(),
     fetchCaseTemplates(),
+    fetchSecondOpinions(),
   ])
 
   const hasSelf = practitioner ? allPractitioners.some(p => p.id === practitioner.id) : true
@@ -1098,6 +1187,7 @@ export async function hydrateAll(userId: string, userName: string, isPatientSurf
     caseVisits,
     messages,
     caseTemplates,
+    secondOpinions,
     currentPractitionerId: practitioner?.id ?? '',
   }
 }

@@ -73,7 +73,11 @@ export function TodayGrid({
   onQuickBill: () => void
 }) {
   const dbError = useClinic((s) => s.dbError)
-  const allAppts = useClinic((s) => s.appointments)
+  // Cancelled appointments stay in the database (never deleted — an
+  // accidental walk-in can be cancelled instead of being permanently stuck
+  // with no way to edit or remove it), just excluded from every stat and
+  // list here, same treatment as the web console.
+  const allAppts = useClinic((s) => s.appointments.filter((a) => a.status !== 'Cancelled'))
   const allTimeBlocks = useClinic((s) => s.timeBlocks)
   const patients = useClinic((s) => s.patients)
   const checkIns = useClinic((s) => s.checkIns)

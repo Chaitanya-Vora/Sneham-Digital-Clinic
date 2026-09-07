@@ -25,6 +25,7 @@ import type {
   RemedyStock,
   Repetition,
   Role,
+  SecondOpinion,
   Surface,
   TimeBlock,
 } from './types'
@@ -43,6 +44,8 @@ import {
   insertPrescription,
   updatePrescriptionDb,
   insertInvestigationOrder,
+  insertSecondOpinion,
+  answerSecondOpinionDb,
   insertInvoice,
   updateInvoiceDb,
   insertDoseReminder,
@@ -58,6 +61,7 @@ import {
   insertTimeBlock,
   deleteTimeBlockDb,
   updatePractitionerDb,
+  deletePractitionerDb,
   upsertCaseData,
   insertCaseVisit,
   updateCaseVisitDb,
@@ -107,6 +111,13 @@ export interface CreateInvestigationOrderInput {
   notes: string
 }
 
+export interface RequestSecondOpinionInput {
+  patientId: string
+  fromPractitionerId: string
+  toPractitionerId: string
+  question: string
+}
+
 export interface CreateInvoiceInput {
   patientId: string
   practitionerId: string
@@ -127,6 +138,7 @@ interface ClinicState {
   appointments: Appointment[]
   prescriptions: Prescription[]
   investigationOrders: InvestigationOrder[]
+  secondOpinions: SecondOpinion[]
   invoices: Invoice[]
   doseReminders: DoseReminder[]
   checkIns: CheckIn[]
@@ -158,6 +170,8 @@ interface ClinicState {
   retryPendingWrites: () => Promise<void>
   publishPrescription: (input: PublishRxInput) => Prescription
   createInvestigationOrder: (input: CreateInvestigationOrderInput) => InvestigationOrder
+  requestSecondOpinion: (input: RequestSecondOpinionInput) => SecondOpinion
+  answerSecondOpinion: (id: string, response: string) => void
   createInvoice: (input: CreateInvoiceInput) => Promise<Invoice | null>
   updateInvoice: (id: string, patch: UpdateInvoiceInput) => void
   cancelInvoice: (id: string) => void
@@ -183,11 +197,13 @@ interface ClinicState {
   markNoShow: (appointmentId: string) => void
   scheduleFollowUp: (input: { patientId: string; practitionerId: string; time: string; date: string; type: 'In person' | 'Video'; reason: string }) => void
   updateAppointmentStatus: (id: string, status: Appointment['status']) => void
+  updateAppointment: (id: string, patch: Partial<Pick<Appointment, 'time' | 'date' | 'type' | 'reason'>>) => void
   rescheduleAppointment: (id: string, time: string, date?: string) => void
   addTimeBlock: (input: Omit<TimeBlock, 'id'>) => void
   removeTimeBlock: (id: string) => void
   submitCheckIn: (input: { patientId: string; prescriptionId: string; marked: CheckIn['marked']; improvementPct: number; changeChips: string[]; freeText: string }) => void
   updatePractitioner: (id: string, patch: Partial<Practitioner>) => void
+  rejectPractitioner: (id: string) => void
   assignPatient: (patientId: string, practitionerId: string) => void
   addDocument: (doc: ClinicDocument) => void
   snapshotCaseVisit: (patientId: string, appointmentId?: string, template?: string) => void
@@ -246,6 +262,7 @@ const emptyState = () => ({
   appointments: [] as Appointment[],
   prescriptions: [] as Prescription[],
   investigationOrders: [] as InvestigationOrder[],
+  secondOpinions: [] as SecondOpinion[],
   invoices: [] as Invoice[],
   doseReminders: [] as DoseReminder[],
   checkIns: [] as CheckIn[],
@@ -443,7 +460,7 @@ export const useClinic = create<ClinicState>()(
         }
         for (const dr of newReminders) void insertDoseReminder(dr)
         void updatePatient(input.patientId, { currentRemedy: remedyLabel })
-        void insertNotification(notif, resolveNotificationOwner(get().patients, get().practitioners, { patientId: input.patientId }))
+        writeThrough(insertNotification(notif, resolveNotificationOwner(get().patients, get().practitioners, { patientId: input.patientId })), 'The patient may not have been notified of this prescription.')
 
         return rx
       },
@@ -460,6 +477,59 @@ export const useClinic = create<ClinicState>()(
         set((s) => ({ investigationOrders: [order, ...s.investigationOrders] }))
         writeThrough(insertInvestigationOrder(order), 'The investigation order may not have saved.')
         return order
+      },
+
+      requestSecondOpinion: (input) => {
+        const patient = get().patients.find((p) => p.id === input.patientId)
+        const to = get().practitioners.find((p) => p.id === input.toPractitionerId)
+        const opinion: SecondOpinion = {
+          id: newId(),
+          patientId: input.patientId,
+          fromPractitionerId: input.fromPractitionerId,
+          toPractitionerId: input.toPractitionerId,
+          question: input.question,
+          status: 'pending',
+          createdAt: new Date().toISOString(),
+        }
+        const notif: AppNotification = {
+          id: newId(),
+          surface: 'web' as Surface,
+          kind: 'second_opinion' as const,
+          title: `Second opinion requested — ${patient?.name ?? 'a patient'}`,
+          message: input.question || 'A colleague asked you to review this case.',
+          time: 'Just now',
+          read: false,
+          severity: 'purple' as const,
+          patientId: input.patientId,
+        }
+        set((s) => ({ secondOpinions: [opinion, ...s.secondOpinions] }))
+        writeThrough(insertSecondOpinion(opinion), 'This second opinion request may not have saved.')
+        writeThrough(insertNotification(notif, resolveNotificationOwner(get().patients, get().practitioners, { practitionerId: input.toPractitionerId })), `${to?.name ?? 'Your colleague'} may not have been notified.`)
+        return opinion
+      },
+
+      answerSecondOpinion: (id, response) => {
+        const answeredAt = new Date().toISOString()
+        set((s) => ({
+          secondOpinions: s.secondOpinions.map((o) => (o.id === id ? { ...o, response, status: 'answered', answeredAt } : o)),
+        }))
+        writeThrough(answerSecondOpinionDb(id, response, answeredAt), 'Your response may not have saved.')
+        const opinion = get().secondOpinions.find((o) => o.id === id)
+        if (opinion) {
+          const patient = get().patients.find((p) => p.id === opinion.patientId)
+          const notif: AppNotification = {
+            id: newId(),
+            surface: 'web' as Surface,
+            kind: 'second_opinion' as const,
+            title: `Second opinion answered — ${patient?.name ?? 'your patient'}`,
+            message: response,
+            time: 'Just now',
+            read: false,
+            severity: 'purple' as const,
+            patientId: opinion.patientId,
+          }
+          writeThrough(insertNotification(notif, resolveNotificationOwner(get().patients, get().practitioners, { practitionerId: opinion.fromPractitionerId })), 'The requester may not have been notified of your response.')
+        }
       },
 
       // Unlike every other "create" action in this store, this one must be
@@ -570,14 +640,14 @@ export const useClinic = create<ClinicState>()(
       pushNotification: (n) => {
         const notif: AppNotification = { ...n, id: newId(), read: false }
         set((s) => ({ notifications: [notif, ...s.notifications] }))
-        void insertNotification(notif, resolveNotificationOwner(get().patients, get().practitioners, { patientId: notif.patientId }))
+        writeThrough(insertNotification(notif, resolveNotificationOwner(get().patients, get().practitioners, { patientId: notif.patientId })), 'This notification may not have reached its recipient.')
       },
 
       markNotificationRead: (id) => {
         set((s) => ({
           notifications: s.notifications.map((n) => (n.id === id ? { ...n, read: true } : n)),
         }))
-        void updateNotificationDb(id, { read: true })
+        writeThrough(updateNotificationDb(id, { read: true }), 'Marking this notification read may not have saved.')
       },
 
       dismissNotification: (id) => {
@@ -771,8 +841,8 @@ export const useClinic = create<ClinicState>()(
         writeThrough(insertHandoff(handoff), 'Handoff may not have sent.')
         void updatePatient(input.patientId, { assignment: 'Assigned out' })
         const uid = get().userId
-        if (uid) void insertNotification(webNotif, uid)
-        void insertNotification(patientNotif, resolveNotificationOwner(get().patients, get().practitioners, { patientId: input.patientId }))
+        if (uid) writeThrough(insertNotification(webNotif, uid), 'This handoff notification may not have saved.')
+        writeThrough(insertNotification(patientNotif, resolveNotificationOwner(get().patients, get().practitioners, { patientId: input.patientId })), 'The patient may not have been notified of this handoff.')
       },
 
       addPatient: (input) => {
@@ -856,7 +926,7 @@ export const useClinic = create<ClinicState>()(
         writeThrough(updateAppointmentDb(appointmentId, { status: 'Seen' }), 'No-show may not have saved.')
         if (appt) {
           const uid = get().userId
-          if (uid) void insertNotification(notif, uid)
+          if (uid) writeThrough(insertNotification(notif, uid), 'This no-show notification may not have saved.')
         }
       },
 
@@ -887,7 +957,7 @@ export const useClinic = create<ClinicState>()(
           notifications: [notif, ...s.notifications],
         }))
         writeThrough(insertAppointment(appt), 'Appointment may not have saved.')
-        void insertNotification(notif, resolveNotificationOwner(get().patients, get().practitioners, { patientId: input.patientId }))
+        writeThrough(insertNotification(notif, resolveNotificationOwner(get().patients, get().practitioners, { patientId: input.patientId })), 'The patient may not have been notified of this follow-up.')
       },
 
       updateAppointmentStatus: (id, status) => {
@@ -895,6 +965,14 @@ export const useClinic = create<ClinicState>()(
           appointments: s.appointments.map((a) => (a.id === id ? { ...a, status } : a)),
         }))
         writeThrough(updateAppointmentDb(id, { status }), 'Status change may not have saved.')
+      },
+
+      updateAppointment: (id, patch) => {
+        set((s) => ({
+          appointments: s.appointments.map((a) => (a.id === id ? { ...a, ...patch } : a)),
+        }))
+        const { date, ...rest } = patch
+        writeThrough(updateAppointmentDb(id, { ...rest, ...(date ? { day_label: date } : {}) }), 'Appointment changes may not have saved.')
       },
 
       rescheduleAppointment: (id, time, date) => {
@@ -956,8 +1034,8 @@ export const useClinic = create<ClinicState>()(
         }))
         writeThrough(insertCheckIn(checkIn), 'Check-in may not have saved.')
         const owner = resolveNotificationOwner(get().patients, get().practitioners, { practitionerId: patient?.owningPractitionerId })
-        void insertNotification(notif, owner)
-        void insertNotification(practNotif, owner)
+        writeThrough(insertNotification(notif, owner), 'This check-in notification may not have saved.')
+        writeThrough(insertNotification(practNotif, owner), 'This check-in notification may not have saved.')
       },
 
       updatePractitioner: (id, patch) => {
@@ -973,6 +1051,11 @@ export const useClinic = create<ClinicState>()(
           }),
         }))
         writeThrough(updatePractitionerDb(id, patch), 'Profile changes may not have saved.')
+      },
+
+      rejectPractitioner: (id) => {
+        set((s) => ({ practitioners: s.practitioners.filter((p) => p.id !== id) }))
+        writeThrough(deletePractitionerDb(id), 'Removing this request may not have saved.')
       },
 
       assignPatient: (patientId, practitionerId) => {
@@ -1044,7 +1127,7 @@ export const useClinic = create<ClinicState>()(
             m.patientId === patientId && m.sender === sender && !m.read ? { ...m, read: true } : m,
           ),
         }))
-        void markMessagesRead(patientId, sender)
+        writeThrough(markMessagesRead(patientId, sender), 'Marking these messages read may not have saved.')
       },
 
       createCaseTemplate: (input) => {

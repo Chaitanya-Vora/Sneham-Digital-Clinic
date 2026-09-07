@@ -9,3 +9,4 @@ dist
 dist-apk/
 .audit-tmp/
 tsconfig.tsbuildinfo
+supabase/.temp/

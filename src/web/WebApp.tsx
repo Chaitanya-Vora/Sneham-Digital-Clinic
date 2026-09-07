@@ -38,20 +38,31 @@ import {
   SignOut,
   EnvelopeSimple,
   TestTube,
+  ChatText,
+  DownloadSimple,
+  FileCsv,
+  Paperclip,
+  PaperPlaneRight,
+  FileText,
+  FilePdf,
+  DotsThreeVertical,
+  Eye,
 } from '@phosphor-icons/react'
 import { todayISO, formatDayLabel, addDaysISO } from '../core/day'
-import { getSections } from '../core/caseTemplate'
+import { getSections, CASE_TEMPLATES } from '../core/caseTemplate'
 import { useClinic } from '../core/store'
 import { useAuth } from '../auth/AuthProvider'
-import type { Appointment, Patient, Potency, Repetition, RxTemplate, Invoice, InvoiceLineItem, PaymentMode } from '../core/types'
+import type { Appointment, Patient, Potency, Repetition, RxTemplate, Invoice, InvoiceLineItem, PaymentMode, ChatMessage } from '../core/types'
 import { isOneOffRepetition } from '../core/types'
 import { MASTER_REMEDIES } from '../core/remedies'
 import { INVESTIGATION_CATALOG, ALL_INVESTIGATIONS, wordsOf, matchesAllWords } from '../core/investigations'
 import { DEFAULT_CONSULT_FEE, invoiceTotal, invoiceBalance } from '../core/billing'
+import { toCsv, downloadCsv } from '../core/csvExport'
 import { STANDARD_MEDICINE_INSTRUCTIONS } from '../core/rxInstructions'
 import { shareViaWhatsApp, shareViaSms, shareViaEmail } from '../core/share'
-import { uploadDocument } from '../core/db'
+import { uploadDocument, getDocumentUrl } from '../core/db'
 import { Avatar, Badge, Button, Card, Chip, Label, Stepper, PatientNotFound } from '../design-system/ui'
+import { PendingApproval } from '../design-system/PendingApproval'
 import { Pressable } from '../design-system/Pressable'
 import { CLINIC_DETAILS } from '../core/letterheadAssets'
 import { SnehamLockup } from '../design-system/Logo'
@@ -63,10 +74,9 @@ import { FollowUp } from './FollowUp'
 import { CommandPalette, type Command } from './CommandPalette'
 import { WebCalendar } from './WebCalendar'
 import { VideoConsult } from '../video/VideoConsult'
-import { ChatThread } from '../components/ChatThread'
 import { exportPrescriptionPdf, exportInvoicePdf, exportInvestigationOrderPdf } from '../core/pdfExport'
 
-type Screen = 'today' | 'calendar' | 'patients' | 'patient' | 'prescription' | 'investigations' | 'casesheet' | 'followup' | 'reports' | 'settings' | 'restricted' | 'prescriptions-all' | 'casenotes-all' | 'followups-all'
+type Screen = 'today' | 'calendar' | 'patients' | 'patient' | 'prescription' | 'investigations' | 'casesheet' | 'followup' | 'reports' | 'settings' | 'restricted' | 'prescriptions-all' | 'casenotes-all' | 'followups-all' | 'messages'
 const POTENCIES: Potency[] = ['6C', '12C', '30C', '200C', '1M', '10M', '50M', 'CM', 'LM', 'Q']
 const REPS: Repetition[] = ['Once daily · night', 'Twice daily', 'Alternate day', 'Weekly', 'As needed', 'Once only today']
 const CLINIC_LOCATIONS = ['Chiplun clinic', 'Pune clinic']
@@ -75,6 +85,7 @@ const NAV = [
   { id: 'today', icon: SunHorizon, label: 'Today' },
   { id: 'calendar', icon: CalendarBlank, label: 'Calendar' },
   { id: 'patients', icon: UsersThree, label: 'Patients' },
+  { id: 'messages', icon: ChatText, label: 'Messages' },
   { id: 'casenotes', icon: Notebook, label: 'Case notes', locked: true },
   { id: 'prescriptions', icon: RxIcon, label: 'Prescriptions', locked: true },
   { id: 'followups', icon: ArrowsClockwise, label: 'Follow-ups', locked: true },
@@ -92,6 +103,7 @@ export function WebApp() {
   const [selectedClinic, setSelectedClinic] = useState('Chiplun clinic')
   const [newPatientOpen, setNewPatientOpen] = useState(false)
   const [videoApptId, setVideoApptId] = useState<string | null>(null)
+  const [messagesPatientId, setMessagesPatientId] = useState<string | null>(null)
   const clinicRef = useRef<HTMLDivElement>(null)
 
   const doctor = useClinic((s) => s.practitioners.find((p) => p.id === s.currentPractitionerId))
@@ -101,25 +113,17 @@ export function WebApp() {
   const pendingCount = useClinic((s) => s.pendingWrites.length)
   const patients = useClinic((s) => s.patients)
   const unread = useClinic((s) => s.notifications.filter((n) => n.surface === 'web' && !n.read).length)
+  const unreadMessages = useClinic((s) => s.messages.filter((m) => m.sender === 'patient' && !m.read).length)
   const todayAppts = useClinic((s) => s.appointments.filter((a) => a.date === todayISO()))
   const toast = useToast()
 
-  if (!doctor) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-canvas">
-        <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-tint border-t-brand" />
-      </div>
-    )
-  }
-
-  const openPatient = (id: string) => {
-    setPatientId(id)
-    setScreen('patient')
-  }
-  const openCaseSheet = (id: string) => { setPatientId(id); setScreen('casesheet') }
-  const openPrescription = (id: string) => { setPatientId(id); setScreen('prescription') }
-  const openFollowUp = (id: string) => { setPatientId(id); setScreen('followup') }
-
+  // Every hook in this component must run unconditionally, before any early
+  // return below — React error #310 ("more hooks than the previous render")
+  // is exactly what happens when a hook is declared after a conditional
+  // return, since the render that takes the early return skips it entirely
+  // while a later render (once `doctor` loads) doesn't. This was the actual
+  // cause of the repeating "Something went wrong" crash.
+  //
   // ⌘K / Ctrl-K command palette
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -143,6 +147,27 @@ export function WebApp() {
     return () => clearInterval(t)
   }, [])
 
+  if (!doctor) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-canvas">
+        <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-tint border-t-brand" />
+      </div>
+    )
+  }
+
+  if (doctor.status === 'pending') {
+    return <PendingApproval name={doctor.name} />
+  }
+
+  const openPatient = (id: string) => {
+    setPatientId(id)
+    setScreen('patient')
+  }
+  const openCaseSheet = (id: string) => { setPatientId(id); setScreen('casesheet') }
+  const openPrescription = (id: string) => { setPatientId(id); setScreen('prescription') }
+  const openFollowUp = (id: string) => { setPatientId(id); setScreen('followup') }
+  const openMessages = (id: string) => { setMessagesPatientId(id); setScreen('messages') }
+
   const commands: Command[] = [
     { id: 'go-today', label: 'Today', group: 'Go to', icon: SunHorizon, run: () => setScreen('today') },
     { id: 'go-calendar', label: 'Calendar', group: 'Go to', icon: CalendarBlank, run: () => setScreen('calendar') },
@@ -162,11 +187,12 @@ export function WebApp() {
   ]
 
   function navTo(id: string, locked?: boolean) {
-    if (locked && role === 'Assistant') {
+    if (locked && (role === 'Assistant' || role === 'Receptionist')) {
       setScreen('restricted')
       return
     }
     if (id === 'today' || id === 'calendar' || id === 'patients' || id === 'reports' || id === 'settings') { setScreen(id as Screen); return }
+    if (id === 'messages') { setScreen('messages'); return }
     if (id === 'prescriptions') { setScreen('prescriptions-all'); return }
     if (id === 'casenotes') { setScreen('casenotes-all'); return }
     if (id === 'followups') { setScreen('followups-all'); return }
@@ -225,7 +251,7 @@ export function WebApp() {
         <nav className="mt-4 space-y-1">
           {NAV.map((n) => {
             const active = navActive === n.id
-            const locked = (n as any).locked && role === 'Assistant'
+            const locked = (n as any).locked && (role === 'Assistant' || role === 'Receptionist')
             return (
               <button
                 key={n.id}
@@ -238,6 +264,9 @@ export function WebApp() {
                 <span className="relative flex flex-1 items-center gap-3">
                   <n.icon size={19} weight={active ? 'fill' : 'regular'} />
                   <span className="flex-1 text-left">{n.label}</span>
+                  {n.id === 'messages' && unreadMessages > 0 && (
+                    <span className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-white">{unreadMessages}</span>
+                  )}
                   {locked && <Lock size={13} className="text-faint" />}
                 </span>
               </button>
@@ -305,6 +334,7 @@ export function WebApp() {
               {screen === 'today' && <TodayView onOpenPatient={openPatient} onStartVideo={setVideoApptId} />}
               {screen === 'calendar' && <WebCalendar onOpenPatient={openPatient} />}
               {screen === 'patients' && <PatientsView onOpenPatient={openPatient} onNewPatient={() => setNewPatientOpen(true)} />}
+              {screen === 'messages' && <MessagesView initialPatientId={messagesPatientId} onOpenPatient={openPatient} />}
               {screen === 'patient' && (
                 <PatientDetail
                   patientId={patientId}
@@ -312,6 +342,7 @@ export function WebApp() {
                   onOrderInvestigations={() => setScreen('investigations')}
                   onCaseSheet={() => setScreen('casesheet')}
                   onFollowUp={() => setScreen('followup')}
+                  onOpenMessages={() => openMessages(patientId)}
                   onBack={() => setScreen('patients')}
                 />
               )}
@@ -361,7 +392,11 @@ export function WebApp() {
 
 // ── TODAY ──
 function TodayView({ onOpenPatient, onStartVideo }: { onOpenPatient: (id: string) => void; onStartVideo: (apptId: string) => void }) {
-  const allAppts = useClinic((s) => s.appointments)
+  // Cancelled appointments stay in the database (never deleted — an
+  // accidental walk-in can now be cancelled instead of being permanently
+  // stuck with no way to edit or remove it), just excluded from every
+  // stat and list here, same as a cancelled invoice is excluded from revenue.
+  const allAppts = useClinic((s) => s.appointments.filter((a) => a.status !== 'Cancelled'))
   const invoices = useClinic((s) => s.invoices)
   const patients = useClinic((s) => s.patients)
   const role = useClinic((s) => s.role)
@@ -465,13 +500,16 @@ function TodayView({ onOpenPatient, onStartVideo }: { onOpenPatient: (id: string
             const p = patients.find((x) => x.id === a.patientId)
             const apptInvoice = invoices.find((i) => i.appointmentId === a.id && i.status !== 'cancelled')
             return (
-              <motion.button
+              <motion.div
                 key={a.id}
                 variants={listItem}
+                role="button"
+                tabIndex={0}
                 onClick={() => onOpenPatient(a.patientId)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenPatient(a.patientId) } }}
                 whileHover={{ y: -1 }}
                 whileTap={{ scale: 0.99 }}
-                className="flex w-full items-center gap-4 rounded-[14px] border border-border bg-surface px-4 py-3 text-left transition hover:bg-surface-hover hover:shadow-card"
+                className={`flex w-full cursor-pointer items-center gap-4 rounded-[14px] border border-l-[3px] bg-surface px-4 py-3 text-left transition hover:bg-surface-hover hover:shadow-card ${a.type === 'Video' ? 'border-border border-l-amber' : 'border-border border-l-green-border'}`}
               >
                 <div className="w-16 font-display text-[13px] font-semibold text-body">{a.time}</div>
                 <Avatar initials={p?.initials ?? '?'} size={38} />
@@ -498,7 +536,21 @@ function TodayView({ onOpenPatient, onStartVideo }: { onOpenPatient: (id: string
                 {apptInvoice && apptInvoice.amountReceived > 0 && <Badge tone="green">₹{apptInvoice.amountReceived.toLocaleString('en-IN')}</Badge>}
                 <Badge tone={a.type === 'Video' ? 'amber' : 'green'}>{a.type}</Badge>
                 <Badge tone={a.status === 'In consult' ? 'green' : 'neutral'}>{a.status}</Badge>
-              </motion.button>
+                {a.status !== 'Seen' && a.status !== 'In consult' && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (!window.confirm(`Cancel ${p?.name ?? 'this'}'s ${a.time} appointment?`)) return
+                      useClinic.getState().updateAppointmentStatus(a.id, 'Cancelled')
+                      toast({ title: 'Appointment cancelled', message: `${p?.name ?? 'Patient'}'s ${a.time} slot is now free.` })
+                    }}
+                    className="rounded-full p-1.5 text-faint transition hover:bg-danger/10 hover:text-danger"
+                    title="Cancel appointment"
+                  >
+                    <X size={15} />
+                  </button>
+                )}
+              </motion.div>
             )
           })}
         </motion.div>
@@ -874,6 +926,8 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
   const patients = useClinic((s) => s.patients)
   const practitioners = useClinic((s) => s.practitioners)
   const assignPatient = useClinic((s) => s.assignPatient)
+  const role = useClinic((s) => s.role)
+  const canAssign = role !== 'Assistant' && role !== 'Receptionist'
   const toast = useToast()
   const [active, setActive] = useState('My cases')
   const [filtersOpen, setFiltersOpen] = useState(false)
@@ -881,6 +935,15 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
   const [selecting, setSelecting] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkAssignOpen, setBulkAssignOpen] = useState(false)
+  const [menuFor, setMenuFor] = useState<string | null>(null)
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
+
+  useEffect(() => {
+    if (!menuFor) return
+    const close = () => setMenuFor(null)
+    document.addEventListener('click', close)
+    return () => document.removeEventListener('click', close)
+  }, [menuFor])
 
   const filterChips = [
     { label: 'Active cases', predicate: (p: Patient) => p.assignment === 'Mine' || p.assignment === 'Assigned to me' },
@@ -953,7 +1016,7 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
         </div>
         <div className="flex gap-2">
           <Button variant="ghost" size="sm" onClick={() => setFiltersOpen((v) => !v)}>Filters</Button>
-          {selecting ? (
+          {canAssign && (selecting ? (
             <>
               <Button variant="ghost" size="sm" onClick={() => { setSelecting(false); setSelected(new Set()) }}>Cancel</Button>
               <Button
@@ -969,7 +1032,7 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
             <Button variant="ghost" size="sm" onClick={() => setSelecting(true)}>
               <Handshake size={15} /> Bulk assign
             </Button>
-          )}
+          ))}
           <Button variant="primary" size="sm" onClick={onNewPatient}><Plus size={15} weight="bold" /> New patient</Button>
         </div>
       </div>
@@ -1015,17 +1078,20 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
       </div>
 
       <Card className="overflow-hidden p-0">
-        <div className={`grid gap-4 border-b border-border bg-raised px-5 py-3 ${selecting ? 'grid-cols-[32px_1.6fr_1.4fr_1.2fr_0.8fr_1fr]' : 'grid-cols-[1.6fr_1.4fr_1.2fr_0.8fr_1fr]'}`}>
+        <div className={`grid gap-4 border-b border-border bg-raised px-5 py-3 ${selecting ? 'grid-cols-[32px_1.6fr_1.4fr_1.2fr_0.8fr_1fr_28px]' : 'grid-cols-[1.6fr_1.4fr_1.2fr_0.8fr_1fr_28px]'}`}>
           {selecting && <Label>{' '}</Label>}
           {['Patient', 'Chief complaint', 'Current remedy', 'Last seen', 'Assignment'].map((h) => (
             <Label key={h}>{h}</Label>
           ))}
+          <span />
         </div>
         {filtered.map((p) => (
-          <button
+          <Pressable
             key={p.id}
+            as="div"
+            hap="tick"
             onClick={() => selecting ? toggleSelect(p.id) : onOpenPatient(p.id)}
-            className={`grid w-full items-center gap-4 border-b border-border px-5 py-3.5 text-left transition last:border-0 hover:bg-surface-hover ${selecting ? 'grid-cols-[32px_1.6fr_1.4fr_1.2fr_0.8fr_1fr]' : 'grid-cols-[1.6fr_1.4fr_1.2fr_0.8fr_1fr]'} ${selected.has(p.id) ? 'bg-tint/40' : ''}`}
+            className={`grid w-full cursor-pointer items-center gap-4 border-b border-border px-5 py-3.5 text-left transition last:border-0 hover:bg-surface-hover ${selecting ? 'grid-cols-[32px_1.6fr_1.4fr_1.2fr_0.8fr_1fr_28px]' : 'grid-cols-[1.6fr_1.4fr_1.2fr_0.8fr_1fr_28px]'} ${selected.has(p.id) ? 'bg-tint/40' : ''}`}
           >
             {selecting && (
               <div className={`flex h-5 w-5 items-center justify-center rounded-[6px] border-2 transition ${selected.has(p.id) ? 'border-brand bg-brand' : 'border-border'}`}>
@@ -1043,12 +1109,50 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
             <div className="text-[13px] text-body">{p.currentRemedy ?? '—'}</div>
             <div className="text-[13px] text-muted">{p.lastSeen}</div>
             <div><Badge tone={toneFor(p.assignment) as any}>{p.assignment}</Badge></div>
-          </button>
+            {canAssign && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  const rect = e.currentTarget.getBoundingClientRect()
+                  setMenuPos({ top: rect.bottom + 4, left: rect.right - 200 })
+                  setMenuFor(menuFor === p.id ? null : p.id)
+                }}
+                className="flex h-7 w-7 items-center justify-center rounded-full text-faint transition hover:bg-tint hover:text-brand"
+              >
+                <DotsThreeVertical size={17} weight="bold" />
+              </button>
+            )}
+          </Pressable>
         ))}
         {filtered.length === 0 && (
           <div className="px-5 py-8 text-center text-[13px] text-muted">No patients match these filters.</div>
         )}
       </Card>
+
+      {menuFor && createPortal(
+        <div
+          style={{ position: 'fixed', top: menuPos.top, left: menuPos.left, zIndex: 200 }}
+          className="w-[200px] overflow-hidden rounded-[12px] border border-border bg-surface shadow-modal"
+        >
+          <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-faint">Reassign to</div>
+          {practitioners.map((pr) => (
+            <button
+              key={pr.id}
+              onClick={() => {
+                const p = patients.find((x) => x.id === menuFor)
+                assignPatient(menuFor, pr.id)
+                setMenuFor(null)
+                toast({ title: 'Patient reassigned', message: `${p?.name ?? 'Patient'} is now assigned to ${pr.name}.` })
+              }}
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-body transition hover:bg-surface-hover"
+            >
+              <Avatar initials={pr.initials} size={22} />
+              {pr.name}
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
 
       {bulkAssignOpen && createPortal(
         <div
@@ -1278,26 +1382,300 @@ function FollowUpsOverview({ onOpenFollowUp }: { onOpenFollowUp: (id: string) =>
   )
 }
 
+// ── MESSAGES ──
+// A real two-pane inbox (conversation list + open thread) — matching the
+// practitioner mobile app's Inbox tab, adapted to the desktop console's
+// extra width instead of squeezing the same chat widget into a narrow
+// sidebar card on the patient page (which just showed a lightweight
+// preview + "open" link — see PatientDetail's Messages card).
+function MessagesView({ initialPatientId, onOpenPatient }: { initialPatientId: string | null; onOpenPatient: (id: string) => void }) {
+  const messages = useClinic((s) => s.messages)
+  const patients = useClinic((s) => s.patients)
+  const [selected, setSelected] = useState<string | null>(initialPatientId)
+
+  const conversations = useMemo(() => {
+    const byPatient = new Map<string, { patientId: string; lastMsg: ChatMessage; unread: number }>()
+    for (const m of messages) {
+      const existing = byPatient.get(m.patientId)
+      if (!existing || m.sentAt > existing.lastMsg.sentAt) {
+        byPatient.set(m.patientId, {
+          patientId: m.patientId,
+          lastMsg: m,
+          unread: (existing?.unread ?? 0) + (m.sender === 'patient' && !m.read ? 1 : 0),
+        })
+      } else if (m.sender === 'patient' && !m.read) {
+        existing.unread++
+      }
+    }
+    return [...byPatient.values()].sort((a, b) => b.lastMsg.sentAt.localeCompare(a.lastMsg.sentAt))
+  }, [messages])
+
+  const selectedPatient = patients.find((p) => p.id === selected)
+
+  return (
+    <div className="flex h-[calc(100vh-150px)] gap-4">
+      <Card className="flex w-[320px] shrink-0 flex-col overflow-hidden p-0">
+        <div className="shrink-0 border-b border-border px-5 py-3.5">
+          <h2 className="font-display text-[16px] font-bold text-ink">Messages</h2>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {conversations.length === 0 ? (
+            <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+              <ChatText size={28} className="text-faint" />
+              <p className="mt-3 text-[13px] text-muted">No conversations yet.</p>
+            </div>
+          ) : (
+            conversations.map((c) => {
+              const p = patients.find((x) => x.id === c.patientId)
+              const name = p?.name ?? 'Unknown'
+              const preview = c.lastMsg.text.length > 48 ? c.lastMsg.text.slice(0, 48) + '…' : c.lastMsg.text
+              const time = new Date(c.lastMsg.sentAt)
+              const isToday = new Date().toDateString() === time.toDateString()
+              const timeStr = isToday
+                ? time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                : time.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+              const active = c.patientId === selected
+              return (
+                <button
+                  key={c.patientId}
+                  onClick={() => setSelected(c.patientId)}
+                  className={`flex w-full items-center gap-3 border-b border-border px-4 py-3 text-left transition ${active ? 'bg-tint' : 'hover:bg-surface-hover'}`}
+                >
+                  <Avatar initials={p?.initials ?? '?'} size={42} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className={`truncate text-[13.5px] font-semibold ${c.unread > 0 ? 'text-ink' : 'text-body'}`}>{name}</span>
+                      <span className={`shrink-0 text-[11px] ${c.unread > 0 ? 'font-semibold text-brand' : 'text-faint'}`}>{timeStr}</span>
+                    </div>
+                    <div className="mt-0.5 flex items-center justify-between gap-2">
+                      <span className={`truncate text-[12.5px] ${c.unread > 0 ? 'font-medium text-body' : 'text-muted'}`}>
+                        {c.lastMsg.sender === 'practitioner' && <span className="text-faint">You: </span>}
+                        {preview}
+                      </span>
+                      {c.unread > 0 && (
+                        <span className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-bold text-white">{c.unread}</span>
+                      )}
+                    </div>
+                  </div>
+                </button>
+              )
+            })
+          )}
+        </div>
+      </Card>
+
+      <Card className="flex min-w-0 flex-1 flex-col overflow-hidden p-0">
+        {selectedPatient ? (
+          <>
+            <div className="flex shrink-0 items-center gap-3 border-b border-border px-5 py-3">
+              <Avatar initials={selectedPatient.initials} size={36} />
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-display text-[14.5px] font-semibold text-ink">{selectedPatient.name}</div>
+                <div className="truncate text-[11.5px] text-faint">{selectedPatient.age}y · {selectedPatient.chiefComplaint}</div>
+              </div>
+              <button
+                onClick={() => onOpenPatient(selectedPatient.id)}
+                className="shrink-0 rounded-pill border border-border bg-surface px-3.5 py-1.5 text-[12.5px] font-semibold text-body transition hover:bg-surface-hover"
+              >
+                View case
+              </button>
+            </div>
+            <div className="min-h-0 flex-1">
+              <WebChatThread patientId={selectedPatient.id} />
+            </div>
+          </>
+        ) : (
+          <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
+            <ChatText size={32} className="text-faint" />
+            <p className="text-[13px] text-muted">Select a conversation to view it here.</p>
+          </div>
+        )}
+      </Card>
+    </div>
+  )
+}
+
+// Web's own thread rendering — same data/behaviour as the shared ChatThread
+// (used by the practitioner/patient apps, which keep their WhatsApp look on
+// purpose), but styled to match the rest of the desktop console rather than
+// a chat app: no wallpaper texture, solid brand-green sent bubbles, no
+// read-receipt ticks, timestamps below each bubble, date dividers.
+function WebChatThread({ patientId }: { patientId: string }) {
+  const messages = useClinic((s) => s.messages.filter((m) => m.patientId === patientId))
+  const sendMessage = useClinic((s) => s.sendMessage)
+  const markConvoRead = useClinic((s) => s.markConvoRead)
+  const [draft, setDraft] = useState('')
+  const endRef = useRef<HTMLDivElement>(null)
+
+  const sorted = useMemo(
+    () => [...messages].sort((a, b) => a.sentAt.localeCompare(b.sentAt)),
+    [messages],
+  )
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [sorted.length])
+
+  useEffect(() => {
+    const unread = messages.some((m) => m.sender === 'patient' && !m.read)
+    if (unread) markConvoRead(patientId, 'patient')
+  }, [patientId, messages, markConvoRead])
+
+  const send = () => {
+    const text = draft.trim()
+    if (!text) return
+    sendMessage(patientId, text, 'practitioner')
+    setDraft('')
+  }
+
+  const dayLabel = (d: Date) => {
+    const today = new Date()
+    const yesterday = new Date(today)
+    yesterday.setDate(yesterday.getDate() - 1)
+    if (d.toDateString() === today.toDateString()) return 'Today'
+    if (d.toDateString() === yesterday.toDateString()) return 'Yesterday'
+    return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })
+  }
+
+  let lastDay = ''
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="min-h-0 flex-1 overflow-y-auto bg-screen px-5 py-4">
+        {sorted.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <p className="text-[13px] text-faint">No messages yet. Say hello.</p>
+          </div>
+        )}
+        <div className="space-y-3">
+          {sorted.map((msg) => {
+            const mine = msg.sender === 'practitioner'
+            const d = new Date(msg.sentAt)
+            const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            const thisDay = dayLabel(d)
+            const showDivider = thisDay !== lastDay
+            lastDay = thisDay
+            return (
+              <div key={msg.id}>
+                {showDivider && (
+                  <div className="mb-3 flex items-center justify-center">
+                    <span className="rounded-pill bg-surface px-3 py-1 text-[10.5px] font-semibold uppercase tracking-wider text-faint">{thisDay}</span>
+                  </div>
+                )}
+                <div className={`flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
+                  <div
+                    className={`max-w-[70%] rounded-[14px] px-3.5 py-2.5 shadow-sm ${
+                      mine ? 'bg-brand text-white' : 'border border-border bg-surface text-body'
+                    }`}
+                  >
+                    <p className="whitespace-pre-wrap text-[13.5px] leading-[1.4]">{msg.text}</p>
+                  </div>
+                  <span className="mt-1 text-[11px] text-faint">{time}</span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        <div ref={endRef} />
+      </div>
+
+      <div className="flex shrink-0 items-center gap-2.5 border-t border-border px-4 py-3">
+        <div className="flex-1 rounded-pill border border-border bg-surface px-4 py-2.5">
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
+            placeholder="Write a reply..."
+            rows={1}
+            className="max-h-[100px] w-full resize-none bg-transparent text-[13.5px] text-body outline-none placeholder:text-faint"
+          />
+        </div>
+        <button
+          onClick={send}
+          disabled={!draft.trim()}
+          className="flex shrink-0 items-center gap-1.5 rounded-pill bg-brand px-4 py-2.5 text-[13px] font-semibold text-white transition hover:bg-accent-deep disabled:opacity-40"
+        >
+          Send <PaperPlaneRight size={15} weight="fill" />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// Small self-reported-wellbeing trend line — real check-in history, not a
+// fabricated multi-week curve. A patient with one check-in gets one dot,
+// not an invented trend; the line only appears once there's something to
+// connect.
+function ProgressChart({ points }: { points: { date: string; value: number }[] }) {
+  if (points.length === 0) {
+    return <p className="mt-3 text-[12.5px] text-faint">No check-ins yet.</p>
+  }
+
+  const W = 280
+  const H = 72
+  const PAD = 6
+  const n = points.length
+  const x = (i: number) => (n === 1 ? W / 2 : PAD + (i / (n - 1)) * (W - PAD * 2))
+  const y = (v: number) => H - PAD - (Math.max(0, Math.min(100, v)) / 100) * (H - PAD * 2)
+
+  const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${x(i)} ${y(p.value)}`).join(' ')
+  const areaPath = `${linePath} L ${x(n - 1)} ${H} L ${x(0)} ${H} Z`
+  const shortDate = (iso: string) => new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+
+  return (
+    <div className="mt-3">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: H }}>
+        {n > 1 && <path d={areaPath} fill="#E9EEE1" />}
+        {n > 1 && <path d={linePath} fill="none" stroke="#5E8A57" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />}
+        {points.map((p, i) => (
+          <circle
+            key={p.date}
+            cx={x(i)}
+            cy={y(p.value)}
+            r={i === n - 1 ? 4 : 2.5}
+            fill={i === n - 1 ? '#5E8A57' : '#FCFBF6'}
+            stroke="#5E8A57"
+            strokeWidth={i === n - 1 ? 0 : 2}
+          />
+        ))}
+      </svg>
+      <div className="mt-1 flex items-center justify-between text-[10.5px] text-faint">
+        <span>{shortDate(points[0].date)}</span>
+        {n > 1 && <span>{shortDate(points[n - 1].date)}</span>}
+      </div>
+    </div>
+  )
+}
+
 // ── PATIENT DETAIL ──
-function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSheet, onFollowUp, onBack }: { patientId: string; onPrescribe: () => void; onOrderInvestigations: () => void; onCaseSheet: () => void; onFollowUp: () => void; onBack: () => void }) {
+function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSheet, onFollowUp, onOpenMessages, onBack }: { patientId: string; onPrescribe: () => void; onOrderInvestigations: () => void; onCaseSheet: () => void; onFollowUp: () => void; onOpenMessages: () => void; onBack: () => void }) {
   const patient = useClinic((s) => s.patients.find((p) => p.id === patientId))
   const rx = useClinic((s) => s.prescriptions.filter((r) => r.patientId === patientId))
   const docs = useClinic((s) => s.documents.filter((d) => d.patientId === patientId))
   const outcomes = useClinic((s) => s.outcomes.filter((o) => o.patientId === patientId))
   const checkIns = useClinic((s) => s.checkIns.filter((c) => c.patientId === patientId))
   const handoffs = useClinic((s) => s.handoffs.filter((h) => h.patientId === patientId))
+  const secondOpinions = useClinic((s) => s.secondOpinions.filter((o) => o.patientId === patientId))
+  const requestSecondOpinion = useClinic((s) => s.requestSecondOpinion)
+  const answerSecondOpinion = useClinic((s) => s.answerSecondOpinion)
   const appointments = useClinic((s) => s.appointments.filter((a) => a.patientId === patientId))
   const invoices = useClinic((s) => s.invoices.filter((i) => i.patientId === patientId))
+  const patientMessages = useClinic((s) => s.messages.filter((m) => m.patientId === patientId))
   const practitioners = useClinic((s) => s.practitioners)
   const doctor = useClinic((s) => s.practitioners.find((p) => p.id === s.currentPractitionerId))
   const assignPatient = useClinic((s) => s.assignPatient)
   const addDocument = useClinic((s) => s.addDocument)
+  const role = useClinic((s) => s.role)
   const toast = useToast()
   const [assignOpen, setAssignOpen] = useState(false)
   const [billing, setBilling] = useState<{ patientId: string; appointmentId?: string; existingInvoice?: Invoice } | null>(null)
   const [assignPos, setAssignPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
   const assignRef = useRef<HTMLDivElement>(null)
   const assignDropRef = useRef<HTMLDivElement>(null)
+  const [requestingOpinion, setRequestingOpinion] = useState(false)
+  const [opinionTo, setOpinionTo] = useState<string | null>(null)
+  const [opinionQuestion, setOpinionQuestion] = useState('')
+  const [opinionReplyDraft, setOpinionReplyDraft] = useState<Record<string, string>>({})
 
   useEffect(() => {
     if (!assignOpen) return
@@ -1309,6 +1687,11 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
     document.addEventListener('mousedown', onClick)
     return () => document.removeEventListener('mousedown', onClick)
   }, [assignOpen])
+
+  const progressPoints = useMemo(
+    () => [...checkIns].sort((a, b) => a.submittedAt.localeCompare(b.submittedAt)).map((c) => ({ date: c.submittedAt, value: c.improvementPct })),
+    [checkIns],
+  )
 
   if (!patient) return <PatientNotFound onBack={onBack} />
 
@@ -1336,6 +1719,13 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
     if (!patient) return
     exportInvoicePdf(inv, patient).catch(() => {})
   }
+
+  // Just a preview — the real conversation now lives in its own Messages
+  // section (a proper two-pane inbox, not a chat widget squeezed into this
+  // sidebar). Reading it here never marks anything read; only actually
+  // opening the conversation does that.
+  const lastMessage = [...patientMessages].sort((a, b) => b.sentAt.localeCompare(a.sentAt))[0]
+  const unreadMessageCount = patientMessages.filter((m) => m.sender === 'patient' && !m.read).length
 
   type TimelineEvent = { id: string; date: string; kind: 'visit' | 'prescription' | 'check-in' | 'outcome' | 'handoff'; title: string; detail: string; tone: 'green' | 'amber' | 'neutral' }
   const timeline: TimelineEvent[] = [
@@ -1371,15 +1761,21 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
           <div className="flex items-center gap-2">
             <h1 className="font-display text-[20px] font-bold text-ink">{patient.name}</h1>
             <div ref={assignRef}>
-              <button
-                onClick={openAssignDropdown}
-                className="group flex items-center gap-1"
-              >
+              {(role === 'Assistant' || role === 'Receptionist') ? (
                 <Badge tone={patient.assignment === 'Unassigned' ? 'amber' : patient.assignment === 'Mine' ? 'green' : 'neutral'}>
                   {patient.assignment}
                 </Badge>
-                <PencilSimple size={12} weight="bold" className="text-faint opacity-0 transition group-hover:opacity-100" />
-              </button>
+              ) : (
+                <button
+                  onClick={openAssignDropdown}
+                  className="group flex items-center gap-1"
+                >
+                  <Badge tone={patient.assignment === 'Unassigned' ? 'amber' : patient.assignment === 'Mine' ? 'green' : 'neutral'}>
+                    {patient.assignment}
+                  </Badge>
+                  <PencilSimple size={12} weight="bold" className="text-faint opacity-0 transition group-hover:opacity-100" />
+                </button>
+              )}
             </div>
           </div>
           <div className="text-[13px] text-muted">
@@ -1521,14 +1917,13 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
 
         <div className="space-y-4">
           <Card className="p-5">
-            <Label>Progress · self-reported</Label>
-            <div className="mt-1 flex items-end gap-2">
-              <span className="font-display text-[30px] font-bold text-success">+65%</span>
-              <span className="mb-1.5 text-[12px] text-faint">12 Jun → today</span>
+            <div className="flex items-center justify-between">
+              <Label>Progress · self-reported</Label>
+              {progressPoints.length > 0 && (
+                <Badge tone="green">+{progressPoints[progressPoints.length - 1].value}%</Badge>
+              )}
             </div>
-            <div className="mt-3 h-2 overflow-hidden rounded-pill bg-tint-pale">
-              <div className="h-full rounded-pill bg-accent" style={{ width: '65%' }} />
-            </div>
+            <ProgressChart points={progressPoints} />
           </Card>
           <Card className="p-5">
             <div className="flex items-center justify-between">
@@ -1545,26 +1940,146 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
                 }} />
               </label>
             </div>
-            <div className="mt-2 space-y-2">
-              {docs.map((d) => (
-                <div key={d.id} className="flex items-center justify-between text-[13px]">
-                  <span className="text-body">{d.name}</span>
-                  <div className="flex items-center gap-2">
-                    <Badge tone="neutral">{d.format}</Badge>
-                    <span className="text-faint">{d.size}</span>
+            <div className="mt-2 space-y-1.5">
+              {docs.map((d) => {
+                const open = async () => {
+                  if (!d.fileUrl) { toast({ title: 'Not available', message: 'This document has no file attached.' }); return }
+                  const url = await getDocumentUrl(d.fileUrl)
+                  if (!url) { toast({ title: 'Could not open document', message: 'Check your connection and try again.' }); return }
+                  window.open(url, '_blank', 'noopener,noreferrer')
+                }
+                const Icon = d.kind === 'Prescription' ? RxIcon : d.kind === 'Report' ? FileText : FilePdf
+                const iconTone = d.kind === 'Prescription' ? 'text-brand' : d.kind === 'Report' ? 'text-amber' : 'text-muted'
+                return (
+                  <div key={d.id} className="flex items-center gap-3 rounded-[12px] px-1.5 py-1.5 transition hover:bg-surface-hover">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-tint-pale">
+                      <Icon size={18} weight="fill" className={iconTone} />
+                    </div>
+                    <button onClick={open} className="min-w-0 flex-1 text-left">
+                      <div className="truncate text-[13px] font-medium text-body">{d.name}</div>
+                      <div className="mt-0.5 text-[11.5px] text-faint">{d.format} · {d.size} · {d.uploadedBy === 'patient' ? 'uploaded by patient' : 'uploaded by you'} · {d.date}</div>
+                    </button>
+                    <button onClick={open} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-faint transition hover:bg-tint hover:text-brand" title="Download">
+                      <DownloadSimple size={16} weight="bold" />
+                    </button>
                   </div>
-                </div>
-              ))}
+                )
+              })}
               {docs.length === 0 && <div className="py-3 text-center text-[12px] text-faint">No documents yet</div>}
             </div>
           </Card>
-          <Card className="flex h-[420px] flex-col overflow-hidden">
-            <div className="shrink-0 border-b border-border px-5 py-3">
+
+          <Card className="p-5">
+            <div className="flex items-center gap-2">
+              <Eye size={16} weight="bold" className="text-brand" />
+              <h3 className="font-display text-[14px] font-bold text-ink">Second opinion</h3>
+            </div>
+            <p className="mt-1 text-[12.5px] text-muted">Share read-only access with a colleague and attach a question. Ownership stays with you.</p>
+
+            {secondOpinions.length > 0 && (
+              <div className="mt-3 space-y-2.5">
+                {secondOpinions.map((o) => {
+                  const isMine = o.fromPractitionerId === doctor?.id
+                  const isToMe = o.toPractitionerId === doctor?.id
+                  const other = practitioners.find((p) => p.id === (isMine ? o.toPractitionerId : o.fromPractitionerId))
+                  return (
+                    <div key={o.id} className="rounded-[12px] border border-border bg-canvas p-3">
+                      <div className="text-[12px] font-semibold text-ink">{isMine ? `Asked ${other?.name ?? 'a colleague'}` : `${other?.name ?? 'A colleague'} asked you`}</div>
+                      {o.question && <p className="mt-1 text-[12.5px] text-body">&ldquo;{o.question}&rdquo;</p>}
+                      {o.status === 'answered' ? (
+                        <div className="mt-2 rounded-[8px] bg-tint px-2.5 py-2 text-[12.5px] text-body">{o.response}</div>
+                      ) : isToMe ? (
+                        <div className="mt-2 space-y-1.5">
+                          <textarea
+                            value={opinionReplyDraft[o.id] ?? ''}
+                            onChange={(e) => setOpinionReplyDraft((d) => ({ ...d, [o.id]: e.target.value }))}
+                            placeholder="Write your response..."
+                            rows={2}
+                            className="w-full rounded-[8px] border border-border bg-surface px-2.5 py-2 text-[12.5px] text-body outline-none focus:border-green-border"
+                          />
+                          <Button
+                            size="sm"
+                            variant="primary"
+                            disabled={!(opinionReplyDraft[o.id] ?? '').trim()}
+                            onClick={() => {
+                              answerSecondOpinion(o.id, (opinionReplyDraft[o.id] ?? '').trim())
+                              toast({ title: 'Response sent' })
+                            }}
+                          >
+                            Send response
+                          </Button>
+                        </div>
+                      ) : (
+                        <Badge tone="amber">Waiting on {other?.name ?? 'colleague'}</Badge>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {requestingOpinion ? (
+              <div className="mt-3 space-y-2">
+                <div className="flex flex-wrap gap-1.5">
+                  {practitioners.filter((p) => p.id !== doctor?.id).map((p) => (
+                    <Chip key={p.id} selected={opinionTo === p.id} onClick={() => setOpinionTo(p.id)}>{p.name}</Chip>
+                  ))}
+                </div>
+                <textarea
+                  value={opinionQuestion}
+                  onChange={(e) => setOpinionQuestion(e.target.value)}
+                  placeholder="What would you like their opinion on?"
+                  rows={2}
+                  className="w-full rounded-[8px] border border-border bg-surface px-2.5 py-2 text-[12.5px] text-body outline-none focus:border-green-border"
+                />
+                <div className="flex justify-end gap-2">
+                  <Button size="sm" variant="ghost" onClick={() => { setRequestingOpinion(false); setOpinionTo(null); setOpinionQuestion('') }}>Cancel</Button>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    disabled={!opinionTo || !doctor}
+                    onClick={() => {
+                      if (!opinionTo || !doctor) return
+                      requestSecondOpinion({ patientId, fromPractitionerId: doctor.id, toPractitionerId: opinionTo, question: opinionQuestion.trim() })
+                      toast({ title: 'Second opinion requested' })
+                      setRequestingOpinion(false)
+                      setOpinionTo(null)
+                      setOpinionQuestion('')
+                    }}
+                  >
+                    Send request
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <Button variant="ghost" size="sm" className="mt-3 w-full" onClick={() => setRequestingOpinion(true)}>Request a note</Button>
+            )}
+          </Card>
+
+          <Card className="p-5">
+            <div className="mb-3 flex items-center justify-between">
               <h3 className="font-display text-[14px] font-bold text-ink">Messages</h3>
+              {unreadMessageCount > 0 && <Badge tone="green">{unreadMessageCount} new</Badge>}
             </div>
-            <div className="min-h-0 flex-1">
-              <ChatThread patientId={patientId} viewAs="practitioner" compact />
-            </div>
+            <button
+              onClick={onOpenMessages}
+              className="flex w-full items-center gap-3 rounded-[14px] border border-border bg-surface px-4 py-3 text-left transition hover:border-green-border hover:bg-surface-hover"
+            >
+              {lastMessage ? (
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[13px] text-body">
+                    {lastMessage.sender === 'practitioner' && <span className="text-faint">You: </span>}
+                    {lastMessage.text}
+                  </div>
+                  <div className="mt-0.5 text-[11px] text-faint">
+                    {new Date(lastMessage.sentAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} · {new Date(lastMessage.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </div>
+                </div>
+              ) : (
+                <span className="flex-1 text-[13px] text-muted">Start a conversation</span>
+              )}
+              <CaretRight size={16} className="shrink-0 text-faint" />
+            </button>
           </Card>
         </div>
       </div>
@@ -2104,6 +2619,7 @@ function NotifPanel({ onClose }: { onClose: () => void }) {
   const patients = useClinic((s) => s.patients)
   const accept = useClinic((s) => s.acceptHandoff)
   const markAll = useClinic((s) => s.markAllRead)
+  const role = useClinic((s) => s.role)
   const toast = useToast()
   const iconFor = (k: string) => (k === 'handoff' ? Handshake : k === 'booking' ? CalendarCheck : k === 'low_stock' ? Warning : Bell)
   return (
@@ -2133,7 +2649,9 @@ function NotifPanel({ onClose }: { onClose: () => void }) {
                   <div className="mt-0.5 text-[11px] text-faint">{n.time}</div>
                   {n.pending && (
                     <div className="mt-2 flex gap-2">
-                      <Button size="sm" variant="primary" onClick={() => { const ho = handoffs.find((h) => h.status === 'pending'); if (ho) accept(ho.id) }}>Accept</Button>
+                      {role !== 'Assistant' && (
+                        <Button size="sm" variant="primary" onClick={() => { const ho = handoffs.find((h) => h.status === 'pending'); if (ho) accept(ho.id) }}>Accept</Button>
+                      )}
                       <Button size="sm" variant="ghost" onClick={() => {
                         const ho = handoffs.find((h) => h.status === 'pending')
                         if (ho) {
@@ -2164,48 +2682,96 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
   const prescriptions = useClinic((s) => s.prescriptions)
   const practitioners = useClinic((s) => s.practitioners)
   const invoices = useClinic((s) => s.invoices)
+  const [period, setPeriod] = useState<'month' | 'year'>('year')
+  const [exportOpen, setExportOpen] = useState(false)
+  const exportRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!exportOpen) return
+    const onClick = (e: MouseEvent) => { if (exportRef.current && !exportRef.current.contains(e.target as Node)) setExportOpen(false) }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [exportOpen])
 
   const inr = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`
 
-  const seenCount = appointments.filter((a) => a.status === 'Seen' || a.status === 'In consult').length
+  // "Month" = this calendar month to date. "Year" = year-to-date (Jan 1 →
+  // today), matching the design spec's own "Jan – Jul 2026" example — never
+  // a fabricated full-year projection. The prior-period window is the SAME
+  // number of elapsed days at the start of the prior month/year, so a
+  // still-in-progress current period is compared fairly, not against a full
+  // completed one.
+  const now = new Date()
+  const startOfThisPeriod = period === 'month' ? new Date(now.getFullYear(), now.getMonth(), 1) : new Date(now.getFullYear(), 0, 1)
+  const startOfPriorPeriod = period === 'month' ? new Date(now.getFullYear(), now.getMonth() - 1, 1) : new Date(now.getFullYear() - 1, 0, 1)
+  const daysElapsed = Math.floor((now.getTime() - startOfThisPeriod.getTime()) / 86400000) + 1
+  const endOfPriorPeriod = new Date(startOfPriorPeriod.getTime() + daysElapsed * 86400000)
+  const periodLabel = period === 'month'
+    ? now.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
+    : `Jan – ${now.toLocaleDateString('en-IN', { month: 'short' })} ${now.getFullYear()}`
+
+  const inRange = (dateStr: string | undefined | null, start: Date, end: Date) => {
+    if (!dateStr) return false
+    const d = new Date(dateStr.slice(0, 10) + 'T00:00:00')
+    return d >= start && d < end
+  }
+
+  // Omits the badge entirely rather than show a fabricated/infinite swing
+  // when the prior period has no real baseline (e.g. a brand-new clinic) —
+  // same "honest omission" rule already used for follow-up adherence below.
+  function periodDelta(current: number, prior: number, opts?: { points?: boolean }): { text: string; positive: boolean } | null {
+    if (prior <= 0) return null
+    if (opts?.points) {
+      const diff = Math.round(current - prior)
+      if (diff === 0) return null
+      return { text: `${diff > 0 ? '+' : ''}${diff} point${Math.abs(diff) === 1 ? '' : 's'}`, positive: diff > 0 }
+    }
+    const pct = Math.round(((current - prior) / prior) * 100)
+    if (pct === 0) return null
+    return { text: `${pct > 0 ? '+' : ''}${pct}% vs last ${period === 'month' ? 'month' : 'year'}`, positive: pct > 0 }
+  }
+
+  const seenAppts = appointments.filter((a) => a.status === 'Seen' || a.status === 'In consult')
+  const seenCount = seenAppts.filter((a) => inRange(a.date, startOfThisPeriod, now)).length
+  const priorSeenCount = seenAppts.filter((a) => inRange(a.date, startOfPriorPeriod, endOfPriorPeriod)).length
+
   // Revenue is billing, not appointments — sourced from invoices (what was
-  // actually received, excluding cancelled bills), clinic-wide/all-time.
-  const totalRevenue = invoices.filter((i) => i.status !== 'cancelled').reduce((sum, i) => sum + i.amountReceived, 0)
+  // actually received, excluding cancelled bills), scoped to the selected period.
+  const activeInvoices = invoices.filter((i) => i.status !== 'cancelled')
+  const totalRevenue = activeInvoices.filter((i) => inRange(i.date, startOfThisPeriod, now)).reduce((sum, i) => sum + i.amountReceived, 0)
+  const priorRevenue = activeInvoices.filter((i) => inRange(i.date, startOfPriorPeriod, endOfPriorPeriod)).reduce((sum, i) => sum + i.amountReceived, 0)
 
   // Adherence = of follow-ups that have actually come due (seen or cancelled —
   // not still upcoming), what fraction were kept vs. missed. Null rather than
   // a fake 0%/100% when nothing has resolved yet.
   const resolvedFollowUps = appointments.filter((a) => a.reason === 'Follow-up' && (a.status === 'Seen' || a.status === 'Cancelled'))
-  const followUpAdherence = resolvedFollowUps.length > 0
-    ? Math.round((resolvedFollowUps.filter((a) => a.status === 'Seen').length / resolvedFollowUps.length) * 100)
+  const periodResolvedFollowUps = resolvedFollowUps.filter((a) => inRange(a.date, startOfThisPeriod, now))
+  const followUpAdherence = periodResolvedFollowUps.length > 0
+    ? Math.round((periodResolvedFollowUps.filter((a) => a.status === 'Seen').length / periodResolvedFollowUps.length) * 100)
+    : null
+  const priorResolvedFollowUps = resolvedFollowUps.filter((a) => inRange(a.date, startOfPriorPeriod, endOfPriorPeriod))
+  const priorFollowUpAdherence = priorResolvedFollowUps.length > 0
+    ? Math.round((priorResolvedFollowUps.filter((a) => a.status === 'Seen').length / priorResolvedFollowUps.length) * 100)
     : null
 
-  // New patients over the same rolling 6-month window as the visits chart below.
-  const monthWindow = (() => {
-    const now = new Date()
-    const keys = new Set<string>()
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-      keys.add(`${d.getFullYear()}-${d.getMonth()}`)
-    }
-    return keys
-  })()
-  const newPatientsInWindow = patients.filter((p) => {
-    const d = new Date(p.patientSince)
-    return !isNaN(d.getTime()) && monthWindow.has(`${d.getFullYear()}-${d.getMonth()}`)
-  }).length
+  const newPatientsInWindow = patients.filter((p) => inRange(p.patientSince, startOfThisPeriod, now)).length
+  const priorNewPatients = patients.filter((p) => inRange(p.patientSince, startOfPriorPeriod, endOfPriorPeriod)).length
 
   const statsBefore = [
-    { label: 'Total visits', num: seenCount, format: (n: number) => String(Math.round(n)), icon: Stethoscope, tone: 'green' as const },
-    { label: 'New patients', num: newPatientsInWindow, format: (n: number) => String(Math.round(n)), icon: Plus, tone: 'brand' as const },
+    { label: 'Total visits', num: seenCount, format: (n: number) => String(Math.round(n)), icon: Stethoscope, tone: 'green' as const, delta: periodDelta(seenCount, priorSeenCount) },
+    { label: 'New patients', num: newPatientsInWindow, format: (n: number) => String(Math.round(n)), icon: Plus, tone: 'brand' as const, delta: periodDelta(newPatientsInWindow, priorNewPatients) },
   ]
-  const revenueStat = { label: 'Revenue', num: totalRevenue, format: inr, icon: CurrencyInr, tone: 'green' as const }
+  const revenueStat = { label: 'Revenue', num: totalRevenue, format: inr, icon: CurrencyInr, tone: 'green' as const, delta: periodDelta(totalRevenue, priorRevenue) }
+  const adherenceDelta = followUpAdherence !== null && priorFollowUpAdherence !== null ? periodDelta(followUpAdherence, priorFollowUpAdherence, { points: true }) : null
 
-  const remedyCount = useMemo(() => {
+  // Scoped to the selected period, unlike Caseload by practitioner below
+  // (a live snapshot of open cases right now — a period doesn't apply to it).
+  const periodPrescriptions = prescriptions.filter((r) => inRange(r.publishedAt, startOfThisPeriod, now))
+  const remedyCount = (() => {
     const map: Record<string, number> = {}
-    prescriptions.forEach((r) => { map[r.remedy] = (map[r.remedy] || 0) + 1 })
+    periodPrescriptions.forEach((r) => { map[r.remedy] = (map[r.remedy] || 0) + 1 })
     return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 6)
-  }, [prescriptions])
+  })()
   const maxRemedy = Math.max(...remedyCount.map(([, c]) => c), 1)
 
   const practitionerLoad = practitioners.map((p) => ({
@@ -2214,6 +2780,66 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
     patients: patients.filter((pt) => pt.owningPractitionerId === p.id).length,
   }))
   const maxCases = Math.max(...practitionerLoad.map((p) => p.cases), 1)
+
+  // Real, back-of-the-clinic data — plain CSV, opens in Excel/Sheets/Numbers.
+  // Her own ask: a way to back up patient data if something happens to the
+  // database. Same location the design spec always called for an Export here.
+  const exportPatients = () => {
+    const rows = patients.map((p) => ({
+      code: p.wsCode, name: p.name, age: p.age, sex: p.sex, phone: p.phone ?? '', location: p.location,
+      chiefComplaint: p.chiefComplaint, currentRemedy: p.currentRemedy ?? '', patientSince: p.patientSince,
+      lastSeen: p.lastSeen, assignment: p.assignment, allergies: p.allergies, regularMedication: p.regularMedication,
+    }))
+    downloadCsv(`sneham-patients-${todayISO()}.csv`, toCsv(rows, [
+      { key: 'code', label: 'Patient Code' }, { key: 'name', label: 'Name' }, { key: 'age', label: 'Age' },
+      { key: 'sex', label: 'Sex' }, { key: 'phone', label: 'Phone' }, { key: 'location', label: 'Location' },
+      { key: 'chiefComplaint', label: 'Chief Complaint' }, { key: 'currentRemedy', label: 'Current Remedy' },
+      { key: 'patientSince', label: 'Patient Since' }, { key: 'lastSeen', label: 'Last Seen' },
+      { key: 'assignment', label: 'Assignment' }, { key: 'allergies', label: 'Allergies' }, { key: 'regularMedication', label: 'Regular Medication' },
+    ]))
+  }
+  const exportAppointments = () => {
+    const rows = appointments.map((a) => ({
+      date: a.date, time: a.time, patient: patients.find((p) => p.id === a.patientId)?.name ?? '',
+      practitioner: practitioners.find((p) => p.id === a.practitionerId)?.name ?? '', type: a.type,
+      status: a.status, reason: a.reason ?? '', firstVisit: a.isFirstVisit ? 'Yes' : 'No',
+    }))
+    downloadCsv(`sneham-appointments-${todayISO()}.csv`, toCsv(rows, [
+      { key: 'date', label: 'Date' }, { key: 'time', label: 'Time' }, { key: 'patient', label: 'Patient' },
+      { key: 'practitioner', label: 'Practitioner' }, { key: 'type', label: 'Type' }, { key: 'status', label: 'Status' },
+      { key: 'reason', label: 'Reason' }, { key: 'firstVisit', label: 'First Visit' },
+    ]))
+  }
+  const exportPrescriptions = () => {
+    const rows = prescriptions.map((r) => ({
+      date: r.publishedAt.slice(0, 10), patient: patients.find((p) => p.id === r.patientId)?.name ?? '',
+      practitioner: practitioners.find((p) => p.id === r.practitionerId)?.name ?? '', remedy: r.remedy,
+      potency: r.potency, dose: r.doseGlobules, repetition: r.repetition, duration: r.durationDays ?? 'Until settled',
+    }))
+    downloadCsv(`sneham-prescriptions-${todayISO()}.csv`, toCsv(rows, [
+      { key: 'date', label: 'Date' }, { key: 'patient', label: 'Patient' }, { key: 'practitioner', label: 'Practitioner' },
+      { key: 'remedy', label: 'Remedy' }, { key: 'potency', label: 'Potency' }, { key: 'dose', label: 'Dose (globules)' },
+      { key: 'repetition', label: 'Repetition' }, { key: 'duration', label: 'Duration (days)' },
+    ]))
+  }
+  const exportInvoices = () => {
+    const rows = invoices.map((inv) => ({
+      invoiceNo: inv.invoiceNo, date: inv.date, patient: patients.find((p) => p.id === inv.patientId)?.name ?? '',
+      items: inv.items.map((it) => `${it.name} x${it.qty}`).join('; '), total: invoiceTotal(inv.items),
+      received: inv.amountReceived, paymentMode: inv.paymentMode, status: inv.status,
+    }))
+    downloadCsv(`sneham-invoices-${todayISO()}.csv`, toCsv(rows, [
+      { key: 'invoiceNo', label: 'Invoice No' }, { key: 'date', label: 'Date' }, { key: 'patient', label: 'Patient' },
+      { key: 'items', label: 'Items' }, { key: 'total', label: 'Total' }, { key: 'received', label: 'Received' },
+      { key: 'paymentMode', label: 'Payment Mode' }, { key: 'status', label: 'Status' },
+    ]))
+  }
+  const exportOptions = [
+    { label: 'Patients (CSV)', run: exportPatients },
+    { label: 'Appointments (CSV)', run: exportAppointments },
+    { label: 'Prescriptions (CSV)', run: exportPrescriptions },
+    { label: 'Invoices (CSV)', run: exportInvoices },
+  ]
 
   // Visits by month, new vs. returning — the last 6 months, oldest first.
   const visitsByMonth = useMemo(() => {
@@ -2239,9 +2865,52 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="font-display text-[20px] font-bold text-ink">Reports</h1>
-        <div className="text-[12.5px] text-faint">Practice analytics · live data from your clinic</div>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="font-display text-[20px] font-bold text-ink">Reports</h1>
+          <div className="text-[12.5px] text-faint">{periodLabel} · Practice analytics</div>
+        </div>
+        <div className="flex items-center gap-2.5">
+          <div className="inline-flex rounded-pill border border-border bg-surface p-0.5">
+            {(['month', 'year'] as const).map((p) => (
+              <button
+                key={p}
+                onClick={() => setPeriod(p)}
+                className={`rounded-pill px-3.5 py-1.5 text-[12.5px] font-semibold capitalize transition ${period === p ? 'bg-brand text-screen' : 'text-muted hover:text-body'}`}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+          <div className="relative" ref={exportRef}>
+            <button
+              onClick={() => setExportOpen((v) => !v)}
+              className="flex items-center gap-1.5 rounded-pill border border-border bg-surface px-3.5 py-2 text-[12.5px] font-semibold text-body transition hover:border-green-border hover:text-brand"
+            >
+              <DownloadSimple size={15} weight="bold" /> Export
+            </button>
+            <AnimatePresence>
+              {exportOpen && (
+                <motion.div
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  className="absolute right-0 top-full z-50 mt-1.5 w-[220px] overflow-hidden rounded-[12px] border border-border bg-surface shadow-modal"
+                >
+                  {exportOptions.map((opt) => (
+                    <button
+                      key={opt.label}
+                      onClick={() => { opt.run(); setExportOpen(false) }}
+                      className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-[13px] text-body transition hover:bg-surface-hover"
+                    >
+                      <FileCsv size={16} className="text-brand" /> {opt.label}
+                    </button>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-4 gap-3">
@@ -2254,6 +2923,11 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
               <Label>{s.label}</Label>
             </div>
             <CountUp value={s.num} format={s.format} duration={1.4} className="mt-2 block font-display text-[26px] font-bold leading-none text-ink" />
+            {s.delta && (
+              <div className={`mt-1 text-[11.5px] font-semibold ${s.delta.positive ? 'text-success' : 'text-danger'}`}>
+                {s.delta.positive ? '↗' : '↘'} {s.delta.text}
+              </div>
+            )}
           </Card>
         ))}
         <Card className="px-4 py-4">
@@ -2268,6 +2942,11 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
           ) : (
             <CountUp value={followUpAdherence} format={(n) => `${Math.round(n)}%`} duration={1.4} className="mt-2 block font-display text-[26px] font-bold leading-none text-ink" />
           )}
+          {adherenceDelta && (
+            <div className={`mt-1 text-[11.5px] font-semibold ${adherenceDelta.positive ? 'text-success' : 'text-danger'}`}>
+              {adherenceDelta.positive ? '↗' : '↘'} {adherenceDelta.text}
+            </div>
+          )}
         </Card>
         <Card className="px-4 py-4">
           <div className="flex items-center gap-2.5">
@@ -2277,6 +2956,11 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
             <Label>{revenueStat.label}</Label>
           </div>
           <CountUp value={revenueStat.num} format={revenueStat.format} duration={1.4} className="mt-2 block font-display text-[26px] font-bold leading-none text-ink" />
+          {revenueStat.delta && (
+            <div className={`mt-1 text-[11.5px] font-semibold ${revenueStat.delta.positive ? 'text-success' : 'text-danger'}`}>
+              {revenueStat.delta.positive ? '↗' : '↘'} {revenueStat.delta.text}
+            </div>
+          )}
         </Card>
       </div>
 
@@ -2375,11 +3059,18 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
 function SettingsView() {
   const practitioners = useClinic((s) => s.practitioners)
   const currentId = useClinic((s) => s.currentPractitionerId)
+  const role = useClinic((s) => s.role)
   const updatePractitioner = useClinic((s) => s.updatePractitioner)
+  const rejectPractitioner = useClinic((s) => s.rejectPractitioner)
+  const customCaseTemplates = useClinic((s) => s.caseTemplates)
+  const deleteCaseTemplate = useClinic((s) => s.deleteCaseTemplate)
   const me = practitioners.find((p) => p.id === currentId)
+  const pending = practitioners.filter((p) => p.status === 'pending')
+  const active = practitioners.filter((p) => p.status === 'active')
   const [clinicName, setClinicName] = useState('Sneham Digital Clinic')
   const [consultDuration, setConsultDuration] = useState('20')
   const [notifPrefs, setNotifPrefs] = useState({ newBooking: true, followUpDue: true, lowStock: false, patientCheckIn: true })
+  const [assignmentRules, setAssignmentRules] = useState({ autoAssignBookings: true, walkInsSharedQueue: true, outOfOfficeDelegation: false })
   const [editingProfile, setEditingProfile] = useState(false)
   const [profileForm, setProfileForm] = useState({
     name: me?.name ?? '',
@@ -2387,6 +3078,8 @@ function SettingsView() {
     qualifications: me?.qualifications || '',
     registrationNo: me?.registrationNo || '',
   })
+  const [addingRemedy, setAddingRemedy] = useState(false)
+  const [remedyQuery, setRemedyQuery] = useState('')
   const toast = useToast()
 
   if (!me) {
@@ -2406,6 +3099,25 @@ function SettingsView() {
     { key: 'lowStock' as const, label: 'Low stock warnings' },
     { key: 'patientCheckIn' as const, label: 'Patient check-in notifications' },
   ]
+
+  const toggleRule = (key: keyof typeof assignmentRules) =>
+    setAssignmentRules((r) => ({ ...r, [key]: !r[key] }))
+
+  const removeRemedy = (remedy: string) =>
+    updatePractitioner(currentId, { remedyList: me.remedyList.filter((r) => r !== remedy) })
+
+  const addRemedy = (remedy: string) => {
+    if (!me.remedyList.includes(remedy)) updatePractitioner(currentId, { remedyList: [...me.remedyList, remedy] })
+    setAddingRemedy(false)
+    setRemedyQuery('')
+  }
+
+  const removeRxTemplate = (id: string) =>
+    updatePractitioner(currentId, { rxTemplates: me.rxTemplates.filter((t) => t.id !== id) })
+
+  const remedyMatches = remedyQuery.trim()
+    ? MASTER_REMEDIES.filter((r) => !me.remedyList.includes(r) && r.toLowerCase().includes(remedyQuery.trim().toLowerCase())).slice(0, 6)
+    : []
 
   const saveProfile = () => {
     updatePractitioner(currentId, {
@@ -2499,6 +3211,94 @@ function SettingsView() {
       </Card>
 
       <div className="grid grid-cols-2 gap-4">
+        <Card className="p-5">
+          <div className="flex items-center justify-between">
+            <h2 className="font-display text-[15px] font-bold text-ink">My remedy list</h2>
+            <Badge tone="neutral">{me.remedyList.length} remedies</Badge>
+          </div>
+          <p className="mt-1 text-[12.5px] text-muted">The only source for prescription autocomplete. Yours to curate.</p>
+          <div className="relative mt-3 flex flex-wrap gap-2">
+            {me.remedyList.map((r) => (
+              <span key={r} className="flex items-center gap-1.5 rounded-pill border border-border bg-surface px-3 py-1.5 text-[13px] text-body">
+                {r}
+                <button onClick={() => removeRemedy(r)} className="text-faint hover:text-danger"><X size={11} weight="bold" /></button>
+              </span>
+            ))}
+            <div>
+              <button
+                onClick={() => setAddingRemedy((v) => !v)}
+                className="rounded-pill border border-dashed border-border-dash px-3 py-1.5 text-[13px] font-medium text-muted transition hover:border-green-border hover:text-brand"
+              >
+                + Add remedy
+              </button>
+              {addingRemedy && (
+                <div className="absolute z-20 mt-1.5 w-[220px] rounded-[12px] border border-border bg-surface p-2 shadow-modal">
+                  <input
+                    value={remedyQuery}
+                    onChange={(e) => setRemedyQuery(e.target.value)}
+                    placeholder="Search remedies..."
+                    autoFocus
+                    className="w-full rounded-[8px] border border-border bg-canvas px-2.5 py-1.5 text-[12.5px] text-body outline-none focus:border-green-border"
+                  />
+                  {remedyQuery.trim() && (
+                    <div className="mt-1 max-h-[180px] overflow-y-auto">
+                      {remedyMatches.map((r) => (
+                        <button key={r} onClick={() => addRemedy(r)} className="block w-full rounded-[6px] px-2 py-1.5 text-left text-[12.5px] text-body hover:bg-tint">{r}</button>
+                      ))}
+                      {remedyMatches.length === 0 && <div className="px-2 py-1.5 text-[12px] text-faint">No matches</div>}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </Card>
+
+        <Card className="p-5">
+          <h2 className="font-display text-[15px] font-bold text-ink">Templates</h2>
+          <p className="mt-1 text-[12.5px] text-muted">Case-taking and prescription templates you build and reuse.</p>
+          <div className="mt-3 space-y-1.5">
+            {CASE_TEMPLATES.map((t) => (
+              <div key={t.name} className="flex items-center justify-between rounded-[10px] px-2 py-1.5">
+                <div>
+                  <div className="text-[13px] font-medium text-body">{t.label}</div>
+                  <div className="text-[11.5px] text-faint">{t.sections.length} sections</div>
+                </div>
+                <Badge tone="neutral">Case</Badge>
+              </div>
+            ))}
+            {customCaseTemplates.map((t) => (
+              <div key={t.id} className="flex items-center justify-between rounded-[10px] px-2 py-1.5">
+                <div>
+                  <div className="text-[13px] font-medium text-body">{t.label}</div>
+                  <div className="text-[11.5px] text-faint">{t.sections.length} sections</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge tone="neutral">Case</Badge>
+                  <button onClick={() => deleteCaseTemplate(t.id)} className="text-faint hover:text-danger"><X size={13} weight="bold" /></button>
+                </div>
+              </div>
+            ))}
+            {me.rxTemplates.map((t) => (
+              <div key={t.id} className="flex items-center justify-between rounded-[10px] px-2 py-1.5">
+                <div>
+                  <div className="text-[13px] font-medium text-body">{t.label}</div>
+                  <div className="text-[11.5px] text-faint">{t.durationDays ? `${t.durationDays} days` : t.repetition} · {t.potency}</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge tone="amber">Rx</Badge>
+                  <button onClick={() => removeRxTemplate(t.id)} className="text-faint hover:text-danger"><X size={13} weight="bold" /></button>
+                </div>
+              </div>
+            ))}
+            {customCaseTemplates.length === 0 && me.rxTemplates.length === 0 && (
+              <p className="px-2 py-1 text-[12px] text-faint">Built-in case templates only — save a prescription as a template from Quick Rx to see it here.</p>
+            )}
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
         <Card className="space-y-5 p-5">
           <h2 className="font-display text-[15px] font-bold text-ink">Clinic details</h2>
           <div>
@@ -2545,10 +3345,35 @@ function SettingsView() {
         </Card>
       </div>
 
+      {role === 'Owner' && pending.length > 0 && (
+        <Card className="p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="font-display text-[15px] font-bold text-ink">Pending approval</h2>
+            <Badge tone="amber">{pending.length} waiting</Badge>
+          </div>
+          {/* Anyone who completes signup lands here first with zero patient-data
+              access (enforced by RLS, not just hidden UI) until approved — see
+              migration_v19_practitioner_approval_gate.sql. */}
+          <div className="space-y-2">
+            {pending.map((pr) => (
+              <div key={pr.id} className="flex items-center gap-3 rounded-[14px] border border-amber/30 bg-amber-tint/20 px-4 py-3">
+                <Avatar initials={pr.initials} size={38} />
+                <div className="flex-1">
+                  <div className="font-display text-[14px] font-semibold text-ink">{pr.name}</div>
+                  <div className="text-[12px] text-muted">{pr.specialty}{pr.qualifications && ` · ${pr.qualifications}`}</div>
+                </div>
+                <Button variant="ghost" size="sm" className="!text-danger" onClick={() => rejectPractitioner(pr.id)}>Reject</Button>
+                <Button variant="accent" size="sm" onClick={() => updatePractitioner(pr.id, { status: 'active' })}>Approve</Button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       <Card className="p-5">
         <h2 className="mb-3 font-display text-[15px] font-bold text-ink">Manage team</h2>
         <div className="space-y-2">
-          {practitioners.map((pr) => (
+          {active.map((pr) => (
             <div key={pr.id} className="flex items-center gap-3 rounded-[14px] border border-border bg-surface px-4 py-3">
               <Avatar initials={pr.initials} size={38} />
               <div className="flex-1">
@@ -2562,6 +3387,74 @@ function SettingsView() {
               <div className="text-[12px] text-faint">{pr.openCases} open cases</div>
             </div>
           ))}
+        </div>
+      </Card>
+
+      <Card className="p-5">
+        <h2 className="font-display text-[15px] font-bold text-ink">Staff & permissions</h2>
+        <p className="mt-1 text-[12.5px] text-muted">What each role can do today — the same gates the app itself enforces, not just a reference chart.</p>
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full text-left text-[13px]">
+            <thead>
+              <tr className="border-b border-border text-[11px] uppercase tracking-wider text-faint">
+                <th className="py-2 pr-4 font-semibold">Role</th>
+                <th className="px-3 py-2 font-semibold">See case notes</th>
+                <th className="px-3 py-2 font-semibold">Schedule & billing</th>
+                <th className="px-3 py-2 font-semibold">Assign cases</th>
+                <th className="px-3 py-2 font-semibold">Accept handoffs</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[
+                { role: 'Owner', caseNotes: true, schedule: true, assign: true, handoffs: true },
+                { role: 'Practitioner', caseNotes: true, schedule: true, assign: true, handoffs: true },
+                { role: 'Assistant', caseNotes: false, schedule: true, assign: false, handoffs: false },
+                { role: 'Receptionist', caseNotes: false, schedule: true, assign: false, handoffs: true },
+              ].map((r) => (
+                <tr key={r.role} className="border-b border-border last:border-0">
+                  <td className="py-2.5 pr-4 font-semibold text-ink">{r.role}</td>
+                  {[r.caseNotes, r.schedule, r.assign, r.handoffs].map((v, i) => (
+                    <td key={i} className="px-3 py-2.5">
+                      {v ? <Check size={16} weight="bold" className="text-success" /> : <X size={16} weight="bold" className="text-faint" />}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      <Card className="p-5">
+        <h2 className="font-display text-[15px] font-bold text-ink">Assignment rules</h2>
+        <div className="mt-3 space-y-3">
+          <button onClick={() => toggleRule('autoAssignBookings')} className="flex w-full items-start justify-between gap-4 text-left">
+            <div>
+              <div className="text-[13px] font-medium text-ink">Auto-assign new bookings</div>
+              <div className="text-[12px] text-muted">New appointments go to the practitioner the patient booked with.</div>
+            </div>
+            {assignmentRules.autoAssignBookings
+              ? <ToggleRight size={28} weight="fill" className="shrink-0 text-accent" />
+              : <ToggleLeft size={28} weight="fill" className="shrink-0 text-faint" />}
+          </button>
+          <button onClick={() => toggleRule('walkInsSharedQueue')} className="flex w-full items-start justify-between gap-4 text-left">
+            <div>
+              <div className="text-[13px] font-medium text-ink">Walk-ins to shared queue</div>
+              <div className="text-[12px] text-muted">Unassigned patients wait in a shared queue anyone can pick up.</div>
+            </div>
+            {assignmentRules.walkInsSharedQueue
+              ? <ToggleRight size={28} weight="fill" className="shrink-0 text-accent" />
+              : <ToggleLeft size={28} weight="fill" className="shrink-0 text-faint" />}
+          </button>
+          <button onClick={() => toggleRule('outOfOfficeDelegation')} className="flex w-full items-start justify-between gap-4 text-left">
+            <div>
+              <div className="text-[13px] font-medium text-ink">Out-of-office delegation</div>
+              <div className="text-[12px] text-muted">While you're away, follow-ups pass to your covering practitioner.</div>
+            </div>
+            {assignmentRules.outOfOfficeDelegation
+              ? <ToggleRight size={28} weight="fill" className="shrink-0 text-accent" />
+              : <ToggleLeft size={28} weight="fill" className="shrink-0 text-faint" />}
+          </button>
         </div>
       </Card>
 

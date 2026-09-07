@@ -3,7 +3,7 @@
 // Used by all three surfaces. Pills, chips, toggles, cards, frames.
 // ─────────────────────────────────────────────────────────────
 import { AnimatePresence, motion, type PanInfo } from 'framer-motion'
-import type { ReactNode } from 'react'
+import { useRef, type ReactNode } from 'react'
 import { Minus, Plus, UsersThree } from '@phosphor-icons/react'
 import { haptic } from './haptics'
 
@@ -73,7 +73,7 @@ export function Chip({
   return (
     <button
       onClick={onClick}
-      className={`rounded-pill px-3.5 py-1.5 text-[13px] font-body font-medium border transition active:scale-95 ${
+      className={`rounded-pill px-3.5 py-2 text-[13px] font-body font-medium border transition active:scale-95 ${
         selected
           ? 'bg-tint text-ink-deep border-green-border'
           : 'bg-surface text-muted border-border hover:bg-surface-hover'
@@ -127,13 +127,13 @@ export function Toggle({
       aria-checked={on}
       aria-label={label}
       onClick={() => onChange(!on)}
-      className={`relative h-[27px] w-[46px] rounded-pill transition ${
+      className={`relative h-[31px] w-[51px] rounded-pill transition ${
         on ? 'bg-accent' : 'bg-border-dash'
       }`}
     >
       <span
-        className={`absolute top-[3px] h-[21px] w-[21px] rounded-full bg-surface shadow-sm transition-all ${
-          on ? 'left-[22px]' : 'left-[3px]'
+        className={`absolute top-[3px] h-[25px] w-[25px] rounded-full bg-surface shadow-sm transition-all ${
+          on ? 'left-[23px]' : 'left-[3px]'
         }`}
       />
     </button>
@@ -197,7 +197,7 @@ export function Stepper({
     <div className="inline-flex items-center gap-2 rounded-pill border border-border bg-surface py-1.5 pl-2 pr-3">
       <button
         onClick={() => onChange(Math.max(min, value - 1))}
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-screen text-body active:scale-90 disabled:opacity-30"
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-screen text-body active:scale-90 disabled:opacity-30"
         disabled={value <= min}
         aria-label="decrease"
       >
@@ -217,7 +217,7 @@ export function Stepper({
       {suffix && <span className="shrink-0 font-display text-[13px] font-semibold text-muted">{suffix}</span>}
       <button
         onClick={() => onChange(Math.min(max, value + 1))}
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-screen text-body active:scale-90 disabled:opacity-30"
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-screen text-body active:scale-90 disabled:opacity-30"
         disabled={value >= max}
         aria-label="increase"
       >
@@ -324,11 +324,24 @@ export function BottomSheet({
   onClose: () => void
   children: ReactNode
 }) {
+  const sheetRef = useRef<HTMLDivElement>(null)
   const onDragEnd = (_: unknown, info: PanInfo) => {
     if (info.offset.y > 110 || info.velocity.y > 520) {
       haptic('impact')
       onClose()
     }
+  }
+  // Android WebView's native long-press paste popup gets corrupted into a
+  // blank box when anchored beneath any ancestor that has a CSS transform —
+  // and framer-motion leaves `transform: translateY(0px)` permanently
+  // applied the moment either an animated `y` or `drag="y"` is used, even
+  // once settled at rest. Clearing the inline transform once the sheet
+  // actually stops moving (mount slide-in, or the spring-back after a drag
+  // that didn't dismiss it) fixes that without touching drag itself — the
+  // next real drag re-asserts its own transform from framer-motion's own
+  // tracked value, not from this DOM string, so the gesture still works.
+  const clearRestingTransform = () => {
+    if (sheetRef.current) sheetRef.current.style.transform = 'none'
   }
   return (
     <AnimatePresence>
@@ -342,10 +355,12 @@ export function BottomSheet({
             onClick={onClose}
           />
           <motion.div
+            ref={sheetRef}
             initial={{ y: '100%' }}
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
             transition={{ type: 'spring', stiffness: 360, damping: 36 }}
+            onAnimationComplete={clearRestingTransform}
             drag="y"
             dragConstraints={{ top: 0, bottom: 0 }}
             dragElastic={{ top: 0, bottom: 0.6 }}

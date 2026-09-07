@@ -47,6 +47,7 @@ import { isOneOffRepetition } from '../core/types'
 import { MASTER_REMEDIES } from '../core/remedies'
 import { INVESTIGATION_CATALOG, ALL_INVESTIGATIONS, wordsOf, matchesAllWords } from '../core/investigations'
 import { Avatar, Badge, BottomSheet, Card, Chip, Label, Stepper } from '../design-system/ui'
+import { PendingApproval } from '../design-system/PendingApproval'
 import { Pressable } from '../design-system/Pressable'
 import { haptic } from '../design-system/haptics'
 import { spring, springSoft, tabVariants, pushVariants, listContainer, listItem } from '../design-system/motion'
@@ -142,6 +143,10 @@ export function PractitionerApp() {
         <button onClick={() => { const s = useClinic.getState(); if (s.userId) s.hydrate(s.userId, '') }} className="rounded-[12px] bg-brand px-6 py-2.5 text-[14px] font-semibold text-white">Retry</button>
       </div>
     )
+  }
+
+  if (doctor.status === 'pending') {
+    return <PendingApproval name={doctor.name} />
   }
 
   return (

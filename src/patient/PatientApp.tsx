@@ -44,6 +44,7 @@ import { PullToRefresh, useHorizontalSwipe, EdgeSwipeBack } from '../design-syst
 import { useToast } from '../design-system/toast'
 import { ChatThread } from '../components/ChatThread'
 import { exportPrescriptionPdf } from '../core/pdfExport'
+import { getDocumentUrl } from '../core/db'
 
 type Tab = 'home' | 'appointments' | 'prescriptions' | 'profile'
 const TAB_ORDER: Tab[] = ['home', 'appointments', 'prescriptions', 'profile']
@@ -1674,13 +1675,18 @@ function DocumentsScreen({ back, onRefresh, patientId }: { back: () => void; onR
                 as="div"
                 hap="tick"
                 scale={0.98}
-                onClick={() => {
+                onClick={async () => {
                   if (!doc.fileUrl) {
                     toast({ title: 'Not available', message: 'This document has no file attached.' })
                     return
                   }
-                  if (Capacitor.isNativePlatform()) Browser.open({ url: doc.fileUrl }).catch(() => {})
-                  else window.open(doc.fileUrl, '_blank', 'noopener,noreferrer')
+                  const url = await getDocumentUrl(doc.fileUrl)
+                  if (!url) {
+                    toast({ title: 'Could not open document', message: 'Check your connection and try again.' })
+                    return
+                  }
+                  if (Capacitor.isNativePlatform()) Browser.open({ url }).catch(() => {})
+                  else window.open(url, '_blank', 'noopener,noreferrer')
                 }}
                 className="flex cursor-pointer items-center gap-3 rounded-[20px] border border-border bg-surface px-4 py-3.5"
               >

@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { reportError } from '../core/errorMonitoring'
 
 // Every deploy renames every JS chunk (content-hashed filenames). A tab left
 // open across a deploy is still holding the old filenames, so the next
@@ -22,6 +23,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: E
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error('Unhandled render error:', error, info.componentStack)
+    reportError(error, info.componentStack)
     if (CHUNK_LOAD_ERROR.test(error.message) && !alreadyTriedReload()) {
       sessionStorage.setItem(RELOAD_GUARD_KEY, String(Date.now()))
       window.location.reload()

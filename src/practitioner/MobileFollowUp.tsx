@@ -57,7 +57,7 @@ export function MobileFollowUp({
   return (
     <div className="flex h-full flex-col bg-screen">
       <div className="px-[18px] pb-2 pt-[var(--app-top)]">
-        <button onClick={onBack} className="flex items-center gap-1 text-[13px] font-semibold text-brand">
+        <button onClick={onBack} className="-ml-2 -my-3 flex items-center gap-1 py-3 pl-2 pr-3 text-[13px] font-semibold text-brand">
           <CaretLeft size={15} weight="bold" /> Back
         </button>
         <div className="mt-1 flex items-center gap-2">

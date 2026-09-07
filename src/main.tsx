@@ -4,10 +4,13 @@ import { BrowserRouter } from 'react-router-dom'
 import { Capacitor } from '@capacitor/core'
 import { SplashScreen } from '@capacitor/splash-screen'
 import { ErrorBoundary } from './design-system/ErrorBoundary'
+import { initErrorMonitoring } from './core/errorMonitoring'
 import { AuthProvider } from './auth/AuthProvider'
 import { AuthGate } from './auth/AuthGate'
 import App from './App'
 import './index.css'
+
+initErrorMonitoring()
 
 if (Capacitor.isNativePlatform()) {
   SplashScreen.hide({ fadeOutDuration: 300 }).catch(() => {})

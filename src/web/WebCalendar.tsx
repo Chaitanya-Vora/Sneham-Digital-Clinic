@@ -48,13 +48,22 @@ function getMonthGrid(year: number, month: number): (Date | null)[][] {
   return rows
 }
 
+// Decimal hour — "9:30 AM" → 9.5 — so grid positioning can place a block
+// at its actual start time, not just round down to the top of the hour.
 function parseHour(time: string): number {
   const m = time.match(/(\d+):?(\d*)\s*(AM|PM)/i)
   if (!m) return 9
-  let h = parseInt(m[1])
-  if (m[3].toUpperCase() === 'PM' && h !== 12) h += 12
-  if (m[3].toUpperCase() === 'AM' && h === 12) h = 0
-  return h
+  let h = parseInt(m[1]) % 12
+  const min = m[2] ? parseInt(m[2]) : 0
+  if (m[3].toUpperCase() === 'PM') h += 12
+  return h + min / 60
+}
+
+function fmtHour(h: number): string {
+  if (h === 0) return '12 AM'
+  if (h < 12) return `${h} AM`
+  if (h === 12) return '12 PM'
+  return `${h - 12} PM`
 }
 
 function fmtDate(d: Date): string {
@@ -74,6 +83,7 @@ function apptsForDate(date: Date, allAppts: Appointment[]): Appointment[] {
 export function WebCalendar({ onOpenPatient }: { onOpenPatient: (id: string) => void }) {
   const seedAppts = useClinic((s) => s.appointments)
   const patients = useClinic((s) => s.patients)
+  const timeBlocks = useClinic((s) => s.timeBlocks)
   const toast = useToast()
 
   const [view, setView] = useState<CalView>('day')
@@ -145,7 +155,16 @@ export function WebCalendar({ onOpenPatient }: { onOpenPatient: (id: string) => 
           transition={{ duration: 0.2, ease: easeCalm }}
         >
           {view === 'day' && <DayView appts={dayAppts} patients={patients} onOpen={onOpenPatient} />}
-          {view === 'week' && <WeekView dates={weekDates} selectedDate={selectedDate} onSelectDay={(d) => { setSelectedDate(d); setView('day') }} allAppts={seedAppts} patients={patients} />}
+          {view === 'week' && (
+            <WeekView
+              dates={weekDates}
+              allAppts={seedAppts}
+              timeBlocks={timeBlocks}
+              patients={patients}
+              onSelectDay={(d) => { setSelectedDate(d); setView('day') }}
+              onOpenPatient={onOpenPatient}
+            />
+          )}
           {view === 'month' && <MonthView grid={monthGrid} selectedDate={selectedDate} onSelectDay={(d) => { setSelectedDate(d); setView('day') }} allAppts={seedAppts} patients={patients} />}
         </motion.div>
       </AnimatePresence>
@@ -163,7 +182,7 @@ function DayView({ appts, patients, onOpen }: { appts: Appointment[]; patients: 
       <div className="relative">
         {HOURS.map((h) => {
           const label = h < 12 ? `${h} AM` : h === 12 ? '12 PM' : `${h - 12} PM`
-          const hourAppts = appts.filter((a) => parseHour(a.time) === h)
+          const hourAppts = appts.filter((a) => Math.floor(parseHour(a.time)) === h)
           return (
             <div key={h} className="flex min-h-[64px] border-b border-border last:border-b-0">
               <div className="flex w-[72px] shrink-0 items-start justify-end border-r border-border px-2.5 pt-2 text-[11px] text-faint">
@@ -202,51 +221,98 @@ function DayView({ appts, patients, onOpen }: { appts: Appointment[]; patients: 
 }
 
 // ── WEEK VIEW ──
-function WeekView({ dates, selectedDate, onSelectDay, allAppts, patients }: {
+const WEEK_HOUR_HEIGHT = 52
+
+function WeekView({ dates, allAppts, timeBlocks, patients, onSelectDay, onOpenPatient }: {
   dates: Date[]
-  selectedDate: Date
-  onSelectDay: (d: Date) => void
   allAppts: Appointment[]
+  timeBlocks: { id: string; practitionerId: string; date: string; startHour: number; durationMin: number; reason: string }[]
   patients: { id: string; name: string; initials: string }[]
+  onSelectDay: (d: Date) => void
+  onOpenPatient: (id: string) => void
 }) {
+  const isoDates = dates.map((d) => toISO(d))
+  const weekBlocks = timeBlocks.filter((b) => isoDates.includes(b.date))
+
   return (
     <Card className="overflow-hidden p-0">
-      <div className="grid grid-cols-7 border-b border-border">
+      {weekBlocks.length > 0 && (
+        <div className="flex items-center gap-2 border-b border-border bg-raised px-3.5 py-2 text-[12px] text-muted">
+          <Clock size={13} className="shrink-0 text-faint" />
+          <span className="truncate">
+            {weekBlocks.map((b, i) => (
+              <span key={b.id}>
+                {i > 0 && ' · '}
+                {fmtDate(new Date(b.date + 'T00:00:00')).split(',')[0].slice(0, 3)} {fmtHour(b.startHour)} blocked for {b.reason}
+              </span>
+            ))}
+          </span>
+        </div>
+      )}
+
+      {/* day header */}
+      <div className="grid grid-cols-[52px_repeat(7,1fr)] border-b border-border">
+        <div />
         {dates.map((d) => {
           const today = isToday(d)
-          const appts = apptsForDate(d, allAppts)
           return (
             <button
               key={d.toDateString()}
               onClick={() => onSelectDay(d)}
-              className="border-r border-border p-2 text-left transition last:border-r-0 hover:bg-surface-hover"
+              className="flex flex-col items-center gap-0.5 border-l border-border py-2 transition hover:bg-surface-hover"
             >
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-medium text-faint">{DAYS[d.getDay() === 0 ? 6 : d.getDay() - 1]}</span>
-                <span className={`flex h-6 w-6 items-center justify-center rounded-full text-[12px] font-bold ${today ? 'bg-brand text-screen' : 'text-ink'}`}>
-                  {d.getDate()}
-                </span>
-              </div>
-              <div className="mt-2 space-y-1">
-                {appts.slice(0, 4).map((a) => {
-                  const p = patients.find((pt) => pt.id === a.patientId)
-                  return (
-                    <div key={a.id} className="flex items-center gap-1 rounded-[6px] bg-tint-pale px-1.5 py-0.5">
-                      <span className="text-[10px] font-semibold text-brand">{a.time.replace(' AM', 'a').replace(' PM', 'p')}</span>
-                      <span className="truncate text-[10px] text-body">{p?.name ?? 'Patient'}</span>
-                    </div>
-                  )
-                })}
-                {appts.length > 4 && (
-                  <div className="text-[10px] text-faint">+{appts.length - 4} more</div>
-                )}
-                {appts.length === 0 && (
-                  <div className="py-3 text-center text-[10px] text-faint">—</div>
-                )}
-              </div>
+              <span className="text-[10.5px] font-medium text-faint">{DAYS[d.getDay() === 0 ? 6 : d.getDay() - 1]}</span>
+              <span className={`flex h-6 w-6 items-center justify-center rounded-full text-[12px] font-bold ${today ? 'bg-brand text-screen' : 'text-ink'}`}>
+                {d.getDate()}
+              </span>
             </button>
           )
         })}
+      </div>
+
+      {/* hourly grid */}
+      <div className="relative">
+        {HOURS.map((h) => (
+          <div key={h} className="grid grid-cols-[52px_repeat(7,1fr)] border-b border-border last:border-b-0" style={{ minHeight: WEEK_HOUR_HEIGHT }}>
+            <div className="flex items-start justify-end border-r border-border px-2 pt-1 text-[10px] text-faint">{fmtHour(h)}</div>
+            {dates.map((d) => {
+              const iso = toISO(d)
+              const dayAppts = apptsForDate(d, allAppts).filter((a) => Math.floor(parseHour(a.time)) === h)
+              const dayBlocks = weekBlocks.filter((b) => b.date === iso && b.startHour === h)
+              return (
+                <div key={d.toDateString() + h} className="relative border-l border-border">
+                  {dayBlocks.map((b) => (
+                    <div
+                      key={b.id}
+                      className="absolute inset-x-0.5 z-[5] flex items-center justify-center overflow-hidden rounded-[6px] border border-dashed border-border-dash bg-raised/60 px-1 text-[9px] font-medium text-faint"
+                      style={{ top: 1, height: Math.max((b.durationMin / 60) * WEEK_HOUR_HEIGHT - 2, WEEK_HOUR_HEIGHT - 2) }}
+                    >
+                      {b.reason}
+                    </div>
+                  ))}
+                  {dayAppts.map((a) => {
+                    const p = patients.find((pt) => pt.id === a.patientId)
+                    const start = parseHour(a.time)
+                    const topOffset = (start - h) * WEEK_HOUR_HEIGHT
+                    const blockHeight = Math.max((a.durationMin / 60) * WEEK_HOUR_HEIGHT, 22)
+                    const isVideo = a.type === 'Video'
+                    return (
+                      <button
+                        key={a.id}
+                        onClick={() => onOpenPatient(a.patientId)}
+                        className={`absolute inset-x-0.5 z-10 overflow-hidden rounded-[6px] px-1.5 py-0.5 text-left transition hover:brightness-95 ${isVideo ? 'bg-amber-tint text-amber-text' : 'bg-tint text-brand'}`}
+                        style={{ top: topOffset, height: blockHeight }}
+                      >
+                        <div className="truncate text-[10px] font-semibold">{isVideo ? 'Video' : 'Consult'}</div>
+                        {blockHeight > 32 && <div className="truncate text-[9.5px] opacity-80">{p?.name ?? 'Patient'}</div>}
+                      </button>
+                    )
+                  })}
+                </div>
+              )
+            })}
+          </div>
+        ))}
       </div>
     </Card>
   )

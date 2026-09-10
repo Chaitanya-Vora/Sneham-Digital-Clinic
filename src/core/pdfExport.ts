@@ -255,7 +255,7 @@ const rxDateFormat = (iso: string) =>
 
 export async function exportPrescriptionPdf(rx: Prescription, patient: Patient) {
   const { pdfDoc, page, height, font } = await loadLetterheadTemplate()
-  const dateStr = rxDateFormat(rx.publishedAt)
+  const dateStr = rxDateFormat(rx.publishedAt ?? rx.createdAt)
   drawPatientInfoFields(page, font, height, patient, dateStr, patient.chiefComplaint || '—')
 
   // The prescription body — exactly what the doctor typed, verbatim, at the

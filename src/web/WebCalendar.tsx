@@ -1,21 +1,22 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   CaretLeft,
   CaretRight,
-  CalendarBlank,
   Clock,
   VideoCamera,
   Plus,
-  Play,
-  Stop,
+  PencilSimple,
+  X,
 } from '@phosphor-icons/react'
 import { toISO } from '../core/day'
 import { useClinic } from '../core/store'
 import type { Appointment } from '../core/types'
-import { Avatar, Badge, Card, Label } from '../design-system/ui'
+import { Avatar, Badge, Card, Chip } from '../design-system/ui'
+import { Pressable } from '../design-system/Pressable'
 import { easeCalm } from '../design-system/motion'
 import { useToast } from '../design-system/toast'
+import { AppointmentModal, type AppointmentModalRequest } from './AppointmentModal'
 
 type CalView = 'day' | 'week' | 'month'
 
@@ -80,21 +81,40 @@ function apptsForDate(date: Date, allAppts: Appointment[]): Appointment[] {
   return allAppts.filter((a) => a.date === iso)
 }
 
-export function WebCalendar({ onOpenPatient }: { onOpenPatient: (id: string) => void }) {
-  const seedAppts = useClinic((s) => s.appointments)
+export function WebCalendar({ onOpenPatient, focusPractitionerId }: { onOpenPatient: (id: string) => void; focusPractitionerId?: string | null }) {
+  // Cancelled appointments stay in the database (see TodayView's own
+  // comment on the same convention) — just excluded from the Calendar too,
+  // to match Today/Follow-ups instead of showing "ghost" slots that look
+  // occupied but aren't.
+  const seedAppts = useClinic((s) => s.appointments.filter((a) => a.status !== 'Cancelled'))
   const patients = useClinic((s) => s.patients)
+  const practitioners = useClinic((s) => s.practitioners)
   const timeBlocks = useClinic((s) => s.timeBlocks)
   const toast = useToast()
 
   const [view, setView] = useState<CalView>('day')
   const [selectedDate, setSelectedDate] = useState(new Date())
+  const [practitionerFilter, setPractitionerFilter] = useState<string | null>(null)
+  const [modalRequest, setModalRequest] = useState<AppointmentModalRequest | null>(null)
+
+  // A click from Today's "Your team today" card can ask the Calendar to
+  // land pre-filtered to one specific person — sync once per navigation,
+  // not on every render (the pill stays user-changeable afterward).
+  useEffect(() => {
+    if (focusPractitionerId) setPractitionerFilter(focusPractitionerId)
+  }, [focusPractitionerId])
+
+  const scopedAppts = useMemo(
+    () => (practitionerFilter ? seedAppts.filter((a) => a.practitionerId === practitionerFilter) : seedAppts),
+    [seedAppts, practitionerFilter],
+  )
 
   const weekDates = useMemo(() => getWeekDates(selectedDate), [selectedDate.toDateString()])
   const monthGrid = useMemo(() => getMonthGrid(selectedDate.getFullYear(), selectedDate.getMonth()), [selectedDate.getFullYear(), selectedDate.getMonth()])
 
   const dayAppts = useMemo(
-    () => apptsForDate(selectedDate, seedAppts),
-    [selectedDate.toDateString(), seedAppts],
+    () => apptsForDate(selectedDate, scopedAppts),
+    [selectedDate.toDateString(), scopedAppts],
   )
 
   function shift(delta: number) {
@@ -118,12 +138,18 @@ export function WebCalendar({ onOpenPatient }: { onOpenPatient: (id: string) => 
   return (
     <div className="space-y-4">
       {/* header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="font-display text-[22px] font-bold text-ink">Calendar</div>
           <div className="text-[13px] text-muted">{headerLabel}</div>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setModalRequest({ mode: 'add', date: toISO(selectedDate) })}
+            className="flex items-center gap-1.5 rounded-pill border border-green-border bg-tint px-3 py-1.5 text-[12px] font-semibold text-brand transition hover:bg-accent hover:text-white"
+          >
+            <Plus size={14} weight="bold" /> Add appointment
+          </button>
           <button onClick={goToday} className="rounded-[10px] border border-border bg-surface px-3 py-1.5 text-[12px] font-semibold text-brand transition hover:bg-surface-hover">
             Today
           </button>
@@ -145,6 +171,18 @@ export function WebCalendar({ onOpenPatient }: { onOpenPatient: (id: string) => 
         </div>
       </div>
 
+      {/* whose calendar */}
+      {practitioners.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          <Chip selected={practitionerFilter === null} onClick={() => setPractitionerFilter(null)}>Everyone</Chip>
+          {practitioners.map((p) => (
+            <Chip key={p.id} selected={practitionerFilter === p.id} onClick={() => setPractitionerFilter(p.id)}>
+              {p.name}
+            </Chip>
+          ))}
+        </div>
+      )}
+
       {/* views */}
       <AnimatePresence mode="wait">
         <motion.div
@@ -154,49 +192,83 @@ export function WebCalendar({ onOpenPatient }: { onOpenPatient: (id: string) => 
           exit={{ opacity: 0, y: -4 }}
           transition={{ duration: 0.2, ease: easeCalm }}
         >
-          {view === 'day' && <DayView appts={dayAppts} patients={patients} onOpen={onOpenPatient} />}
+          {view === 'day' && (
+            <DayView
+              appts={dayAppts}
+              patients={patients}
+              onOpen={onOpenPatient}
+              onEdit={(a) => setModalRequest({ mode: 'edit', appointment: a })}
+              onCancel={(a) => {
+                if (!window.confirm(`Cancel this appointment at ${a.time}?`)) return
+                useClinic.getState().updateAppointmentStatus(a.id, 'Cancelled')
+                toast({ title: 'Appointment cancelled', message: `${a.time} slot is now free.` })
+              }}
+              onAddSlot={(hour) => setModalRequest({ mode: 'add', date: toISO(selectedDate), hour })}
+            />
+          )}
           {view === 'week' && (
             <WeekView
               dates={weekDates}
-              allAppts={seedAppts}
+              allAppts={scopedAppts}
               timeBlocks={timeBlocks}
               patients={patients}
               onSelectDay={(d) => { setSelectedDate(d); setView('day') }}
               onOpenPatient={onOpenPatient}
+              onAddSlot={(d, hour) => setModalRequest({ mode: 'add', date: toISO(d), hour })}
             />
           )}
-          {view === 'month' && <MonthView grid={monthGrid} selectedDate={selectedDate} onSelectDay={(d) => { setSelectedDate(d); setView('day') }} allAppts={seedAppts} patients={patients} />}
+          {view === 'month' && <MonthView grid={monthGrid} selectedDate={selectedDate} onSelectDay={(d) => { setSelectedDate(d); setView('day') }} allAppts={scopedAppts} patients={patients} />}
         </motion.div>
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {modalRequest && <AppointmentModal request={modalRequest} onClose={() => setModalRequest(null)} />}
       </AnimatePresence>
     </div>
   )
 }
 
 // ── DAY VIEW ──
-function DayView({ appts, patients, onOpen }: { appts: Appointment[]; patients: { id: string; name: string; initials: string }[]; onOpen: (id: string) => void }) {
+function DayView({ appts, patients, onOpen, onEdit, onCancel, onAddSlot }: {
+  appts: Appointment[]
+  patients: { id: string; name: string; initials: string }[]
+  onOpen: (id: string) => void
+  onEdit: (a: Appointment) => void
+  onCancel: (a: Appointment) => void
+  onAddSlot: (hour: number) => void
+}) {
   const pFind = (id: string) => patients.find((p) => p.id === id)
   const statusTone = (s: Appointment['status']) => s === 'In consult' ? 'green' : s === 'New' || s === 'Waiting' ? 'amber' : 'neutral'
+  const canModify = (a: Appointment) => a.status !== 'Seen' && a.status !== 'In consult' && a.status !== 'Cancelled'
 
   return (
     <Card className="overflow-hidden p-0">
       <div className="relative">
         {HOURS.map((h) => {
-          const label = h < 12 ? `${h} AM` : h === 12 ? '12 PM' : `${h - 12} PM`
           const hourAppts = appts.filter((a) => Math.floor(parseHour(a.time)) === h)
           return (
             <div key={h} className="flex min-h-[64px] border-b border-border last:border-b-0">
               <div className="flex w-[72px] shrink-0 items-start justify-end border-r border-border px-2.5 pt-2 text-[11px] text-faint">
                 {h < 12 ? `${h} AM` : h === 12 ? '12 PM' : `${h - 12} PM`}
               </div>
-              <div className="flex-1 px-2 py-1">
+              <div
+                className="group/slot relative flex-1 px-2 py-1"
+                onClick={hourAppts.length === 0 ? () => onAddSlot(h) : undefined}
+              >
+                {hourAppts.length === 0 && (
+                  <div className="flex h-full min-h-[48px] cursor-pointer items-center px-1 text-[11.5px] text-faint opacity-0 transition group-hover/slot:opacity-100">
+                    <Plus size={12} className="mr-1" /> Add appointment
+                  </div>
+                )}
                 {hourAppts.map((a) => {
                   const p = pFind(a.patientId)
                   if (!p) return null
                   return (
-                    <button
+                    <Pressable
+                      as="div"
                       key={a.id}
                       onClick={() => onOpen(a.patientId)}
-                      className="group mb-1 flex w-full items-center gap-3 rounded-[12px] border border-border bg-surface px-3 py-2 text-left transition hover:border-green-border hover:shadow-card"
+                      className="group mb-1 flex w-full cursor-pointer items-center gap-3 rounded-[12px] border border-border bg-surface px-3 py-2 text-left transition hover:border-green-border hover:shadow-card"
                     >
                       <Avatar initials={p.initials} size={32} />
                       <div className="min-w-0 flex-1">
@@ -207,8 +279,26 @@ function DayView({ appts, patients, onOpen }: { appts: Appointment[]; patients: 
                           {a.reason && <> · {a.reason}</>}
                         </div>
                       </div>
+                      {canModify(a) && (
+                        <div className="flex items-center gap-0.5 opacity-0 transition group-hover:opacity-100">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onEdit(a) }}
+                            className="rounded-full p-1.5 text-faint transition hover:bg-tint hover:text-brand"
+                            title="Edit appointment"
+                          >
+                            <PencilSimple size={14} />
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onCancel(a) }}
+                            className="rounded-full p-1.5 text-faint transition hover:bg-danger/10 hover:text-danger"
+                            title="Cancel appointment"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      )}
                       <Badge tone={statusTone(a.status)}>{a.status}</Badge>
-                    </button>
+                    </Pressable>
                   )
                 })}
               </div>
@@ -223,13 +313,14 @@ function DayView({ appts, patients, onOpen }: { appts: Appointment[]; patients: 
 // ── WEEK VIEW ──
 const WEEK_HOUR_HEIGHT = 52
 
-function WeekView({ dates, allAppts, timeBlocks, patients, onSelectDay, onOpenPatient }: {
+function WeekView({ dates, allAppts, timeBlocks, patients, onSelectDay, onOpenPatient, onAddSlot }: {
   dates: Date[]
   allAppts: Appointment[]
   timeBlocks: { id: string; practitionerId: string; date: string; startHour: number; durationMin: number; reason: string }[]
   patients: { id: string; name: string; initials: string }[]
   onSelectDay: (d: Date) => void
   onOpenPatient: (id: string) => void
+  onAddSlot: (d: Date, hour: number) => void
 }) {
   const isoDates = dates.map((d) => toISO(d))
   const weekBlocks = timeBlocks.filter((b) => isoDates.includes(b.date))
@@ -279,8 +370,16 @@ function WeekView({ dates, allAppts, timeBlocks, patients, onSelectDay, onOpenPa
               const iso = toISO(d)
               const dayAppts = apptsForDate(d, allAppts).filter((a) => Math.floor(parseHour(a.time)) === h)
               const dayBlocks = weekBlocks.filter((b) => b.date === iso && b.startHour === h)
+              const isEmpty = dayAppts.length === 0 && dayBlocks.length === 0
               return (
-                <div key={d.toDateString() + h} className="relative border-l border-border">
+                <div
+                  key={d.toDateString() + h}
+                  className={`group/cell relative border-l border-border ${isEmpty ? 'cursor-pointer' : ''}`}
+                  onClick={isEmpty ? () => onAddSlot(d, h) : undefined}
+                >
+                  {isEmpty && (
+                    <Plus size={11} className="absolute left-1 top-1 text-faint opacity-0 transition group-hover/cell:opacity-100" />
+                  )}
                   {dayBlocks.map((b) => (
                     <div
                       key={b.id}

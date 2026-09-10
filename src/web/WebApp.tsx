@@ -73,6 +73,7 @@ import { CaseSheet } from './CaseSheet'
 import { FollowUp } from './FollowUp'
 import { CommandPalette, type Command } from './CommandPalette'
 import { WebCalendar } from './WebCalendar'
+import { AppointmentModal, type AppointmentModalRequest } from './AppointmentModal'
 import { VideoConsult } from '../video/VideoConsult'
 import { exportPrescriptionPdf, exportInvoicePdf, exportInvestigationOrderPdf } from '../core/pdfExport'
 
@@ -104,6 +105,7 @@ export function WebApp() {
   const [newPatientOpen, setNewPatientOpen] = useState(false)
   const [videoApptId, setVideoApptId] = useState<string | null>(null)
   const [messagesPatientId, setMessagesPatientId] = useState<string | null>(null)
+  const [calendarFocusPractitionerId, setCalendarFocusPractitionerId] = useState<string | null>(null)
   const clinicRef = useRef<HTMLDivElement>(null)
 
   const doctor = useClinic((s) => s.practitioners.find((p) => p.id === s.currentPractitionerId))
@@ -167,6 +169,7 @@ export function WebApp() {
   const openPrescription = (id: string) => { setPatientId(id); setScreen('prescription') }
   const openFollowUp = (id: string) => { setPatientId(id); setScreen('followup') }
   const openMessages = (id: string) => { setMessagesPatientId(id); setScreen('messages') }
+  const openCalendarForPractitioner = (practitionerId: string) => { setCalendarFocusPractitionerId(practitionerId); setScreen('calendar') }
 
   const commands: Command[] = [
     { id: 'go-today', label: 'Today', group: 'Go to', icon: SunHorizon, run: () => setScreen('today') },
@@ -331,8 +334,8 @@ export function WebApp() {
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.24, ease: easeCalm }}
             >
-              {screen === 'today' && <TodayView onOpenPatient={openPatient} onStartVideo={setVideoApptId} />}
-              {screen === 'calendar' && <WebCalendar onOpenPatient={openPatient} />}
+              {screen === 'today' && <TodayView onOpenPatient={openPatient} onStartVideo={setVideoApptId} onOpenCalendarForPractitioner={openCalendarForPractitioner} />}
+              {screen === 'calendar' && <WebCalendar onOpenPatient={openPatient} focusPractitionerId={calendarFocusPractitionerId} />}
               {screen === 'patients' && <PatientsView onOpenPatient={openPatient} onNewPatient={() => setNewPatientOpen(true)} />}
               {screen === 'messages' && <MessagesView initialPatientId={messagesPatientId} onOpenPatient={openPatient} />}
               {screen === 'patient' && (
@@ -391,7 +394,7 @@ export function WebApp() {
 }
 
 // ── TODAY ──
-function TodayView({ onOpenPatient, onStartVideo }: { onOpenPatient: (id: string) => void; onStartVideo: (apptId: string) => void }) {
+function TodayView({ onOpenPatient, onStartVideo, onOpenCalendarForPractitioner }: { onOpenPatient: (id: string) => void; onStartVideo: (apptId: string) => void; onOpenCalendarForPractitioner: (practitionerId: string) => void }) {
   // Cancelled appointments stay in the database (never deleted — an
   // accidental walk-in can now be cancelled instead of being permanently
   // stuck with no way to edit or remove it), just excluded from every
@@ -556,7 +559,7 @@ function TodayView({ onOpenPatient, onStartVideo }: { onOpenPatient: (id: string
         </motion.div>
       </Card>
 
-      {role === 'Owner' && team.length > 0 && (
+      {role === 'Owner' && viewMode === 'everyone' && team.length > 0 && (
         <Card className="p-5">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="font-display text-[16px] font-bold text-ink">Your team today</h2>
@@ -567,11 +570,15 @@ function TodayView({ onOpenPatient, onStartVideo }: { onOpenPatient: (id: string
               const rows = teamToday.filter((a) => a.practitionerId === p.id)
               return (
                 <div key={p.id}>
-                  <div className="mb-1.5 flex items-center gap-2">
+                  <button
+                    onClick={() => onOpenCalendarForPractitioner(p.id)}
+                    className="mb-1.5 flex items-center gap-2 rounded-[8px] transition hover:text-brand"
+                    title={`View ${p.name}'s calendar`}
+                  >
                     <Avatar initials={p.initials} size={22} />
                     <span className="text-[13px] font-semibold text-ink">{p.name}</span>
                     <span className="text-[12px] text-faint">{rows.length} today</span>
-                  </div>
+                  </button>
                   {rows.length === 0 ? (
                     <p className="pl-8 text-[12.5px] text-faint">Nothing scheduled today.</p>
                   ) : (
@@ -1114,7 +1121,15 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
                 onClick={(e) => {
                   e.stopPropagation()
                   const rect = e.currentTarget.getBoundingClientRect()
-                  setMenuPos({ top: rect.bottom + 4, left: rect.right - 200 })
+                  // Flip the menu upward when there isn't room below — a
+                  // row near the bottom of the list would otherwise open a
+                  // menu that renders past the bottom of the window with
+                  // no way to scroll it into view (it's position: fixed).
+                  const estimatedHeight = 40 + practitioners.length * 44
+                  const opensUpward = rect.bottom + 4 + estimatedHeight > window.innerHeight
+                  setMenuPos(opensUpward
+                    ? { top: rect.top - estimatedHeight - 4, left: rect.right - 200 }
+                    : { top: rect.bottom + 4, left: rect.right - 200 })
                   setMenuFor(menuFor === p.id ? null : p.id)
                 }}
                 className="flex h-7 w-7 items-center justify-center rounded-full text-faint transition hover:bg-tint hover:text-brand"
@@ -1338,10 +1353,13 @@ function CaseNotesOverview({ onOpenCaseSheet }: { onOpenCaseSheet: (id: string) 
 function FollowUpsOverview({ onOpenFollowUp }: { onOpenFollowUp: (id: string) => void }) {
   const appts = useClinic((s) => s.appointments)
   const patients = useClinic((s) => s.patients)
+  const toast = useToast()
+  const [modalRequest, setModalRequest] = useState<AppointmentModalRequest | null>(null)
   const followUps = appts
     .filter((a) => a.reason?.toLowerCase().includes('follow') && a.status !== 'Seen' && a.status !== 'Cancelled')
     .sort((a, b) => a.date.localeCompare(b.date))
   const today = todayISO()
+  const canModify = (a: Appointment) => a.status !== 'Seen' && a.status !== 'In consult' && a.status !== 'Cancelled'
 
   return (
     <div className="space-y-4">
@@ -1361,23 +1379,51 @@ function FollowUpsOverview({ onOpenFollowUp }: { onOpenFollowUp: (id: string) =>
             const pt = patients.find((p) => p.id === a.patientId)
             const overdue = a.date < today
             return (
-              <button
+              <Pressable
+                as="div"
                 key={a.id}
                 onClick={() => onOpenFollowUp(a.patientId)}
-                className="flex w-full items-center gap-4 border-b border-border px-5 py-3.5 text-left transition last:border-0 hover:bg-surface-hover"
+                className="flex w-full cursor-pointer items-center gap-4 border-b border-border px-5 py-3.5 text-left transition last:border-0 hover:bg-surface-hover"
               >
                 <Avatar initials={pt?.initials ?? '?'} size={36} />
                 <div className="min-w-0 flex-1">
-                  <div className="font-display text-[14px] font-semibold text-ink">{pt?.name ?? 'Patient'}</div>
-                  <div className="text-[12px] text-muted">{pt?.currentRemedy ?? '—'}</div>
+                  <div className="truncate font-display text-[14px] font-semibold text-ink">{pt?.name ?? 'Patient'}</div>
+                  <div className="truncate text-[12px] text-muted">{pt?.currentRemedy ?? '—'}</div>
                 </div>
-                <div className="text-[13px] text-body">{formatDayLabel(a.date)} · {a.time}</div>
-                <Badge tone={overdue ? 'amber' : 'neutral'}>{overdue ? 'Overdue' : 'Upcoming'}</Badge>
-              </button>
+                <div className="shrink-0 whitespace-nowrap text-[13px] text-body">{formatDayLabel(a.date)} · {a.time}</div>
+                <div className="shrink-0"><Badge tone={overdue ? 'amber' : 'neutral'}>{overdue ? 'Overdue' : 'Upcoming'}</Badge></div>
+                {canModify(a) && (
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setModalRequest({ mode: 'edit', appointment: a }) }}
+                      className="rounded-full p-1.5 text-faint transition hover:bg-tint hover:text-brand"
+                      title="Edit appointment"
+                    >
+                      <PencilSimple size={15} />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        if (!window.confirm(`Cancel ${pt?.name ?? 'this'}'s ${formatDayLabel(a.date)} follow-up?`)) return
+                        useClinic.getState().updateAppointmentStatus(a.id, 'Cancelled')
+                        toast({ title: 'Follow-up cancelled', message: `${pt?.name ?? 'Patient'}'s follow-up has been cancelled.` })
+                      }}
+                      className="rounded-full p-1.5 text-faint transition hover:bg-danger/10 hover:text-danger"
+                      title="Cancel follow-up"
+                    >
+                      <X size={15} />
+                    </button>
+                  </div>
+                )}
+              </Pressable>
             )
           })
         )}
       </Card>
+
+      <AnimatePresence>
+        {modalRequest && <AppointmentModal request={modalRequest} onClose={() => setModalRequest(null)} />}
+      </AnimatePresence>
     </div>
   )
 }

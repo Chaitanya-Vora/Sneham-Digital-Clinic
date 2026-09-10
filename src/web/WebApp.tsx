@@ -60,7 +60,7 @@ import { DEFAULT_CONSULT_FEE, invoiceTotal, invoiceBalance } from '../core/billi
 import { toCsv, downloadCsv } from '../core/csvExport'
 import { STANDARD_MEDICINE_INSTRUCTIONS } from '../core/rxInstructions'
 import { shareViaWhatsApp, shareViaSms, shareViaEmail } from '../core/share'
-import { uploadDocument, getDocumentUrl } from '../core/db'
+import { uploadDocument, getDocumentUrl, fetchPatientDeletionImpact } from '../core/db'
 import { Avatar, Badge, Button, Card, Chip, Label, Stepper, PatientNotFound } from '../design-system/ui'
 import { PendingApproval } from '../design-system/PendingApproval'
 import { Pressable } from '../design-system/Pressable'
@@ -930,7 +930,11 @@ function WalkInButton() {
 
 // ── PATIENTS ──
 function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: string) => void; onNewPatient: () => void }) {
-  const patients = useClinic((s) => s.patients)
+  const allPatients = useClinic((s) => s.patients)
+  const archivePatient = useClinic((s) => s.archivePatient)
+  const restorePatient = useClinic((s) => s.restorePatient)
+  const patients = useMemo(() => allPatients.filter((p) => !p.archivedAt), [allPatients])
+  const archivedPatients = useMemo(() => allPatients.filter((p) => p.archivedAt), [allPatients])
   const practitioners = useClinic((s) => s.practitioners)
   const assignPatient = useClinic((s) => s.assignPatient)
   const role = useClinic((s) => s.role)
@@ -970,6 +974,7 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
     ['Assigned by me', assignedOut] as const,
     ['Unassigned', unassignedCount] as const,
     ['Overdue follow-ups', followUpDue] as const,
+    ['Archived', archivedPatients.length] as const,
   ]
 
   const tabPredicate = (p: Patient): boolean => {
@@ -985,7 +990,8 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
   const toggleFilter = (label: string) =>
     setActiveFilters((fs) => fs.includes(label) ? fs.filter((f) => f !== label) : [...fs, label])
 
-  const filtered = patients.filter((p) => {
+  const filtered = (active === 'Archived' ? archivedPatients : patients).filter((p) => {
+    if (active === 'Archived') return true
     if (!tabPredicate(p)) return false
     if (activeFilters.length === 0) return true
     return activeFilters.every((label) => {
@@ -1149,22 +1155,50 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
           style={{ position: 'fixed', top: menuPos.top, left: menuPos.left, zIndex: 200 }}
           className="w-[200px] overflow-hidden rounded-[12px] border border-border bg-surface shadow-modal"
         >
-          <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-faint">Reassign to</div>
-          {practitioners.map((pr) => (
+          {active === 'Archived' ? (
             <button
-              key={pr.id}
               onClick={() => {
-                const p = patients.find((x) => x.id === menuFor)
-                assignPatient(menuFor, pr.id)
+                const p = allPatients.find((x) => x.id === menuFor)
+                restorePatient(menuFor)
                 setMenuFor(null)
-                toast({ title: 'Patient reassigned', message: `${p?.name ?? 'Patient'} is now assigned to ${pr.name}.` })
+                toast({ title: 'Patient restored', message: `${p?.name ?? 'Patient'} is back in the active roster.` })
               }}
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-body transition hover:bg-surface-hover"
+              className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-[13px] font-semibold text-brand transition hover:bg-surface-hover"
             >
-              <Avatar initials={pr.initials} size={22} />
-              {pr.name}
+              Restore patient
             </button>
-          ))}
+          ) : (
+            <>
+              <button
+                onClick={() => {
+                  const p = allPatients.find((x) => x.id === menuFor)
+                  if (!window.confirm(`Archive ${p?.name ?? 'this patient'}? They'll be hidden from your active roster but nothing is deleted.`)) return
+                  archivePatient(menuFor)
+                  setMenuFor(null)
+                  toast({ title: 'Patient archived', message: `${p?.name ?? 'Patient'} is hidden from your active roster. Restore any time from the Archived tab.` })
+                }}
+                className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-[13px] font-semibold text-body transition hover:bg-surface-hover"
+              >
+                Archive patient
+              </button>
+              <div className="border-t border-border px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-faint">Reassign to</div>
+              {practitioners.map((pr) => (
+                <button
+                  key={pr.id}
+                  onClick={() => {
+                    const p = allPatients.find((x) => x.id === menuFor)
+                    assignPatient(menuFor, pr.id)
+                    setMenuFor(null)
+                    toast({ title: 'Patient reassigned', message: `${p?.name ?? 'Patient'} is now assigned to ${pr.name}.` })
+                  }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-body transition hover:bg-surface-hover"
+                >
+                  <Avatar initials={pr.initials} size={22} />
+                  {pr.name}
+                </button>
+              ))}
+            </>
+          )}
         </div>,
         document.body,
       )}
@@ -1176,7 +1210,7 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-[380px] rounded-[20px] border border-border bg-surface p-6 shadow-modal"
+            className="max-h-[90vh] w-[380px] overflow-y-auto rounded-[20px] border border-border bg-surface p-6 shadow-modal"
           >
             <div className="mb-4 flex items-center justify-between">
               <h2 className="font-display text-[17px] font-bold text-ink">Assign {selected.size} patients</h2>
@@ -1722,6 +1756,22 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
   const [opinionTo, setOpinionTo] = useState<string | null>(null)
   const [opinionQuestion, setOpinionQuestion] = useState('')
   const [opinionReplyDraft, setOpinionReplyDraft] = useState<Record<string, string>>({})
+  const [patientMenuOpen, setPatientMenuOpen] = useState(false)
+  const [editPatientOpen, setEditPatientOpen] = useState(false)
+  const [deletePatientOpen, setDeletePatientOpen] = useState(false)
+  const archivePatient = useClinic((s) => s.archivePatient)
+  const restorePatient = useClinic((s) => s.restorePatient)
+  const patientMenuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!patientMenuOpen) return
+    const onClick = (e: MouseEvent) => {
+      if (patientMenuRef.current?.contains(e.target as Node)) return
+      setPatientMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [patientMenuOpen])
 
   useEffect(() => {
     if (!assignOpen) return
@@ -1832,7 +1882,65 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
         <Button variant="ghost" size="sm" onClick={onCaseSheet}><Notebook size={15} /> Open case sheet</Button>
         <Button variant="ghost" size="sm" onClick={onOrderInvestigations}><TestTube size={15} /> Order investigations</Button>
         <Button variant="primary" size="sm" onClick={onPrescribe}><RxIcon size={15} weight="fill" /> Write prescription</Button>
+        <div ref={patientMenuRef} className="relative">
+          <button
+            onClick={() => setPatientMenuOpen((v) => !v)}
+            className="flex h-8 w-8 items-center justify-center rounded-full text-faint transition hover:bg-tint hover:text-brand"
+          >
+            <DotsThreeVertical size={18} weight="bold" />
+          </button>
+          {patientMenuOpen && (
+            <div className="absolute right-0 top-9 z-[100] w-[220px] overflow-hidden rounded-[12px] border border-border bg-surface shadow-modal">
+              <button
+                onClick={() => { setEditPatientOpen(true); setPatientMenuOpen(false) }}
+                className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-[13px] text-body transition hover:bg-surface-hover"
+              >
+                <PencilSimple size={15} /> Edit patient details
+              </button>
+              {(role !== 'Assistant' && role !== 'Receptionist') && (
+                patient.archivedAt ? (
+                  <button
+                    onClick={() => {
+                      restorePatient(patient.id)
+                      setPatientMenuOpen(false)
+                      toast({ title: 'Patient restored', message: `${patient.name} is back in the active roster.` })
+                    }}
+                    className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-[13px] font-semibold text-brand transition hover:bg-surface-hover"
+                  >
+                    Restore patient
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => {
+                      if (!window.confirm(`Archive ${patient.name}? They'll be hidden from your active roster but nothing is deleted.`)) return
+                      archivePatient(patient.id)
+                      setPatientMenuOpen(false)
+                      toast({ title: 'Patient archived', message: `${patient.name} is hidden from your active roster. Restore any time from the Archived tab.` })
+                    }}
+                    className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-[13px] text-body transition hover:bg-surface-hover"
+                  >
+                    Archive patient
+                  </button>
+                )
+              )}
+              {role === 'Owner' && (
+                <>
+                  <div className="border-t border-border" />
+                  <button
+                    onClick={() => { setDeletePatientOpen(true); setPatientMenuOpen(false) }}
+                    className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-[13px] font-semibold text-danger transition hover:bg-danger/10"
+                  >
+                    <X size={15} /> Permanently delete patient…
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
       </Card>
+
+      {editPatientOpen && <EditPatientModal patient={patient} onClose={() => setEditPatientOpen(false)} />}
+      {deletePatientOpen && <PermanentDeleteModal patient={patient} onClose={() => setDeletePatientOpen(false)} onDeleted={onBack} />}
 
       {assignOpen && createPortal(
         <div
@@ -3646,7 +3754,7 @@ function NewPatientModal({ onClose }: { onClose: () => void }) {
         exit={{ opacity: 0, scale: 0.97, y: 8 }}
         transition={{ type: 'spring', stiffness: 400, damping: 32 }}
         onClick={(e) => e.stopPropagation()}
-        className="w-[440px] rounded-[20px] border border-border bg-surface p-6 shadow-modal"
+        className="max-h-[90vh] w-[440px] overflow-y-auto rounded-[20px] border border-border bg-surface p-6 shadow-modal"
       >
         <div className="mb-5 flex items-center justify-between">
           <h2 className="font-display text-[17px] font-bold text-ink">New patient</h2>
@@ -3678,6 +3786,207 @@ function NewPatientModal({ onClose }: { onClose: () => void }) {
           <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
           <Button variant="primary" size="sm" onClick={onSubmit} className={!form.name.trim() || !form.chiefComplaint.trim() ? 'opacity-50' : ''}>
             <Plus size={15} weight="bold" /> Add patient
+          </Button>
+        </div>
+      </motion.div>
+    </motion.div>
+  )
+}
+
+// ── EDIT PATIENT MODAL ──
+function EditPatientModal({ patient, onClose }: { patient: Patient; onClose: () => void }) {
+  const updatePatientDetails = useClinic((s) => s.updatePatientDetails)
+  const toast = useToast()
+  const [form, setForm] = useState({
+    name: patient.name,
+    age: String(patient.age),
+    sex: patient.sex,
+    phone: patient.phone ?? '',
+    chiefComplaint: patient.chiefComplaint,
+    location: patient.location,
+    allergies: patient.allergies,
+    regularMedication: patient.regularMedication,
+  })
+  const set = (key: string, value: string) => setForm((f) => ({ ...f, [key]: value }))
+
+  const onSubmit = () => {
+    if (!form.name.trim() || !form.chiefComplaint.trim()) return
+    updatePatientDetails(patient.id, {
+      name: form.name.trim(),
+      age: parseInt(form.age) || 0,
+      sex: form.sex,
+      location: form.location.trim(),
+      phone: form.phone.trim(),
+      chiefComplaint: form.chiefComplaint.trim(),
+      allergies: form.allergies.trim(),
+      regularMedication: form.regularMedication.trim(),
+    })
+    toast({ title: 'Patient details updated', message: `${form.name.trim()}'s record has been saved.` })
+    onClose()
+  }
+
+  const fields = [
+    { key: 'name', label: 'Full name', placeholder: 'e.g. Priya Sharma', required: true },
+    { key: 'age', label: 'Age', placeholder: 'e.g. 34', type: 'number' },
+    { key: 'phone', label: 'Phone', placeholder: '+91 98765 43210' },
+    { key: 'chiefComplaint', label: 'Chief complaint', placeholder: 'e.g. Chronic migraine', required: true },
+    { key: 'location', label: 'Location', placeholder: 'e.g. Andheri West' },
+    { key: 'allergies', label: 'Allergies', placeholder: 'e.g. Dust, penicillin — or "No allergies"' },
+    { key: 'regularMedication', label: 'Regular medication', placeholder: 'e.g. None' },
+  ]
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.96, y: 12 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.97, y: 8 }}
+        transition={{ type: 'spring', stiffness: 400, damping: 32 }}
+        onClick={(e) => e.stopPropagation()}
+        className="max-h-[90vh] w-[440px] overflow-y-auto rounded-[20px] border border-border bg-surface p-6 shadow-modal"
+      >
+        <div className="mb-5 flex items-center justify-between">
+          <h2 className="font-display text-[17px] font-bold text-ink">Edit patient details</h2>
+          <button onClick={onClose} className="text-faint hover:text-body"><X size={18} weight="bold" /></button>
+        </div>
+        <div className="space-y-4">
+          {fields.map((f) => (
+            <div key={f.key}>
+              <Label>{f.label}{f.required ? ' *' : ''}</Label>
+              <input
+                type={f.type ?? 'text'}
+                value={(form as any)[f.key]}
+                onChange={(e) => set(f.key, e.target.value)}
+                placeholder={f.placeholder}
+                className="mt-1.5 w-full rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-[13px] text-body outline-none placeholder:text-faint focus:border-green-border"
+              />
+            </div>
+          ))}
+          <div>
+            <Label>Gender</Label>
+            <div className="mt-1.5 flex gap-2">
+              {(['Female', 'Male', 'Other'] as const).map((s) => (
+                <Chip key={s} selected={form.sex === s} onClick={() => set('sex', s)}>{s}</Chip>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="mt-6 flex justify-end gap-2">
+          <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" size="sm" onClick={onSubmit} className={!form.name.trim() || !form.chiefComplaint.trim() ? 'opacity-50' : ''}>
+            Save changes
+          </Button>
+        </div>
+      </motion.div>
+    </motion.div>
+  )
+}
+
+// ── PERMANENT DELETE MODAL ──
+// Deliberately not a window.confirm() — this is the single most
+// destructive action in the app (irreversible, cascades across every
+// dependent record), so it gets a real confirmation flow: live counts of
+// what will be destroyed, and a typed-name match before the button even
+// enables. See CLAUDE.md's own design principle — warnings are reserved
+// for exactly this kind of irreversible error.
+function PermanentDeleteModal({ patient, onClose, onDeleted }: { patient: Patient; onClose: () => void; onDeleted: () => void }) {
+  const permanentlyDeletePatient = useClinic((s) => s.permanentlyDeletePatient)
+  const toast = useToast()
+  const [impact, setImpact] = useState<Record<string, number> | null>(null)
+  const [confirmText, setConfirmText] = useState('')
+  const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetchPatientDeletionImpact(patient.id).then((r) => { if (!cancelled) setImpact(r) })
+    return () => { cancelled = true }
+  }, [patient.id])
+
+  const impactLabels: Record<string, string> = {
+    appointments: 'appointments', prescriptions: 'prescriptions', invoices: 'invoices',
+    investigation_orders: 'investigation orders', case_visits: 'case visits', documents: 'documents',
+    check_ins: 'check-ins', handoffs: 'handoffs', second_opinions: 'second opinions',
+    outcomes: 'outcomes', messages: 'messages',
+  }
+  const nonZero = impact ? Object.entries(impact).filter(([, n]) => n > 0) : []
+  const canConfirm = confirmText.trim() === patient.name && !deleting
+
+  const onConfirm = async () => {
+    setDeleting(true)
+    setError(null)
+    const result = await permanentlyDeletePatient(patient.id)
+    setDeleting(false)
+    if (result.ok) {
+      toast({ title: 'Patient permanently deleted', message: `${patient.name}'s record and all linked data have been removed.` })
+      onDeleted()
+    } else {
+      setError(result.error ?? 'The delete failed — nothing was removed. Please try again.')
+    }
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.96, y: 12 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.97, y: 8 }}
+        transition={{ type: 'spring', stiffness: 400, damping: 32 }}
+        onClick={(e) => e.stopPropagation()}
+        className="max-h-[90vh] w-[460px] overflow-y-auto rounded-[20px] border border-danger/30 bg-surface p-6 shadow-modal"
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="font-display text-[17px] font-bold text-danger">Permanently delete patient</h2>
+          <button onClick={onClose} className="text-faint hover:text-body"><X size={18} weight="bold" /></button>
+        </div>
+
+        <p className="text-[13px] text-body">
+          This permanently deletes <strong>{patient.name}</strong>'s record. This cannot be undone.
+        </p>
+
+        {impact === null ? (
+          <p className="mt-3 text-[12.5px] text-faint">Checking what's linked to this patient…</p>
+        ) : nonZero.length > 0 ? (
+          <div className="mt-3 rounded-[12px] bg-danger/5 px-3.5 py-3">
+            <div className="text-[12px] font-semibold text-danger">This will also delete:</div>
+            <ul className="mt-1.5 space-y-0.5 text-[12.5px] text-body">
+              {nonZero.map(([key, n]) => (
+                <li key={key}>{n} {impactLabels[key] ?? key}</li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <p className="mt-3 text-[12.5px] text-faint">No linked records found.</p>
+        )}
+
+        <div className="mt-4">
+          <Label>Type "{patient.name}" to confirm</Label>
+          <input
+            value={confirmText}
+            onChange={(e) => setConfirmText(e.target.value)}
+            placeholder={patient.name}
+            className="mt-1.5 w-full rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-[13px] text-body outline-none placeholder:text-faint focus:border-danger"
+          />
+        </div>
+
+        {error && <p className="mt-3 text-[12.5px] font-medium text-danger">{error}</p>}
+
+        <div className="mt-6 flex justify-end gap-2">
+          <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+          <Button variant="danger" size="sm" onClick={onConfirm} disabled={!canConfirm}>
+            {deleting ? 'Deleting…' : 'Permanently delete'}
           </Button>
         </div>
       </motion.div>

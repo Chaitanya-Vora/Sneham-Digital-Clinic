@@ -117,6 +117,7 @@ export const patients: Patient[] = [
     allergies: 'No allergies',
     regularMedication: 'No regular medication',
     lastOutcome: 'Partial',
+    archivedAt: null,
   },
   {
     id: 'pt-kabir',
@@ -134,6 +135,7 @@ export const patients: Patient[] = [
     assignment: 'Unassigned',
     allergies: 'No allergies',
     regularMedication: 'None',
+    archivedAt: null,
   },
   {
     id: 'pt-tara',
@@ -151,6 +153,7 @@ export const patients: Patient[] = [
     assignment: 'Covering',
     allergies: 'No allergies',
     regularMedication: 'None',
+    archivedAt: null,
   },
   {
     id: 'pt-rohit',
@@ -168,6 +171,7 @@ export const patients: Patient[] = [
     assignment: 'Assigned to me',
     allergies: 'Dust',
     regularMedication: 'None',
+    archivedAt: null,
   },
   {
     id: 'pt-meera',
@@ -185,6 +189,7 @@ export const patients: Patient[] = [
     assignment: 'Mine',
     allergies: 'No allergies',
     regularMedication: 'None',
+    archivedAt: null,
   },
   {
     id: 'pt-devan',
@@ -202,6 +207,7 @@ export const patients: Patient[] = [
     assignment: 'Assigned out',
     allergies: 'No allergies',
     regularMedication: 'Antacids (occasional)',
+    archivedAt: null,
   },
 ]
 

@@ -109,6 +109,9 @@ export interface Patient {
   allergies: string
   regularMedication: string
   lastOutcome?: string
+  // Soft-delete: an archived patient is hidden from active rosters/pickers
+  // but never destroyed — mirrors Invoice.cancelledAt. null = active.
+  archivedAt: string | null
 }
 
 export type PaymentStatus = 'unpaid' | 'paid' | 'waived'

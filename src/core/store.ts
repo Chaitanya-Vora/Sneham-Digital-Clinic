@@ -39,6 +39,7 @@ import {
   insertPatient,
   updatePatient,
   linkPatientAuthUser,
+  permanentlyDeletePatientDb,
   insertAppointment,
   updateAppointmentDb,
   insertPrescription,
@@ -192,6 +193,10 @@ interface ClinicState {
   createHandoff: (input: { patientId: string; fromId: string; toId: string; coveringUntil: string; note: Handoff['note'] }) => void
   addPatient: (input: { name: string; age: number; sex: Patient['sex']; location: string; chiefComplaint: string; phone: string }) => Patient
   linkPatientIdentity: (patientId: string, userId: string) => void
+  updatePatientDetails: (id: string, patch: Partial<Pick<Patient, 'name' | 'age' | 'sex' | 'location' | 'phone' | 'chiefComplaint' | 'allergies' | 'regularMedication'>>) => void
+  archivePatient: (id: string) => void
+  restorePatient: (id: string) => void
+  permanentlyDeletePatient: (id: string) => Promise<{ ok: boolean; error?: string }>
   startConsult: (appointmentId: string) => void
   endConsult: (appointmentId: string) => void
   markNoShow: (appointmentId: string) => void
@@ -871,10 +876,66 @@ export const useClinic = create<ClinicState>()(
           assignment: 'Mine',
           allergies: '',
           regularMedication: '',
+          archivedAt: null,
         }
         set((s) => ({ patients: [patient, ...s.patients] }))
         writeThrough(insertPatient(patient), 'Patient may not have saved — check your connection.')
         return patient
+      },
+
+      updatePatientDetails: (id, patch) => {
+        set((s) => ({
+          patients: s.patients.map((p) => {
+            if (p.id !== id) return p
+            const next = { ...p, ...patch }
+            if (patch.name !== undefined) {
+              next.initials = patch.name.split(' ').map((w) => w[0]).join('').toUpperCase().slice(0, 2)
+            }
+            return next
+          }),
+        }))
+        const dbPatch: Partial<Patient> = { ...patch }
+        if (patch.name !== undefined) {
+          dbPatch.initials = patch.name.split(' ').map((w) => w[0]).join('').toUpperCase().slice(0, 2)
+        }
+        writeThrough(updatePatient(id, dbPatch), 'Patient details may not have saved.')
+      },
+
+      archivePatient: (id) => {
+        const archivedAt = new Date().toISOString()
+        set((s) => ({ patients: s.patients.map((p) => (p.id === id ? { ...p, archivedAt } : p)) }))
+        writeThrough(updatePatient(id, { archivedAt }), 'Archiving may not have saved.')
+      },
+
+      restorePatient: (id) => {
+        set((s) => ({ patients: s.patients.map((p) => (p.id === id ? { ...p, archivedAt: null } : p)) }))
+        writeThrough(updatePatient(id, { archivedAt: null }), 'Restoring may not have saved.')
+      },
+
+      // Deliberately NOT optimistic, unlike every other action in this
+      // file — this is a genuinely irreversible whole-record deletion. The
+      // caller must await the result and only remove the patient from view
+      // after confirmed success.
+      permanentlyDeletePatient: async (id) => {
+        const result = await permanentlyDeletePatientDb(id)
+        if (result.ok) {
+          set((s) => ({
+            patients: s.patients.filter((p) => p.id !== id),
+            appointments: s.appointments.filter((a) => a.patientId !== id),
+            prescriptions: s.prescriptions.filter((r) => r.patientId !== id),
+            invoices: s.invoices.filter((i) => i.patientId !== id),
+            investigationOrders: s.investigationOrders.filter((o) => o.patientId !== id),
+            caseVisits: s.caseVisits.filter((v) => v.patientId !== id),
+            documents: s.documents.filter((d) => d.patientId !== id),
+            checkIns: s.checkIns.filter((c) => c.patientId !== id),
+            handoffs: s.handoffs.filter((h) => h.patientId !== id),
+            secondOpinions: s.secondOpinions.filter((o) => o.patientId !== id),
+            outcomes: s.outcomes.filter((o) => o.patientId !== id),
+            messages: s.messages.filter((m) => m.patientId !== id),
+            doseReminders: s.doseReminders.filter((d) => d.patientId !== id),
+          }))
+        }
+        return result
       },
 
       linkPatientIdentity: (patientId, userId) => {

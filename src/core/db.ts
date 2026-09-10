@@ -193,6 +193,7 @@ function toAppPatient(r: any): Patient {
     allergies: r.allergies,
     regularMedication: r.regular_medication,
     lastOutcome: r.last_outcome ?? undefined,
+    archivedAt: r.archived_at ?? null,
   }
 }
 
@@ -215,6 +216,7 @@ function toDbPatient(p: Patient) {
     allergies: p.allergies,
     regular_medication: p.regularMedication,
     last_outcome: p.lastOutcome ?? null,
+    archived_at: p.archivedAt,
   }
 }
 
@@ -251,10 +253,43 @@ export async function updatePatient(id: string, patch: Partial<Patient>): Promis
   if (patch.regularMedication !== undefined) db.regular_medication = patch.regularMedication
   if (patch.lastOutcome !== undefined) db.last_outcome = patch.lastOutcome
   if (patch.owningPractitionerId !== undefined) db.owning_practitioner_id = patch.owningPractitionerId
+  if (patch.phone !== undefined) db.phone = patch.phone
+  if (patch.age !== undefined) db.age = patch.age
+  if (patch.sex !== undefined) db.sex = patch.sex
+  if (patch.location !== undefined) db.location = patch.location
+  if (patch.archivedAt !== undefined) db.archived_at = patch.archivedAt
   if (Object.keys(db).length === 0) return true
   const { error } = await supabase.from('patients').update(db).eq('id', id)
   if (error) { console.error('updatePatient:', error.message); return false }
   return true
+}
+
+// Live, per-table counts for the permanent-delete confirmation UI — plain
+// SELECT count queries, no RPC needed since the caller already has read
+// access to every one of these via their existing "read accessible X"
+// policies.
+const DELETION_IMPACT_TABLES = [
+  'appointments', 'prescriptions', 'invoices', 'investigation_orders',
+  'case_visits', 'documents', 'check_ins', 'handoffs', 'second_opinions', 'outcomes', 'messages',
+] as const
+
+export async function fetchPatientDeletionImpact(patientId: string): Promise<Record<string, number>> {
+  const counts = await Promise.all(
+    DELETION_IMPACT_TABLES.map((t) => supabase.from(t).select('id', { count: 'exact', head: true }).eq('patient_id', patientId)),
+  )
+  return Object.fromEntries(DELETION_IMPACT_TABLES.map((t, i) => [t, counts[i].count ?? 0]))
+}
+
+// Runs server-side as a single atomic operation (see
+// supabase/migration_v24_patient_permanent_delete.sql) — deletes the
+// patient and every dependent row in one transaction, gated to the clinic
+// owner. Unlike every other write in this file, the caller MUST await this
+// and only update local state on success — see cancelPrescription-style
+// optimistic updates are NOT safe here, this is genuinely irreversible.
+export async function permanentlyDeletePatientDb(patientId: string): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase.rpc('permanently_delete_patient', { target_patient_id: patientId })
+  if (error) { console.error('permanentlyDeletePatientDb:', error.message); return { ok: false, error: error.message } }
+  return { ok: true }
 }
 
 

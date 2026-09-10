@@ -360,7 +360,11 @@ function toAppPrescription(r: any): Prescription {
     durationDays: r.duration_days,
     preparation: r.preparation,
     bodyText: r.body_text ?? undefined,
-    publishedAt: r.published_at,
+    status: r.status,
+    publishedAt: r.published_at ?? undefined,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+    cancelledAt: r.cancelled_at ?? undefined,
     sharedVia: r.shared_via ?? [],
     remindersEnabled: r.reminders_enabled,
     reminderTimes: r.reminder_times ?? [],
@@ -379,7 +383,11 @@ function toDbPrescription(p: Prescription) {
     duration_days: p.durationDays,
     preparation: p.preparation,
     body_text: p.bodyText ?? null,
-    published_at: p.publishedAt,
+    status: p.status,
+    published_at: p.publishedAt ?? null,
+    created_at: p.createdAt,
+    updated_at: p.updatedAt,
+    cancelled_at: p.cancelledAt ?? null,
     shared_via: p.sharedVia,
     reminders_enabled: p.remindersEnabled,
     reminder_times: p.reminderTimes,
@@ -387,7 +395,11 @@ function toDbPrescription(p: Prescription) {
 }
 
 export async function fetchPrescriptions(): Promise<Prescription[]> {
-  const { data, error } = await supabase.from('prescriptions').select('*').order('published_at', { ascending: false })
+  // Ordered by created_at, not published_at — once published_at can be
+  // null (a draft), Postgres's default NULLS FIRST for DESC would sort
+  // every draft to the very top of the initial hydrate. created_at is
+  // always populated (backfilled for every pre-existing row too).
+  const { data, error } = await supabase.from('prescriptions').select('*').order('created_at', { ascending: false })
   if (error) { console.error('fetchPrescriptions:', error.message); _hydrateErrors++; return [] }
   return (data ?? []).map(toAppPrescription)
 }
@@ -401,6 +413,14 @@ export async function insertPrescription(p: Prescription): Promise<boolean> {
 export async function updatePrescriptionDb(id: string, patch: Record<string, unknown>): Promise<boolean> {
   const { error } = await supabase.from('prescriptions').update(patch).eq('id', id)
   if (error) { console.error('updatePrescription:', error.message); return false }
+  return true
+}
+
+// A cancelled prescription's dose reminders must stop nagging the patient
+// — they never expire on their own (durationDays is display-only).
+export async function deleteDoseRemindersForPrescription(prescriptionId: string): Promise<boolean> {
+  const { error } = await supabase.from('dose_reminders').delete().eq('prescription_id', prescriptionId)
+  if (error) { console.error('deleteDoseRemindersForPrescription:', error.message); return false }
   return true
 }
 

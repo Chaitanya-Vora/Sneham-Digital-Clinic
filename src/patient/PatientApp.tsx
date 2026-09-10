@@ -96,7 +96,9 @@ export function PatientApp() {
 
   const patient = useMyPatient()
   const ME = patient?.id ?? ''
-  const prescriptions = useClinic((s) => s.prescriptions.filter((r) => r.patientId === ME))
+  // Only published prescriptions — a draft or cancelled one must be
+  // invisible here, not merely unlabelled (see selPublishedPrescriptionsFor).
+  const prescriptions = useClinic((s) => s.prescriptions.filter((r) => r.patientId === ME && r.status === 'published'))
   const doses = useClinic((s) => s.doseReminders.filter((d) => d.patientId === ME))
   const notifs = useClinic((s) => s.notifications.filter((n) => n.surface === 'patient'))
   const toggleDose = useClinic((s) => s.toggleDoseLogged)
@@ -1340,7 +1342,9 @@ function DataPrivacyScreen({ back, onRefresh }: { back: () => void; onRefresh: (
   const { signOut } = useAuth()
   const resetDemo = useClinic((s) => s.resetDemo)
   const patient = useMyPatient()
-  const prescriptions = useClinic((s) => s.prescriptions.filter((r) => r.patientId === patient?.id))
+  // Only published prescriptions — a draft or cancelled one must not leak
+  // into the patient's own "download my data" export either.
+  const prescriptions = useClinic((s) => s.prescriptions.filter((r) => r.patientId === patient?.id && r.status === 'published'))
   const appointments = useClinic((s) => s.appointments.filter((a) => a.patientId === patient?.id))
   const doses = useClinic((s) => s.doseReminders.filter((d) => d.patientId === patient?.id))
   const messages = useClinic((s) => s.messages.filter((m) => m.patientId === patient?.id))
@@ -1461,7 +1465,10 @@ function CheckInScreen({ back, onRefresh, patientId }: { back: () => void; onRef
     const myId = s.patients.find((p) => p.id === patientId)?.owningPractitionerId
     return s.practitioners.find((p) => p.id === myId)?.name ?? s.practitioners[0]?.name ?? 'your doctor'
   })
-  const prescriptions = useClinic((s) => s.prescriptions.filter((r) => r.patientId === patientId))
+  // Only published prescriptions — a draft the patient was never told
+  // about must not become `prescriptions[0]` here and silently drive
+  // which prescription this check-in attaches to.
+  const prescriptions = useClinic((s) => s.prescriptions.filter((r) => r.patientId === patientId && r.status === 'published'))
   const existingCheckIns = useClinic((s) => s.checkIns.filter((c) => c.patientId === patientId))
   const submitCheckIn = useClinic((s) => s.submitCheckIn)
   const rx = prescriptions[0]

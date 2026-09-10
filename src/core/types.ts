@@ -177,7 +177,18 @@ export interface Prescription {
   // this existed. The structured fields still drive dose reminders and
   // reporting regardless of what's actually printed.
   bodyText?: string
-  publishedAt: string // ISO
+  // A prescription is never hard-deleted — a mistaken one is cancelled
+  // instead (status: 'cancelled'), same reasoning as Invoice: history
+  // stays intact for the doctor even though it disappears from the
+  // patient's own app. A draft exists (attached to the patient's file,
+  // editable, re-openable) but hasn't been published yet — publishedAt
+  // stays unset until the moment it actually is, and once set, is never
+  // cleared again even if later cancelled.
+  status: 'draft' | 'published' | 'cancelled'
+  publishedAt?: string // ISO — set once, the moment status becomes 'published'
+  createdAt: string // ISO — always set, at row creation (draft or immediate-publish)
+  updatedAt: string // ISO — bumped on every save/publish/cancel transition
+  cancelledAt?: string // ISO — set once, the moment status becomes 'cancelled'
   sharedVia: string[] // WhatsApp / SMS / Email / Patient app
   remindersEnabled: boolean
   reminderTimes: string[] // ["8:00 AM", "8:00 PM"]

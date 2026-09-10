@@ -44,6 +44,7 @@ import {
   updateAppointmentDb,
   insertPrescription,
   updatePrescriptionDb,
+  deleteDoseRemindersForPrescription,
   insertInvestigationOrder,
   insertSecondOpinion,
   answerSecondOpinionDb,
@@ -88,6 +89,7 @@ export type PendingWrite =
   | { id: string; kind: 'caseData'; patientId: string; queuedAt: string }
   | { id: string; kind: 'prescription'; rx: Prescription; queuedAt: string }
   | { id: string; kind: 'invoice'; invoiceId: string; patch: Record<string, unknown>; queuedAt: string }
+  | { id: string; kind: 'prescriptionPatch'; prescriptionId: string; patch: Record<string, unknown>; queuedAt: string }
 
 export interface PublishRxInput {
   patientId: string
@@ -170,6 +172,10 @@ interface ClinicState {
   setOffline: (v: boolean) => void
   retryPendingWrites: () => Promise<void>
   publishPrescription: (input: PublishRxInput) => Prescription
+  saveDraftPrescription: (input: PublishRxInput) => Prescription
+  updateDraftPrescription: (id: string, input: PublishRxInput) => void
+  publishDraftPrescription: (id: string, input: PublishRxInput) => Prescription | null
+  cancelPrescription: (id: string) => void
   createInvestigationOrder: (input: CreateInvestigationOrderInput) => InvestigationOrder
   requestSecondOpinion: (input: RequestSecondOpinionInput) => SecondOpinion
   answerSecondOpinion: (id: string, response: string) => void
@@ -392,6 +398,9 @@ export const useClinic = create<ClinicState>()(
           } else if (w.kind === 'prescription') {
             const ok = await insertPrescription(w.rx)
             if (ok) set((s) => ({ pendingWrites: s.pendingWrites.filter((p) => p.id !== w.id) }))
+          } else if (w.kind === 'prescriptionPatch') {
+            const ok = await updatePrescriptionDb(w.prescriptionId, w.patch)
+            if (ok) set((s) => ({ pendingWrites: s.pendingWrites.filter((p) => p.id !== w.id) }))
           } else {
             const ok = await updateInvoiceDb(w.invoiceId, w.patch)
             if (ok) set((s) => ({ pendingWrites: s.pendingWrites.filter((p) => p.id !== w.id) }))
@@ -413,7 +422,10 @@ export const useClinic = create<ClinicState>()(
           durationDays: input.durationDays,
           preparation: input.preparation,
           bodyText: input.bodyText,
+          status: 'published',
           publishedAt,
+          createdAt: publishedAt,
+          updatedAt: publishedAt,
           sharedVia: input.sharedVia,
           remindersEnabled: input.remindersEnabled,
           reminderTimes: input.reminderTimes,
@@ -468,6 +480,156 @@ export const useClinic = create<ClinicState>()(
         writeThrough(insertNotification(notif, resolveNotificationOwner(get().patients, get().practitioners, { patientId: input.patientId })), 'The patient may not have been notified of this prescription.')
 
         return rx
+      },
+
+      saveDraftPrescription: (input) => {
+        const rxId = newId()
+        const now = new Date().toISOString()
+        const rx: Prescription = {
+          id: rxId,
+          patientId: input.patientId,
+          practitionerId: input.practitionerId,
+          remedy: input.remedy,
+          potency: input.potency,
+          doseGlobules: input.doseGlobules,
+          repetition: input.repetition,
+          durationDays: input.durationDays,
+          preparation: input.preparation,
+          bodyText: input.bodyText,
+          status: 'draft',
+          createdAt: now,
+          updatedAt: now,
+          sharedVia: input.sharedVia,
+          remindersEnabled: input.remindersEnabled,
+          reminderTimes: input.reminderTimes,
+        }
+        // Deliberately no dose reminders, no patient notification, no
+        // currentRemedy update — a draft must stay completely invisible to
+        // the patient until actually published.
+        set((s) => ({ prescriptions: [rx, ...s.prescriptions] }))
+        if (get().offline) {
+          set((s) => ({ pendingWrites: [...s.pendingWrites, { id: newId(), kind: 'prescription', rx, queuedAt: new Date().toISOString() }] }))
+          useToasts.getState().show({ title: 'Saved — will sync once back online', message: 'This draft is queued and will save automatically as soon as you’re reconnected.' })
+        } else {
+          writeThrough(insertPrescription(rx), 'This draft may not have saved.')
+        }
+        return rx
+      },
+
+      updateDraftPrescription: (id, input) => {
+        const rx = get().prescriptions.find((r) => r.id === id)
+        if (!rx || rx.status !== 'draft') return
+        const updatedAt = new Date().toISOString()
+        set((s) => ({
+          prescriptions: s.prescriptions.map((r) => (r.id === id ? {
+            ...r,
+            remedy: input.remedy, potency: input.potency, doseGlobules: input.doseGlobules,
+            repetition: input.repetition, durationDays: input.durationDays, preparation: input.preparation,
+            bodyText: input.bodyText, sharedVia: input.sharedVia, remindersEnabled: input.remindersEnabled,
+            reminderTimes: input.reminderTimes, updatedAt,
+          } : r)),
+        }))
+        const dbPatch = {
+          remedy: input.remedy, potency: input.potency, dose_globules: input.doseGlobules,
+          repetition: input.repetition, duration_days: input.durationDays, preparation: input.preparation,
+          body_text: input.bodyText ?? null, shared_via: input.sharedVia,
+          reminders_enabled: input.remindersEnabled, reminder_times: input.reminderTimes,
+          updated_at: updatedAt,
+        }
+        if (get().offline) {
+          set((s) => ({ pendingWrites: [...s.pendingWrites, { id: newId(), kind: 'prescriptionPatch', prescriptionId: id, patch: dbPatch, queuedAt: new Date().toISOString() }] }))
+          useToasts.getState().show({ title: 'Saved — will sync once back online', message: 'This draft’s changes are queued and will sync automatically as soon as you’re reconnected.' })
+        } else {
+          writeThrough(updatePrescriptionDb(id, dbPatch), 'This draft’s changes may not have saved.')
+        }
+      },
+
+      publishDraftPrescription: (id, input) => {
+        const rx = get().prescriptions.find((r) => r.id === id)
+        if (!rx) return null
+        const publishedAt = new Date().toISOString()
+        const remedyLabel = `${input.remedy} ${input.potency}`
+        const doctor = get().practitioners.find((p) => p.id === input.practitionerId)
+
+        const newReminders: DoseReminder[] = input.remindersEnabled
+          ? input.reminderTimes.map((time) => ({
+              id: newId(), prescriptionId: id, patientId: input.patientId,
+              remedy: input.remedy, potency: input.potency, time, slot: fmtSlot(time), loggedToday: false,
+            }))
+          : []
+
+        const notif: AppNotification = {
+          id: newId(), surface: 'patient' as Surface, kind: 'prescription' as const,
+          title: 'New prescription',
+          message: `${doctor?.name ?? 'Your practitioner'} prescribed ${remedyLabel}. ${input.remindersEnabled ? 'Dose reminders are on.' : ''}`.trim(),
+          time: 'Just now', read: false, severity: 'info' as const,
+        }
+
+        const updated: Prescription = {
+          ...rx,
+          remedy: input.remedy, potency: input.potency, doseGlobules: input.doseGlobules,
+          repetition: input.repetition, durationDays: input.durationDays, preparation: input.preparation,
+          bodyText: input.bodyText, sharedVia: input.sharedVia, remindersEnabled: input.remindersEnabled,
+          reminderTimes: input.reminderTimes, status: 'published', publishedAt, updatedAt: publishedAt,
+        }
+
+        set((s) => ({
+          prescriptions: s.prescriptions.map((r) => (r.id === id ? updated : r)),
+          doseReminders: [...newReminders, ...s.doseReminders],
+          patients: s.patients.map((p) => (p.id === input.patientId ? { ...p, currentRemedy: remedyLabel } : p)),
+          notifications: [notif, ...s.notifications],
+        }))
+
+        const dbPatch = {
+          remedy: input.remedy, potency: input.potency, dose_globules: input.doseGlobules,
+          repetition: input.repetition, duration_days: input.durationDays, preparation: input.preparation,
+          body_text: input.bodyText ?? null, shared_via: input.sharedVia,
+          reminders_enabled: input.remindersEnabled, reminder_times: input.reminderTimes,
+          status: 'published', published_at: publishedAt, updated_at: publishedAt,
+        }
+        if (get().offline) {
+          set((s) => ({ pendingWrites: [...s.pendingWrites, { id: newId(), kind: 'prescriptionPatch', prescriptionId: id, patch: dbPatch, queuedAt: new Date().toISOString() }] }))
+          useToasts.getState().show({ title: 'Saved — will send once back online', message: `${remedyLabel} is queued and will publish automatically as soon as you're reconnected.` })
+        } else {
+          writeThrough(updatePrescriptionDb(id, dbPatch), 'Your prescription may not have saved.')
+        }
+        for (const dr of newReminders) void insertDoseReminder(dr)
+        void updatePatient(input.patientId, { currentRemedy: remedyLabel })
+        writeThrough(insertNotification(notif, resolveNotificationOwner(get().patients, get().practitioners, { patientId: input.patientId })), 'The patient may not have been notified of this prescription.')
+
+        return updated
+      },
+
+      cancelPrescription: (id) => {
+        const rx = get().prescriptions.find((r) => r.id === id)
+        if (!rx) return
+        const cancelledAt = new Date().toISOString()
+
+        // Recompute currentRemedy from whatever's left published for this
+        // patient — the patient's own app renders this field directly, so
+        // leaving it pointing at a just-cancelled remedy would contradict
+        // "disappears as if never sent." Harmless no-op if this was only
+        // ever a draft (it never touched currentRemedy in the first place).
+        const stillPublished = get().prescriptions
+          .filter((r) => r.patientId === rx.patientId && r.id !== id && r.status === 'published')
+          .sort((a, b) => (b.publishedAt ?? '').localeCompare(a.publishedAt ?? ''))
+        const nextRemedy = stillPublished[0] ? `${stillPublished[0].remedy} ${stillPublished[0].potency}` : null
+
+        set((s) => ({
+          prescriptions: s.prescriptions.map((r) => (r.id === id ? { ...r, status: 'cancelled', cancelledAt, updatedAt: cancelledAt } : r)),
+          doseReminders: s.doseReminders.filter((d) => d.prescriptionId !== id),
+          patients: s.patients.map((p) => (p.id === rx.patientId ? { ...p, currentRemedy: nextRemedy } : p)),
+        }))
+
+        const dbPatch = { status: 'cancelled', cancelled_at: cancelledAt, updated_at: cancelledAt }
+        if (get().offline) {
+          set((s) => ({ pendingWrites: [...s.pendingWrites, { id: newId(), kind: 'prescriptionPatch', prescriptionId: id, patch: dbPatch, queuedAt: new Date().toISOString() }] }))
+          useToasts.getState().show({ title: 'Saved — will sync once back online', message: 'This cancellation is queued and will sync automatically as soon as you’re reconnected.' })
+        } else {
+          writeThrough(updatePrescriptionDb(id, dbPatch), 'This cancellation may not have saved.')
+        }
+        void updatePatient(rx.patientId, { currentRemedy: nextRemedy })
+        writeThrough(deleteDoseRemindersForPrescription(id), 'Old dose reminders for this prescription may not have cleared.')
       },
 
       createInvestigationOrder: (input) => {
@@ -1261,6 +1423,13 @@ export const selPatient = (id: string) => (s: ClinicState) =>
 
 export const selPrescriptionsFor = (patientId: string) => (s: ClinicState) =>
   s.prescriptions.filter((r) => r.patientId === patientId)
+
+// Patient-facing only — a draft or cancelled prescription must be
+// invisible to the patient, not merely unlabelled. Every doctor/staff view
+// (web and mobile) keeps using selPrescriptionsFor above and must keep
+// seeing every status.
+export const selPublishedPrescriptionsFor = (patientId: string) => (s: ClinicState) =>
+  s.prescriptions.filter((r) => r.patientId === patientId && r.status === 'published')
 
 export const selDosesFor = (patientId: string) => (s: ClinicState) =>
   s.doseReminders.filter((d) => d.patientId === patientId)

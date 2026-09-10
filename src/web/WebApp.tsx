@@ -30,6 +30,7 @@ import {
   ToggleLeft,
   Printer,
   PencilSimple,
+  Prohibit,
   Stethoscope,
   UserCircle,
   IdentificationCard,
@@ -50,7 +51,7 @@ import {
 } from '@phosphor-icons/react'
 import { todayISO, formatDayLabel, addDaysISO } from '../core/day'
 import { getSections, CASE_TEMPLATES } from '../core/caseTemplate'
-import { useClinic } from '../core/store'
+import { useClinic, type PublishRxInput } from '../core/store'
 import { useAuth } from '../auth/AuthProvider'
 import type { Appointment, Patient, Potency, Repetition, RxTemplate, Invoice, InvoiceLineItem, PaymentMode, ChatMessage } from '../core/types'
 import { isOneOffRepetition } from '../core/types'
@@ -106,6 +107,7 @@ export function WebApp() {
   const [videoApptId, setVideoApptId] = useState<string | null>(null)
   const [messagesPatientId, setMessagesPatientId] = useState<string | null>(null)
   const [calendarFocusPractitionerId, setCalendarFocusPractitionerId] = useState<string | null>(null)
+  const [rxDraftId, setRxDraftId] = useState<string | null>(null)
   const clinicRef = useRef<HTMLDivElement>(null)
 
   const doctor = useClinic((s) => s.practitioners.find((p) => p.id === s.currentPractitionerId))
@@ -166,7 +168,7 @@ export function WebApp() {
     setScreen('patient')
   }
   const openCaseSheet = (id: string) => { setPatientId(id); setScreen('casesheet') }
-  const openPrescription = (id: string) => { setPatientId(id); setScreen('prescription') }
+  const openPrescription = (id: string) => { setPatientId(id); setRxDraftId(null); setScreen('prescription') }
   const openFollowUp = (id: string) => { setPatientId(id); setScreen('followup') }
   const openMessages = (id: string) => { setMessagesPatientId(id); setScreen('messages') }
   const openCalendarForPractitioner = (practitionerId: string) => { setCalendarFocusPractitionerId(practitionerId); setScreen('calendar') }
@@ -341,7 +343,7 @@ export function WebApp() {
               {screen === 'patient' && (
                 <PatientDetail
                   patientId={patientId}
-                  onPrescribe={() => setScreen('prescription')}
+                  onPrescribe={(draftId) => { setRxDraftId(draftId ?? null); setScreen('prescription') }}
                   onOrderInvestigations={() => setScreen('investigations')}
                   onCaseSheet={() => setScreen('casesheet')}
                   onFollowUp={() => setScreen('followup')}
@@ -349,10 +351,10 @@ export function WebApp() {
                   onBack={() => setScreen('patients')}
                 />
               )}
-              {screen === 'prescription' && <PrescriptionWriter patientId={patientId} onDone={() => setScreen('patient')} />}
+              {screen === 'prescription' && <PrescriptionWriter patientId={patientId} draftId={rxDraftId} onDone={() => { setRxDraftId(null); setScreen('patient') }} />}
               {screen === 'investigations' && <InvestigationWriter patientId={patientId} onDone={() => setScreen('patient')} />}
               {screen === 'casesheet' && (
-                <CaseSheet patientId={patientId} onPrescribe={() => setScreen('prescription')} onBack={() => setScreen('patient')} />
+                <CaseSheet patientId={patientId} onPrescribe={() => { setRxDraftId(null); setScreen('prescription') }} onBack={() => setScreen('patient')} />
               )}
               {screen === 'followup' && <FollowUp patientId={patientId} onBack={() => setScreen('patient')} />}
               {screen === 'prescriptions-all' && <PrescriptionsOverview onOpenPatient={openPatient} onWriteFor={openPrescription} />}
@@ -1246,7 +1248,7 @@ function PrescriptionsOverview({ onOpenPatient, onWriteFor }: { onOpenPatient: (
   const prescriptions = useClinic((s) => s.prescriptions)
   const patients = useClinic((s) => s.patients)
   const [search, setSearch] = useState('')
-  const sorted = [...prescriptions].sort((a, b) => b.publishedAt.localeCompare(a.publishedAt))
+  const sorted = [...prescriptions].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   const q = search.trim().toLowerCase()
   const filtered = q
     ? sorted.filter((r) => {
@@ -1260,7 +1262,7 @@ function PrescriptionsOverview({ onOpenPatient, onWriteFor }: { onOpenPatient: (
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-display text-[20px] font-bold text-ink">Prescriptions</h1>
-          <div className="text-[12.5px] text-faint">{prescriptions.length.toLocaleString('en-IN')} published</div>
+          <div className="text-[12.5px] text-faint">{prescriptions.filter((r) => r.status === 'published').length.toLocaleString('en-IN')} published</div>
         </div>
         <input
           value={search}
@@ -1289,10 +1291,12 @@ function PrescriptionsOverview({ onOpenPatient, onWriteFor }: { onOpenPatient: (
                 <Avatar initials={pt?.initials ?? '?'} size={36} />
                 <div className="min-w-0 flex-1">
                   <div className="font-display text-[14px] font-semibold text-ink">{pt?.name ?? 'Unknown patient'}</div>
-                  <div className="text-[12px] text-muted">{new Date(r.publishedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+                  <div className="text-[12px] text-muted">{new Date(r.publishedAt ?? r.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
                 </div>
-                <div className="text-[13.5px] font-semibold text-ink">{r.remedy} {r.potency}</div>
+                <div className={`text-[13.5px] font-semibold ${r.status === 'cancelled' ? 'text-faint line-through' : 'text-ink'}`}>{r.remedy} {r.potency}</div>
                 <div className="w-[150px] text-[12px] text-muted">{r.repetition}</div>
+                {r.status === 'draft' && <Badge tone="amber">Draft</Badge>}
+                {r.status === 'cancelled' && <Badge tone="danger">Cancelled</Badge>}
                 <div className="flex flex-wrap justify-end gap-1">
                   {r.sharedVia.map((c) => <Badge key={c} tone="neutral">{c}</Badge>)}
                 </div>
@@ -1728,7 +1732,7 @@ function ProgressChart({ points }: { points: { date: string; value: number }[] }
 }
 
 // ── PATIENT DETAIL ──
-function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSheet, onFollowUp, onOpenMessages, onBack }: { patientId: string; onPrescribe: () => void; onOrderInvestigations: () => void; onCaseSheet: () => void; onFollowUp: () => void; onOpenMessages: () => void; onBack: () => void }) {
+function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSheet, onFollowUp, onOpenMessages, onBack }: { patientId: string; onPrescribe: (draftId?: string) => void; onOrderInvestigations: () => void; onCaseSheet: () => void; onFollowUp: () => void; onOpenMessages: () => void; onBack: () => void }) {
   const patient = useClinic((s) => s.patients.find((p) => p.id === patientId))
   const rx = useClinic((s) => s.prescriptions.filter((r) => r.patientId === patientId))
   const docs = useClinic((s) => s.documents.filter((d) => d.patientId === patientId))
@@ -1745,6 +1749,7 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
   const doctor = useClinic((s) => s.practitioners.find((p) => p.id === s.currentPractitionerId))
   const assignPatient = useClinic((s) => s.assignPatient)
   const addDocument = useClinic((s) => s.addDocument)
+  const cancelPrescription = useClinic((s) => s.cancelPrescription)
   const role = useClinic((s) => s.role)
   const toast = useToast()
   const [assignOpen, setAssignOpen] = useState(false)
@@ -1825,7 +1830,11 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
 
   type TimelineEvent = { id: string; date: string; kind: 'visit' | 'prescription' | 'check-in' | 'outcome' | 'handoff'; title: string; detail: string; tone: 'green' | 'amber' | 'neutral' }
   const timeline: TimelineEvent[] = [
-    ...rx.map((r) => ({ id: r.id, date: r.publishedAt, kind: 'prescription' as const, title: `${r.remedy} ${r.potency}`, detail: `${r.repetition} · ${r.durationDays ? `${r.durationDays} days` : 'until settled'}`, tone: 'green' as const })),
+    // Drafts aren't a real clinical event yet — they're excluded here, not
+    // just given a fallback date. A cancelled one stays (its publishedAt is
+    // preserved, and a doctor's own audit timeline should still show a
+    // retracted prescription as something that happened).
+    ...rx.filter((r) => r.status !== 'draft').map((r) => ({ id: r.id, date: r.publishedAt ?? r.createdAt, kind: 'prescription' as const, title: `${r.remedy} ${r.potency}`, detail: `${r.repetition} · ${r.durationDays ? `${r.durationDays} days` : 'until settled'}`, tone: 'green' as const })),
     ...outcomes.map((o) => ({ id: o.id, date: o.date, kind: 'outcome' as const, title: o.outcome, detail: o.note || o.remedy, tone: o.outcome === 'Clear improvement' ? 'green' as const : o.outcome === 'Partial' ? 'amber' as const : 'neutral' as const })),
     ...checkIns.map((c) => ({ id: c.id, date: c.submittedAt, kind: 'check-in' as const, title: c.marked === 'better' ? 'Feeling better' : c.marked === 'worse' ? 'Feeling worse' : 'No change', detail: c.freeText || `${c.improvementPct}% improvement`, tone: c.marked === 'better' ? 'green' as const : c.marked === 'worse' ? 'amber' as const : 'neutral' as const })),
     // Every transfer belongs on the record — who, when and why — same as
@@ -1881,7 +1890,7 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
         <Button variant="ghost" size="sm" onClick={onFollowUp}><ArrowsClockwise size={15} /> Follow-up</Button>
         <Button variant="ghost" size="sm" onClick={onCaseSheet}><Notebook size={15} /> Open case sheet</Button>
         <Button variant="ghost" size="sm" onClick={onOrderInvestigations}><TestTube size={15} /> Order investigations</Button>
-        <Button variant="primary" size="sm" onClick={onPrescribe}><RxIcon size={15} weight="fill" /> Write prescription</Button>
+        <Button variant="primary" size="sm" onClick={() => onPrescribe()}><RxIcon size={15} weight="fill" /> Write prescription</Button>
         <div ref={patientMenuRef} className="relative">
           <button
             onClick={() => setPatientMenuOpen((v) => !v)}
@@ -1985,20 +1994,40 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
           <Card className="p-5">
             <h2 className="mb-3 font-display text-[15px] font-bold text-ink">Prescription history</h2>
             <div className="space-y-2.5">
-              {rx.map((r) => (
-                <div key={r.id} className="flex items-center gap-3 rounded-[14px] border border-border bg-surface px-4 py-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-tint text-brand">
-                    <RxIcon size={17} weight="fill" />
+              {rx.map((r) => {
+                const isDraft = r.status === 'draft'
+                const isCancelled = r.status === 'cancelled'
+                return (
+                  <div key={r.id} className={`flex items-center gap-3 rounded-[14px] border border-border bg-surface px-4 py-3 ${isCancelled ? 'opacity-60' : ''}`}>
+                    <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-tint text-brand">
+                      <RxIcon size={17} weight="fill" />
+                    </div>
+                    <div className="flex-1">
+                      <div className={`font-display text-[14px] font-semibold text-ink ${isCancelled ? 'line-through' : ''}`}>{r.remedy} {r.potency}</div>
+                      <div className="text-[12px] text-muted">{r.repetition} · {r.doseGlobules} globules{r.durationDays ? ` · ${r.durationDays} days` : ''}</div>
+                    </div>
+                    {isDraft && <Badge tone="amber">Draft</Badge>}
+                    {isCancelled && <Badge tone="danger">Cancelled</Badge>}
+                    <div className="flex flex-wrap justify-end gap-1">
+                      {r.sharedVia.map((c) => <Badge key={c} tone="neutral">{c}</Badge>)}
+                    </div>
+                    {isDraft && (
+                      <button onClick={() => onPrescribe(r.id)} title="Continue editing" className="text-faint hover:text-body">
+                        <PencilSimple size={16} />
+                      </button>
+                    )}
+                    {!isCancelled && (
+                      <button
+                        onClick={() => cancelPrescription(r.id)}
+                        title={isDraft ? 'Discard draft' : 'Cancel prescription'}
+                        className="text-faint hover:text-danger"
+                      >
+                        <Prohibit size={16} />
+                      </button>
+                    )}
                   </div>
-                  <div className="flex-1">
-                    <div className="font-display text-[14px] font-semibold text-ink">{r.remedy} {r.potency}</div>
-                    <div className="text-[12px] text-muted">{r.repetition} · {r.doseGlobules} globules{r.durationDays ? ` · ${r.durationDays} days` : ''}</div>
-                  </div>
-                  <div className="flex flex-wrap justify-end gap-1">
-                    {r.sharedVia.map((c) => <Badge key={c} tone="neutral">{c}</Badge>)}
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </Card>
 
@@ -2249,10 +2278,14 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
 }
 
 // ── PRESCRIPTION WRITER ──
-function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: () => void }) {
+function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string; draftId?: string | null; onDone: () => void }) {
   const patient = useClinic((s) => s.patients.find((p) => p.id === patientId))
   const doctor = useClinic((s) => s.practitioners.find((p) => p.id === s.currentPractitionerId))
   const publish = useClinic((s) => s.publishPrescription)
+  const draft = useClinic((s) => (draftId ? s.prescriptions.find((r) => r.id === draftId) : undefined))
+  const saveDraft = useClinic((s) => s.saveDraftPrescription)
+  const updateDraft = useClinic((s) => s.updateDraftPrescription)
+  const publishDraft = useClinic((s) => s.publishDraftPrescription)
   const updatePractitioner = useClinic((s) => s.updatePractitioner)
   const scheduleFollowUp = useClinic((s) => s.scheduleFollowUp)
   const toast = useToast()
@@ -2289,6 +2322,22 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
       : `${remedy} ${potency} — ${dose} globules, ${rep}${duration ? `, ${duration} days` : ''}`
     setBodyText(doseLine)
   }, [remedy, potency, dose, rep, duration, bodyTouched])
+
+  // Pre-fill from an existing draft when opening one for continued editing
+  // — mirrors applyTemplate's bulk-field-set above.
+  useEffect(() => {
+    if (!draft) return
+    setRemedy(draft.remedy)
+    setPotency(draft.potency)
+    setDose(draft.doseGlobules)
+    if (draft.durationDays) setDuration(draft.durationDays)
+    setRep(draft.repetition)
+    setPrep(draft.preparation)
+    setBodyText(draft.bodyText ?? '')
+    setBodyTouched(!!draft.bodyText)
+    setChannels(draft.sharedVia.filter((c) => c !== 'Patient app'))
+  }, [draft?.id])
+
   const [templatesOpen, setTemplatesOpen] = useState(false)
   const [savingTemplate, setSavingTemplate] = useState(false)
   const [templateLabel, setTemplateLabel] = useState('')
@@ -2358,7 +2407,7 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
   function onPublish() {
     if (!patient) return
     if (!remedy.trim()) { toast({ title: 'Enter a remedy first' }); return }
-    publish({
+    const payload: PublishRxInput = {
       patientId,
       practitionerId: doctor?.id ?? '',
       remedy: remedy.trim(),
@@ -2372,7 +2421,9 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
       reminderTimes: rep === 'Twice daily' ? ['8:00 AM', '8:00 PM'] : ['8:00 PM'],
       sharedVia: ['Patient app', ...channels],
       origin: 'web',
-    })
+    }
+    const rx = draftId ? publishDraft(draftId, payload) : publish(payload)
+    if (!rx) return // draft vanished from under us (e.g. cancelled elsewhere) — bail quietly
 
     // Publishing books the review too — a course that ends without anyone
     // checking back on it is the exact gap a follow-up reminder exists to
@@ -2399,12 +2450,37 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
     onDone()
   }
 
+  function onSave() {
+    if (!remedy.trim()) { toast({ title: 'Enter a remedy first' }); return }
+    const payload: PublishRxInput = {
+      patientId,
+      practitionerId: doctor?.id ?? '',
+      remedy: remedy.trim(),
+      potency,
+      doseGlobules: dose,
+      repetition: rep,
+      durationDays: isOneOffRepetition(rep) ? null : duration,
+      preparation: prep,
+      bodyText: bodyText.trim() || undefined,
+      remindersEnabled: !isOneOffRepetition(rep),
+      reminderTimes: rep === 'Twice daily' ? ['8:00 AM', '8:00 PM'] : ['8:00 PM'],
+      sharedVia: channels, // no 'Patient app' — nothing has been sent yet
+      origin: 'web',
+    }
+    if (draftId) updateDraft(draftId, payload)
+    else saveDraft(payload)
+    toast({ title: draftId ? 'Draft updated' : 'Draft saved', message: `${remedy} ${potency} is saved with ${patient?.name}'s file — not sent yet.` })
+    onDone()
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-display text-[20px] font-bold text-ink">Prescription · {patient.name}</h1>
-          <div className="text-[12.5px] text-faint">From your saved remedy list · publishes to her app instantly</div>
+          <div className="text-[12.5px] text-faint">
+            {draftId ? 'Editing a saved draft — nothing has been sent to her app yet' : 'From your saved remedy list · publishes to her app instantly'}
+          </div>
         </div>
         <div className="relative">
           <Button variant="ghost" size="sm" onClick={() => setTemplatesOpen((v) => !v)}>Saved templates</Button>
@@ -2596,13 +2672,17 @@ function PrescriptionWriter({ patientId, onDone }: { patientId: string; onDone: 
                 </button>
               ))}
             </div>
-            <Button variant="accent" className="w-full" onClick={onPublish}>
-              <RxIcon size={17} weight="fill" /> Publish to patient app
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="ghost" className="flex-1" onClick={onSave}>Save — don't send yet</Button>
+              <Button variant="accent" className="flex-1" onClick={onPublish}>
+                <RxIcon size={17} weight="fill" /> Publish to patient app
+              </Button>
+            </div>
             <div className="flex justify-center">
               <button onClick={async () => {
                 if (!remedy.trim()) { toast({ title: 'Enter a remedy first' }); return }
-                const rx = { id: crypto.randomUUID(), patientId: patient.id, practitionerId: doctor?.id ?? '', remedy: remedy.trim(), potency: potency as any, doseGlobules: dose, repetition: rep as any, durationDays: duration, preparation: prep, bodyText: bodyText.trim() || undefined, publishedAt: new Date().toISOString(), sharedVia: [], remindersEnabled: false, reminderTimes: [] }
+                const nowIso = new Date().toISOString()
+                const rx = { id: crypto.randomUUID(), patientId: patient.id, practitionerId: doctor?.id ?? '', remedy: remedy.trim(), potency: potency as any, doseGlobules: dose, repetition: rep as any, durationDays: duration, preparation: prep, bodyText: bodyText.trim() || undefined, status: 'published' as const, publishedAt: nowIso, createdAt: nowIso, updatedAt: nowIso, sharedVia: [], remindersEnabled: false, reminderTimes: [] }
                 await exportPrescriptionPdf(rx, patient).catch((e) => {
                   console.error('PDF export failed', e)
                   toast({ title: 'PDF export failed', message: e instanceof Error ? e.message : 'Please try again.' })
@@ -2966,7 +3046,7 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
   }
   const exportPrescriptions = () => {
     const rows = prescriptions.map((r) => ({
-      date: r.publishedAt.slice(0, 10), patient: patients.find((p) => p.id === r.patientId)?.name ?? '',
+      date: (r.publishedAt ?? r.createdAt).slice(0, 10), patient: patients.find((p) => p.id === r.patientId)?.name ?? '',
       practitioner: practitioners.find((p) => p.id === r.practitionerId)?.name ?? '', remedy: r.remedy,
       potency: r.potency, dose: r.doseGlobules, repetition: r.repetition, duration: r.durationDays ?? 'Until settled',
     }))

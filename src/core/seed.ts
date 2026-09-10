@@ -274,7 +274,10 @@ export const prescriptions: Prescription[] = [
     durationDays: 14,
     preparation:
       'Dissolve under the tongue at night, 15 minutes away from food, drink or mint. Tip into the cap — don’t touch the globules.',
+    status: 'published',
     publishedAt: '2026-07-10T20:00:00+05:30',
+    createdAt: '2026-07-10T20:00:00+05:30',
+    updatedAt: '2026-07-10T20:00:00+05:30',
     sharedVia: ['Patient app', 'WhatsApp'],
     remindersEnabled: true,
     reminderTimes: ['8:00 AM', '8:00 PM'],
@@ -290,7 +293,10 @@ export const prescriptions: Prescription[] = [
     durationDays: null,
     preparation:
       'For muscle soreness after exercise. Take only when needed, up to three times a day.',
+    status: 'published',
     publishedAt: '2026-07-10T20:05:00+05:30',
+    createdAt: '2026-07-10T20:05:00+05:30',
+    updatedAt: '2026-07-10T20:05:00+05:30',
     sharedVia: ['Patient app'],
     remindersEnabled: false,
     reminderTimes: [],

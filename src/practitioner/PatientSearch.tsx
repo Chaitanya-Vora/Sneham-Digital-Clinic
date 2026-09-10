@@ -501,7 +501,7 @@ export function PatientDetailScreen({
                         <span>{rx.durationDays ? `${rx.durationDays} days` : 'Until settled'}</span>
                       </div>
                       <div className="mt-1.5 text-[11px] text-faint">
-                        Published {new Date(rx.publishedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        {rx.status === 'published' ? 'Published' : rx.status === 'cancelled' ? 'Cancelled' : 'Saved (not yet published)'} {new Date(rx.publishedAt ?? rx.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
                       </div>
                     </Card>
                   </motion.div>

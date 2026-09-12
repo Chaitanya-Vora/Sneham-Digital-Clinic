@@ -406,7 +406,7 @@ function TodayView({ onOpenPatient, onStartVideo, onOpenCalendarForPractitioner 
   const patients = useClinic((s) => s.patients)
   const role = useClinic((s) => s.role)
   const myId = useClinic((s) => s.currentPractitionerId)
-  const practitioners = useClinic((s) => s.practitioners)
+  const practitioners = useClinic((s) => s.practitioners.filter((p) => p.status === 'active'))
   const toast = useToast()
   // null = modal closed. patientId: null = show the patient picker first
   // (top-level "Quick bill"); a real id = already scoped to that patient
@@ -937,7 +937,7 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
   const restorePatient = useClinic((s) => s.restorePatient)
   const patients = useMemo(() => allPatients.filter((p) => !p.archivedAt), [allPatients])
   const archivedPatients = useMemo(() => allPatients.filter((p) => p.archivedAt), [allPatients])
-  const practitioners = useClinic((s) => s.practitioners)
+  const practitioners = useClinic((s) => s.practitioners.filter((p) => p.status === 'active'))
   const assignPatient = useClinic((s) => s.assignPatient)
   const role = useClinic((s) => s.role)
   const canAssign = role !== 'Assistant' && role !== 'Receptionist'
@@ -1745,7 +1745,11 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
   const appointments = useClinic((s) => s.appointments.filter((a) => a.patientId === patientId))
   const invoices = useClinic((s) => s.invoices.filter((i) => i.patientId === patientId))
   const patientMessages = useClinic((s) => s.messages.filter((m) => m.patientId === patientId))
+  // Kept unfiltered — historical handoff entries below need to resolve a
+  // since-removed practitioner's real name, not show "Unknown". The
+  // assignment dropdown further down uses its own active-only list instead.
   const practitioners = useClinic((s) => s.practitioners)
+  const activePractitioners = useMemo(() => practitioners.filter((p) => p.status === 'active'), [practitioners])
   const doctor = useClinic((s) => s.practitioners.find((p) => p.id === s.currentPractitionerId))
   const assignPatient = useClinic((s) => s.assignPatient)
   const addDocument = useClinic((s) => s.addDocument)
@@ -1958,7 +1962,7 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
           className="w-[240px] overflow-hidden rounded-[12px] border border-border bg-surface shadow-modal"
         >
           <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-faint">Assign to</div>
-          {practitioners.map((pr) => (
+          {activePractitioners.map((pr) => (
             <button
               key={pr.id}
               onClick={() => {
@@ -2914,7 +2918,10 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
   const patients = useClinic((s) => s.patients)
   const appointments = useClinic((s) => s.appointments)
   const prescriptions = useClinic((s) => s.prescriptions)
+  // Kept unfiltered — CSV exports below need to resolve a since-removed
+  // practitioner's real name against historical rows, not show blank.
   const practitioners = useClinic((s) => s.practitioners)
+  const activePractitioners = useMemo(() => practitioners.filter((p) => p.status === 'active'), [practitioners])
   const invoices = useClinic((s) => s.invoices)
   const [period, setPeriod] = useState<'month' | 'year'>('year')
   const [exportOpen, setExportOpen] = useState(false)
@@ -3008,7 +3015,7 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
   })()
   const maxRemedy = Math.max(...remedyCount.map(([, c]) => c), 1)
 
-  const practitionerLoad = practitioners.map((p) => ({
+  const practitionerLoad = activePractitioners.map((p) => ({
     name: p.name.replace('Dr. ', ''),
     cases: p.openCases,
     patients: patients.filter((pt) => pt.owningPractitionerId === p.id).length,
@@ -3301,6 +3308,7 @@ function SettingsView() {
   const me = practitioners.find((p) => p.id === currentId)
   const pending = practitioners.filter((p) => p.status === 'pending')
   const active = practitioners.filter((p) => p.status === 'active')
+  const inactive = practitioners.filter((p) => p.status === 'inactive')
   const [clinicName, setClinicName] = useState('Sneham Digital Clinic')
   const [consultDuration, setConsultDuration] = useState('20')
   const [notifPrefs, setNotifPrefs] = useState({ newBooking: true, followUpDue: true, lowStock: false, patientCheckIn: true })
@@ -3619,10 +3627,49 @@ function SettingsView() {
               </div>
               <Badge tone={pr.role === 'Owner' ? 'green' : 'neutral'}>{pr.role}</Badge>
               <div className="text-[12px] text-faint">{pr.openCases} open cases</div>
+              {role === 'Owner' && pr.id !== currentId && pr.role !== 'Owner' && (
+                <button
+                  onClick={() => {
+                    if (!window.confirm(`Remove ${pr.name} from the active team? Their existing patients, appointments, and case history stay exactly as they are — this just ends their access and takes them off the roster. You can reinstate them any time.`)) return
+                    updatePractitioner(pr.id, { status: 'inactive' })
+                    toast({ title: 'Practitioner removed', message: `${pr.name} no longer has access. Reinstate any time below.` })
+                  }}
+                  className="rounded-full p-1.5 text-faint transition hover:bg-danger/10 hover:text-danger"
+                  title="Remove from team"
+                >
+                  <X size={15} />
+                </button>
+              )}
             </div>
           ))}
         </div>
       </Card>
+
+      {role === 'Owner' && inactive.length > 0 && (
+        <Card className="p-5">
+          <h2 className="mb-3 font-display text-[15px] font-bold text-ink">Inactive</h2>
+          <div className="space-y-2">
+            {inactive.map((pr) => (
+              <div key={pr.id} className="flex items-center gap-3 rounded-[14px] border border-border bg-surface px-4 py-3 opacity-70">
+                <Avatar initials={pr.initials} size={38} />
+                <div className="flex-1">
+                  <div className="font-display text-[14px] font-semibold text-ink">{pr.name}</div>
+                  <div className="text-[12px] text-muted">{pr.specialty}</div>
+                </div>
+                <button
+                  onClick={() => {
+                    updatePractitioner(pr.id, { status: 'active' })
+                    toast({ title: 'Practitioner reinstated', message: `${pr.name} is back on the active team.` })
+                  }}
+                  className="rounded-pill border border-green-border bg-tint px-3 py-1.5 text-[12px] font-semibold text-brand transition hover:bg-accent hover:text-white"
+                >
+                  Reinstate
+                </button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       <Card className="p-5">
         <h2 className="font-display text-[15px] font-bold text-ink">Staff & permissions</h2>
@@ -3996,7 +4043,7 @@ function PermanentDeleteModal({ patient, onClose, onDeleted }: { patient: Patien
     outcomes: 'outcomes', messages: 'messages',
   }
   const nonZero = impact ? Object.entries(impact).filter(([, n]) => n > 0) : []
-  const canConfirm = confirmText.trim() === patient.name && !deleting
+  const canConfirm = confirmText.trim().toLowerCase() === patient.name.trim().toLowerCase() && !deleting
 
   const onConfirm = async () => {
     setDeleting(true)
@@ -4052,7 +4099,7 @@ function PermanentDeleteModal({ patient, onClose, onDeleted }: { patient: Patien
         )}
 
         <div className="mt-4">
-          <Label>Type "{patient.name}" to confirm</Label>
+          <div className="text-[13px] text-body">Type <strong>"{patient.name}"</strong> to confirm</div>
           <input
             value={confirmText}
             onChange={(e) => setConfirmText(e.target.value)}

@@ -88,7 +88,7 @@ export function WebCalendar({ onOpenPatient, focusPractitionerId }: { onOpenPati
   // occupied but aren't.
   const seedAppts = useClinic((s) => s.appointments.filter((a) => a.status !== 'Cancelled'))
   const patients = useClinic((s) => s.patients)
-  const practitioners = useClinic((s) => s.practitioners)
+  const practitioners = useClinic((s) => s.practitioners.filter((p) => p.status === 'active'))
   const timeBlocks = useClinic((s) => s.timeBlocks)
   const toast = useToast()
 

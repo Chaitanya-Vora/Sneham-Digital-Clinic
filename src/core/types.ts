@@ -58,8 +58,13 @@ export type OutcomeKind =
 // them all patient-data access until they're 'active' (see
 // migration_v19_practitioner_approval_gate.sql). The clinic's very first
 // signup ever starts 'active' (no one exists yet to approve them);
-// everyone after that starts 'pending'.
-export type PractitionerStatus = 'pending' | 'active'
+// everyone after that starts 'pending'. 'inactive' is a practitioner who's
+// left the clinic — deliberately a status flip, not a row delete, since
+// their patients/appointments/prescriptions/case notes still reference
+// them; RLS's own can_access_patient() already checks status === 'active',
+// so flipping to 'inactive' removes their clinical access with no
+// separate RLS change (see migration_v28_practitioner_inactive_status.sql).
+export type PractitionerStatus = 'pending' | 'active' | 'inactive'
 
 export interface Practitioner {
   id: string

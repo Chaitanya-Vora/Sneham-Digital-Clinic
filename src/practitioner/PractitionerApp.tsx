@@ -162,9 +162,9 @@ export function PractitionerApp() {
           <Pressable as="div" hap="tick" scale={0.94} onClick={() => setSwitchOpen(true)} className="cursor-pointer">
             <Avatar initials={doctor.initials} size={38} />
           </Pressable>
-          <div className="flex-1">
-            <div className="font-display text-[15px] font-bold text-ink">{doctor.name}</div>
-            <div className="text-[11px] text-faint">{new Date().toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })} · Chiplun clinic</div>
+          <div className="min-w-0 flex-1">
+            <div className="truncate font-display text-[15px] font-bold text-ink">{doctor.name.split(' ').slice(0, 2).join(' ')}</div>
+            <div className="truncate text-[11px] text-faint">{new Date().toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })} · Chiplun clinic</div>
           </div>
           <Pressable ariaLabel="search patients" hap="tick" onClick={() => setSearchOpen(true)} className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
             <MagnifyingGlass size={17} className="text-body" />

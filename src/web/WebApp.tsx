@@ -3103,6 +3103,7 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
     return months
   }, [appointments])
   const maxMonthly = Math.max(...visitsByMonth.map((m) => m.new + m.returning), 1)
+  const totalVisitsInWindow = visitsByMonth.reduce((sum, m) => sum + m.new + m.returning, 0)
 
   return (
     <div className="space-y-5">
@@ -3214,11 +3215,18 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
               <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-accent" />Returning</span>
             </div>
           </div>
+          {totalVisitsInWindow === 0 ? (
+            <div className="flex flex-col items-center justify-center py-10 text-center" style={{ height: 160 }}>
+              <ChartLineUp size={28} className="text-border-dash" />
+              <p className="mt-3 text-[13px] font-medium text-muted">No patient visits in this window yet</p>
+              <p className="mt-1 text-[12px] text-faint">This fills in as you see patients — nothing to worry about.</p>
+            </div>
+          ) : (
           <div className="flex items-end gap-4" style={{ height: 160 }}>
             {visitsByMonth.map((m, i) => (
               <div key={m.key} className="flex flex-1 flex-col items-center gap-1.5">
                 <div className="text-[11px] font-semibold text-faint">{m.new + m.returning || ''}</div>
-                <div className="flex w-full flex-col justify-end overflow-hidden rounded-t-[8px]" style={{ height: 120 }}>
+                <div className="flex w-full flex-col justify-end overflow-hidden rounded-t-[8px] bg-screen" style={{ height: 120 }}>
                   <motion.div
                     initial={{ height: 0 }}
                     animate={{ height: `${(m.returning / maxMonthly) * 120}px` }}
@@ -3236,6 +3244,7 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
               </div>
             ))}
           </div>
+          )}
         </Card>
 
         <div className="space-y-4">

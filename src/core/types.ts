@@ -7,6 +7,16 @@ import type { ISODate } from './day'
 
 export type Role = 'Owner' | 'Practitioner' | 'Assistant' | 'Receptionist'
 
+// Owner and Practitioner have never been restricted by any of these checks
+// anywhere in the app — only Assistant/Receptionist are ever gated — so
+// only those two roles have a real, editable row. See migration_v32.
+export type EditableRole = 'Assistant' | 'Receptionist'
+export interface RolePermissionSet {
+  seeCaseNotes: boolean
+  assignCases: boolean
+  acceptHandoffs: boolean
+}
+
 export type AssignmentState =
   | 'Mine'
   | 'Unassigned'

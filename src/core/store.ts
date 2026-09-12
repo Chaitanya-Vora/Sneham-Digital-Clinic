@@ -28,6 +28,8 @@ import type {
   SecondOpinion,
   Surface,
   TimeBlock,
+  EditableRole,
+  RolePermissionSet,
 } from './types'
 import { type CaseState, type CaseSectionDef, type CustomCaseTemplate, emptyCase } from './caseTemplate'
 import { useToasts } from '../design-system/toast'
@@ -72,6 +74,8 @@ import {
   insertCaseTemplate,
   updateCaseTemplateDb,
   deleteCaseTemplateDb,
+  updateRolePermission as updateRolePermissionDb,
+  DEFAULT_ROLE_PERMISSIONS,
 } from './db'
 
 const caseTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -142,6 +146,7 @@ interface ClinicState {
   prescriptions: Prescription[]
   investigationOrders: InvestigationOrder[]
   secondOpinions: SecondOpinion[]
+  rolePermissions: Record<EditableRole, RolePermissionSet>
   invoices: Invoice[]
   doseReminders: DoseReminder[]
   checkIns: CheckIn[]
@@ -214,6 +219,7 @@ interface ClinicState {
   removeTimeBlock: (id: string) => void
   submitCheckIn: (input: { patientId: string; prescriptionId: string; marked: CheckIn['marked']; improvementPct: number; changeChips: string[]; freeText: string }) => void
   updatePractitioner: (id: string, patch: Partial<Practitioner>) => void
+  updateRolePermission: (role: EditableRole, patch: Partial<RolePermissionSet>) => void
   rejectPractitioner: (id: string) => void
   assignPatient: (patientId: string, practitionerId: string) => void
   addDocument: (doc: ClinicDocument) => void
@@ -274,6 +280,7 @@ const emptyState = () => ({
   prescriptions: [] as Prescription[],
   investigationOrders: [] as InvestigationOrder[],
   secondOpinions: [] as SecondOpinion[],
+  rolePermissions: DEFAULT_ROLE_PERMISSIONS,
   invoices: [] as Invoice[],
   doseReminders: [] as DoseReminder[],
   checkIns: [] as CheckIn[],
@@ -1275,6 +1282,13 @@ export const useClinic = create<ClinicState>()(
           }),
         }))
         writeThrough(updatePractitionerDb(id, patch), 'Profile changes may not have saved.')
+      },
+
+      updateRolePermission: (role, patch) => {
+        set((s) => ({
+          rolePermissions: { ...s.rolePermissions, [role]: { ...s.rolePermissions[role], ...patch } },
+        }))
+        writeThrough(updateRolePermissionDb(role, patch), 'Permission change may not have saved.')
       },
 
       rejectPractitioner: (id) => {

@@ -55,7 +55,7 @@ import { todayISO, formatDayLabel, addDaysISO } from '../core/day'
 import { getSections, CASE_TEMPLATES } from '../core/caseTemplate'
 import { useClinic, type PublishRxInput } from '../core/store'
 import { useAuth } from '../auth/AuthProvider'
-import type { Appointment, Patient, Potency, Repetition, RxTemplate, Invoice, InvoiceLineItem, PaymentMode, ChatMessage, ReferralSource } from '../core/types'
+import type { Appointment, Patient, Potency, Repetition, RxTemplate, Invoice, InvoiceLineItem, PaymentMode, ChatMessage, ReferralSource, Role, EditableRole, RolePermissionSet } from '../core/types'
 import { isOneOffRepetition } from '../core/types'
 import { MASTER_REMEDIES } from '../core/remedies'
 import { INVESTIGATION_CATALOG, ALL_INVESTIGATIONS, wordsOf, matchesAllWords } from '../core/investigations'
@@ -85,6 +85,13 @@ const POTENCIES: Potency[] = ['6C', '12C', '30C', '200C', '1M', '10M', '50M', 'C
 const REPS: Repetition[] = ['Once daily · night', 'Twice daily', 'Alternate day', 'Weekly', 'As needed', 'Once only today']
 const CLINIC_LOCATIONS = ['Chiplun clinic', 'Pune clinic']
 const REFERRAL_SOURCES: ReferralSource[] = ['Offline', 'Instagram', 'References', 'Referral']
+
+// Owner and Practitioner have never been restricted by any of these
+// checks — only Assistant/Receptionist have a real, editable row (see
+// migration_v32) — so anyone else always passes.
+function hasRolePermission(role: Role, rolePermissions: Record<EditableRole, RolePermissionSet>, key: keyof RolePermissionSet): boolean {
+  return role === 'Assistant' || role === 'Receptionist' ? rolePermissions[role][key] : true
+}
 
 const NAV = [
   { id: 'today', icon: SunHorizon, label: 'Today' },
@@ -123,6 +130,7 @@ export function WebApp() {
 
   const doctor = useClinic((s) => s.practitioners.find((p) => p.id === s.currentPractitionerId))
   const role = useClinic((s) => s.role)
+  const rolePermissions = useClinic((s) => s.rolePermissions)
   const offline = useClinic((s) => s.offline)
   const dbError = useClinic((s) => s.dbError)
   const pendingCount = useClinic((s) => s.pendingWrites.length)
@@ -203,7 +211,7 @@ export function WebApp() {
   ]
 
   function navTo(id: string, locked?: boolean) {
-    if (locked && (role === 'Assistant' || role === 'Receptionist')) {
+    if (locked && !hasRolePermission(role, rolePermissions, 'seeCaseNotes')) {
       setScreen('restricted')
       return
     }
@@ -267,7 +275,7 @@ export function WebApp() {
         <nav className="mt-4 space-y-1">
           {NAV.map((n) => {
             const active = navActive === n.id
-            const locked = (n as any).locked && (role === 'Assistant' || role === 'Receptionist')
+            const locked = (n as any).locked && !hasRolePermission(role, rolePermissions, 'seeCaseNotes')
             return (
               <button
                 key={n.id}
@@ -951,7 +959,8 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
   const practitioners = useClinic((s) => s.practitioners.filter((p) => p.status === 'active'))
   const assignPatient = useClinic((s) => s.assignPatient)
   const role = useClinic((s) => s.role)
-  const canAssign = role !== 'Assistant' && role !== 'Receptionist'
+  const rolePermissions = useClinic((s) => s.rolePermissions)
+  const canAssign = hasRolePermission(role, rolePermissions, 'assignCases')
   const toast = useToast()
   const [active, setActive] = useState('My cases')
   const [filtersOpen, setFiltersOpen] = useState(false)
@@ -1814,6 +1823,7 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
   const addDocument = useClinic((s) => s.addDocument)
   const cancelPrescription = useClinic((s) => s.cancelPrescription)
   const role = useClinic((s) => s.role)
+  const rolePermissions = useClinic((s) => s.rolePermissions)
   const toast = useToast()
   const [assignOpen, setAssignOpen] = useState(false)
   const [billing, setBilling] = useState<{ patientId: string; appointmentId?: string; existingInvoice?: Invoice } | null>(null)
@@ -1929,7 +1939,7 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
           <div className="flex items-center gap-2">
             <h1 className="font-display text-[20px] font-bold text-ink">{patient.name}</h1>
             <div ref={assignRef}>
-              {(role === 'Assistant' || role === 'Receptionist') ? (
+              {!hasRolePermission(role, rolePermissions, 'assignCases') ? (
                 <Badge tone={patient.assignment === 'Unassigned' ? 'amber' : patient.assignment === 'Mine' ? 'green' : 'neutral'}>
                   {patient.assignment}
                 </Badge>
@@ -1987,7 +1997,7 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
               >
                 <DownloadSimple size={15} /> Export patient summary (PDF)
               </button>
-              {(role !== 'Assistant' && role !== 'Receptionist') && (
+              {hasRolePermission(role, rolePermissions, 'assignCases') && (
                 patient.archivedAt ? (
                   <button
                     onClick={() => {
@@ -2935,6 +2945,7 @@ function NotifPanel({ onClose }: { onClose: () => void }) {
   const accept = useClinic((s) => s.acceptHandoff)
   const markAll = useClinic((s) => s.markAllRead)
   const role = useClinic((s) => s.role)
+  const rolePermissions = useClinic((s) => s.rolePermissions)
   const toast = useToast()
   const iconFor = (k: string) => (k === 'handoff' ? Handshake : k === 'booking' ? CalendarCheck : k === 'low_stock' ? Warning : Bell)
   return (
@@ -2964,7 +2975,7 @@ function NotifPanel({ onClose }: { onClose: () => void }) {
                   <div className="mt-0.5 text-[11px] text-faint">{n.time}</div>
                   {n.pending && (
                     <div className="mt-2 flex gap-2">
-                      {role !== 'Assistant' && (
+                      {hasRolePermission(role, rolePermissions, 'acceptHandoffs') && (
                         <Button size="sm" variant="primary" onClick={() => { const ho = handoffs.find((h) => h.status === 'pending'); if (ho) accept(ho.id) }}>Accept</Button>
                       )}
                       <Button size="sm" variant="ghost" onClick={() => {
@@ -3449,6 +3460,8 @@ function SettingsView() {
   const updatePractitioner = useClinic((s) => s.updatePractitioner)
   const rejectPractitioner = useClinic((s) => s.rejectPractitioner)
   const assignPatient = useClinic((s) => s.assignPatient)
+  const rolePermissions = useClinic((s) => s.rolePermissions)
+  const updateRolePermission = useClinic((s) => s.updateRolePermission)
   const customCaseTemplates = useClinic((s) => s.caseTemplates)
   const deleteCaseTemplate = useClinic((s) => s.deleteCaseTemplate)
   const me = practitioners.find((p) => p.id === currentId)
@@ -3830,7 +3843,11 @@ function SettingsView() {
 
       <Card className="p-5">
         <h2 className="font-display text-[15px] font-bold text-ink">Staff & permissions</h2>
-        <p className="mt-1 text-[12.5px] text-muted">What each role can do today — the same gates the app itself enforces, not just a reference chart.</p>
+        <p className="mt-1 text-[12.5px] text-muted">
+          {role === 'Owner'
+            ? 'What each role can do — click a cell to change it. Owner and Practitioner always have full access; Schedule & billing isn\'t restrictable yet.'
+            : 'What each role can do today — the same gates the app itself enforces.'}
+        </p>
         <div className="mt-3 overflow-x-auto">
           <table className="w-full text-left text-[13px]">
             <thead>
@@ -3843,21 +3860,52 @@ function SettingsView() {
               </tr>
             </thead>
             <tbody>
-              {[
-                { role: 'Owner', caseNotes: true, schedule: true, assign: true, handoffs: true },
-                { role: 'Practitioner', caseNotes: true, schedule: true, assign: true, handoffs: true },
-                { role: 'Assistant', caseNotes: false, schedule: true, assign: false, handoffs: false },
-                { role: 'Receptionist', caseNotes: false, schedule: true, assign: false, handoffs: true },
-              ].map((r) => (
-                <tr key={r.role} className="border-b border-border last:border-0">
-                  <td className="py-2.5 pr-4 font-semibold text-ink">{r.role}</td>
-                  {[r.caseNotes, r.schedule, r.assign, r.handoffs].map((v, i) => (
-                    <td key={i} className="px-3 py-2.5">
-                      {v ? <Check size={16} weight="bold" className="text-success" /> : <X size={16} weight="bold" className="text-faint" />}
-                    </td>
-                  ))}
-                </tr>
-              ))}
+              {(['Owner', 'Practitioner', 'Assistant', 'Receptionist'] as const).map((r) => {
+                const editable = role === 'Owner' && (r === 'Assistant' || r === 'Receptionist')
+                const perms = r === 'Assistant' || r === 'Receptionist' ? rolePermissions[r] : null
+                const cells: { key: keyof RolePermissionSet | 'schedule'; value: boolean }[] = [
+                  { key: 'seeCaseNotes', value: perms ? perms.seeCaseNotes : true },
+                  { key: 'schedule', value: true },
+                  { key: 'assignCases', value: perms ? perms.assignCases : true },
+                  { key: 'acceptHandoffs', value: perms ? perms.acceptHandoffs : true },
+                ]
+                const labelFor: Record<string, string> = {
+                  seeCaseNotes: 'see case notes',
+                  assignCases: 'assign cases',
+                  acceptHandoffs: 'accept handoffs',
+                }
+                return (
+                  <tr key={r} className="border-b border-border last:border-0">
+                    <td className="py-2.5 pr-4 font-semibold text-ink">{r}</td>
+                    {cells.map((c) => {
+                      const isReallyEditable = editable && c.key !== 'schedule'
+                      const icon = c.value
+                        ? <Check size={16} weight="bold" className="text-success" />
+                        : <X size={16} weight="bold" className="text-faint" />
+                      if (!isReallyEditable) {
+                        return <td key={c.key} className="px-3 py-2.5">{icon}</td>
+                      }
+                      return (
+                        <td key={c.key} className="px-3 py-2.5">
+                          <button
+                            onClick={() => {
+                              const next = !c.value
+                              const verb = next ? 'grant' : 'remove'
+                              if (!window.confirm(`${verb === 'grant' ? 'Grant' : 'Remove'} "${labelFor[c.key]}" ${verb === 'grant' ? 'to' : 'from'} ${r}?`)) return
+                              updateRolePermission(r as EditableRole, { [c.key]: next } as Partial<RolePermissionSet>)
+                              toast({ title: 'Permission updated', message: `${r} can ${next ? 'now' : 'no longer'} ${labelFor[c.key]}.` })
+                            }}
+                            className="rounded-full p-1 transition hover:bg-surface-hover active:scale-90"
+                            title={`Click to ${c.value ? 'remove' : 'grant'}`}
+                          >
+                            {icon}
+                          </button>
+                        </td>
+                      )
+                    })}
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>

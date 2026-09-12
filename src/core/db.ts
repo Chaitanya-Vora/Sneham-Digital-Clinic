@@ -17,6 +17,8 @@ import type {
   Prescription,
   RemedyStock,
   TimeBlock,
+  EditableRole,
+  RolePermissionSet,
 } from './types'
 import type { CaseState, CustomCaseTemplate } from './caseTemplate'
 import { DEFAULT_PRACTITIONER_REMEDIES } from './remedies'
@@ -461,6 +463,35 @@ export async function fetchInvestigationOrders(): Promise<InvestigationOrder[]> 
 export async function insertInvestigationOrder(o: InvestigationOrder): Promise<boolean> {
   const { error } = await supabase.from('investigation_orders').insert(toDbInvestigationOrder(o))
   if (error) { console.error('insertInvestigationOrder:', error.message); return false }
+  return true
+}
+
+// The Owner-editable "Staff & permissions" table on Settings — same table
+// the app's own role gates read from, not just a display. Falls back to
+// the pre-existing hardcoded defaults if the fetch fails, so a transient
+// network error never silently grants access that used to be restricted.
+export const DEFAULT_ROLE_PERMISSIONS: Record<EditableRole, RolePermissionSet> = {
+  Assistant: { seeCaseNotes: false, assignCases: false, acceptHandoffs: false },
+  Receptionist: { seeCaseNotes: false, assignCases: false, acceptHandoffs: true },
+}
+
+export async function fetchRolePermissions(): Promise<Record<EditableRole, RolePermissionSet>> {
+  const { data, error } = await supabase.from('role_permissions').select('*')
+  if (error || !data) { console.error('fetchRolePermissions:', error?.message); return DEFAULT_ROLE_PERMISSIONS }
+  const result = { ...DEFAULT_ROLE_PERMISSIONS }
+  data.forEach((r: any) => {
+    result[r.role as EditableRole] = { seeCaseNotes: r.see_case_notes, assignCases: r.assign_cases, acceptHandoffs: r.accept_handoffs }
+  })
+  return result
+}
+
+export async function updateRolePermission(role: EditableRole, patch: Partial<RolePermissionSet>): Promise<boolean> {
+  const db: Record<string, unknown> = { updated_at: new Date().toISOString() }
+  if (patch.seeCaseNotes !== undefined) db.see_case_notes = patch.seeCaseNotes
+  if (patch.assignCases !== undefined) db.assign_cases = patch.assignCases
+  if (patch.acceptHandoffs !== undefined) db.accept_handoffs = patch.acceptHandoffs
+  const { error } = await supabase.from('role_permissions').update(db).eq('role', role)
+  if (error) { console.error('updateRolePermission:', error.message); return false }
   return true
 }
 
@@ -1171,6 +1202,7 @@ export interface HydratedData {
   messages: ChatMessage[]
   caseTemplates: CustomCaseTemplate[]
   secondOpinions: SecondOpinion[]
+  rolePermissions: Record<EditableRole, RolePermissionSet>
   currentPractitionerId: string
 }
 
@@ -1201,6 +1233,7 @@ export async function hydrateAll(userId: string, userName: string, isPatientSurf
     messages,
     caseTemplates,
     secondOpinions,
+    rolePermissions,
   ] = await Promise.all([
     fetchPractitioners(),
     fetchPatients(),
@@ -1221,6 +1254,7 @@ export async function hydrateAll(userId: string, userName: string, isPatientSurf
     fetchMessages(),
     fetchCaseTemplates(),
     fetchSecondOpinions(),
+    fetchRolePermissions(),
   ])
 
   const hasSelf = practitioner ? allPractitioners.some(p => p.id === practitioner.id) : true
@@ -1246,6 +1280,7 @@ export async function hydrateAll(userId: string, userName: string, isPatientSurf
     messages,
     caseTemplates,
     secondOpinions,
+    rolePermissions,
     currentPractitionerId: practitioner?.id ?? '',
   }
 }

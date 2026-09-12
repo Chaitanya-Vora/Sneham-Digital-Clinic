@@ -64,6 +64,7 @@ import { MobileFollowUp } from './MobileFollowUp'
 import { CalendarScreen } from './Calendar'
 import { PatientSearchSheet, PatientDetailScreen, AddPatientSheet, InvoiceSheet } from './PatientSearch'
 import { TodayGrid } from './TodayGrid'
+import { PatientQuickView } from './PatientQuickView'
 import { VideoConsult } from '../video/VideoConsult'
 import { ChatThread } from '../components/ChatThread'
 
@@ -83,7 +84,16 @@ const refresh = async () => {
 export function PractitionerApp() {
   const [tab, setTab] = useState<Tab>('today')
   const [dir, setDir] = useState(1)
-  const [overlay, setOverlay] = useState<Overlay>(null)
+  // Overlay navigation as one atomic value — current screen, what's
+  // stacked underneath it (so Patient detail -> Case sheet -> Back returns
+  // to Patient detail, not the tab root), and which way to animate. Kept as
+  // a single setState call per action rather than nesting setState inside
+  // another's updater — React StrictMode's dev-only double-invocation of
+  // updater functions turned that into a real bug (Back silently needing an
+  // extra tap) the moment the updater had a side effect in it.
+  const [overlayNav, setOverlayNav] = useState<{ current: Overlay; history: Overlay[]; dir: number }>({ current: null, history: [], dir: 1 })
+  const overlay = overlayNav.current
+  const overlayDir = overlayNav.dir
   const [switchOpen, setSwitchOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [addPatientOpen, setAddPatientOpen] = useState(false)
@@ -111,6 +121,36 @@ export function PractitionerApp() {
     setRxPatientId(patientId)
     goTab('rx')
   }
+
+  // A fresh entry point (from a tab root, global search, or "add patient")
+  // — no back-history yet, since there's nothing underneath to return to.
+  const openOverlay = (next: Overlay) => {
+    setOverlayNav({ current: next, history: [], dir: 1 })
+  }
+  // Navigating deeper from within an already-open overlay (e.g. Patient
+  // detail -> Case sheet) — keeps what's open now so Back can return to it,
+  // instead of skipping past it to the tab root.
+  const pushOverlay = (next: Overlay) => {
+    setOverlayNav((s) => ({
+      current: next,
+      history: s.current ? [...s.history, s.current] : s.history,
+      dir: 1,
+    }))
+  }
+  // Back — pop one level if there's history to return to, else close fully.
+  const closeOverlay = () => {
+    setOverlayNav((s) => {
+      if (s.history.length === 0) return { current: null, history: [], dir: -1 }
+      return { current: s.history[s.history.length - 1], history: s.history.slice(0, -1), dir: -1 }
+    })
+  }
+  // Prescribing exits the whole patient-detail flow into a different tab —
+  // the overlay history no longer applies once we've left it.
+  const exitOverlayToRx = (patientId: string) => {
+    setOverlayNav({ current: null, history: [], dir: 1 })
+    goToRx(patientId)
+  }
+
   const tabIdx = TAB_ORDER.indexOf(tab)
   const swipe = useHorizontalSwipe({
     onNext: () => { if (tabIdx < TAB_ORDER.length - 1) goTab(TAB_ORDER[tabIdx + 1]) },
@@ -181,13 +221,17 @@ export function PractitionerApp() {
           <AnimatePresence custom={dir} initial={false}>
             <motion.div key={tab} className="absolute inset-0" custom={dir} variants={tabVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.15 }} {...swipe}>
               {tab === 'calendar' ? (
-                <CalendarScreen onOpenPatient={(id) => setOverlay({ kind: 'patient-detail', patientId: id })} />
+                <CalendarScreen
+                  onOpenPatient={(id) => openOverlay({ kind: 'patient-detail', patientId: id })}
+                  openCase={(id) => openOverlay({ kind: 'case', patientId: id })}
+                  goRx={goToRx}
+                />
               ) : (
                 <PullToRefresh onRefresh={refresh} className="h-full px-[18px] pb-[120px] pt-2">
-                  {tab === 'today' && <TodayGrid openCase={(id) => setOverlay({ kind: 'case', patientId: id })} goRx={goToRx} startVideo={(apptId) => setOverlay({ kind: 'video', appointmentId: apptId })} onQuickBill={() => setBillSearchOpen(true)} onInstantMeeting={() => setInstantMeetingOpen(true)} />}
-                  {tab === 'followups' && <FollowupsScreen openCompare={(id) => setOverlay({ kind: 'compare', patientId: id })} />}
+                  {tab === 'today' && <TodayGrid openCase={(id) => openOverlay({ kind: 'case', patientId: id })} goRx={goToRx} startVideo={(apptId) => openOverlay({ kind: 'video', appointmentId: apptId })} onQuickBill={() => setBillSearchOpen(true)} onInstantMeeting={() => setInstantMeetingOpen(true)} />}
+                  {tab === 'followups' && <FollowupsScreen openCompare={(id) => openOverlay({ kind: 'compare', patientId: id })} openCase={(id) => openOverlay({ kind: 'case', patientId: id })} goRx={goToRx} />}
                   {tab === 'rx' && <QuickRxScreen patientId={rxPatientId} onPatientPicked={setRxPatientId} />}
-                  {tab === 'inbox' && <InboxScreen onOpenPatient={(id) => setOverlay({ kind: 'patient-detail', patientId: id })} onOpenChat={(id, name) => setOverlay({ kind: 'chat', patientId: id, patientName: name })} />}
+                  {tab === 'inbox' && <InboxScreen onOpenPatient={(id) => openOverlay({ kind: 'patient-detail', patientId: id })} onOpenChat={(id, name) => openOverlay({ kind: 'chat', patientId: id, patientName: name })} />}
                 </PullToRefresh>
               )}
             </motion.div>
@@ -197,29 +241,30 @@ export function PractitionerApp() {
 
       <TabBar tab={tab} onChange={(t) => (t === 'rx' ? goToRx(null) : goTab(t))} />
 
-      {/* overlays: case sheet / compare / video */}
-      <AnimatePresence custom={1}>
+      {/* overlays: case sheet / compare / video — dir flips to -1 on Back so
+          the slide direction matches native forward/back conventions */}
+      <AnimatePresence custom={overlayDir}>
         {overlay && (
-          <motion.div key={overlay.kind + ('patientId' in overlay ? overlay.patientId : overlay.appointmentId)} className="absolute inset-0 z-40 bg-screen" custom={1} variants={pushVariants} initial="enter" animate="center" exit="exit" transition={spring}>
-            <EdgeSwipeBack onBack={() => setOverlay(null)}>
+          <motion.div key={overlay.kind + ('patientId' in overlay ? overlay.patientId : overlay.appointmentId)} className="absolute inset-0 z-40 bg-screen" custom={overlayDir} variants={pushVariants} initial="enter" animate="center" exit="exit" transition={spring}>
+            <EdgeSwipeBack onBack={closeOverlay}>
               {overlay.kind === 'video' ? (
-                <VideoConsultOverlay appointmentId={overlay.appointmentId} onClose={() => setOverlay(null)} />
+                <VideoConsultOverlay appointmentId={overlay.appointmentId} onClose={closeOverlay} />
               ) : overlay.kind === 'case' ? (
-                <MobileCaseSheet patientId={overlay.patientId} onBack={() => setOverlay(null)} onPrescribe={() => { setOverlay(null); goToRx(overlay.patientId) }} />
+                <MobileCaseSheet patientId={overlay.patientId} onBack={closeOverlay} onPrescribe={() => exitOverlayToRx(overlay.patientId)} />
               ) : overlay.kind === 'compare' ? (
-                <MobileFollowUp patientId={overlay.patientId} onBack={() => setOverlay(null)} onDone={() => setOverlay(null)} />
+                <MobileFollowUp patientId={overlay.patientId} onBack={closeOverlay} onDone={closeOverlay} />
               ) : overlay.kind === 'chat' ? (
-                <ChatOverlay patientId={overlay.patientId} patientName={overlay.patientName} onBack={() => setOverlay(null)} />
+                <ChatOverlay patientId={overlay.patientId} patientName={overlay.patientName} onBack={closeOverlay} />
               ) : overlay.kind === 'investigations' ? (
-                <QuickInvestigationScreen patientId={overlay.patientId} onBack={() => setOverlay(null)} />
+                <QuickInvestigationScreen patientId={overlay.patientId} onBack={closeOverlay} />
               ) : (
                 <PatientDetailScreen
                   patientId={overlay.patientId}
-                  onBack={() => setOverlay(null)}
-                  onOpenCase={(id) => setOverlay({ kind: 'case', patientId: id })}
-                  onOpenFollowUp={(id) => setOverlay({ kind: 'compare', patientId: id })}
-                  onPrescribe={() => { setOverlay(null); goToRx(overlay.patientId) }}
-                  onOrderInvestigations={() => setOverlay({ kind: 'investigations', patientId: overlay.patientId })}
+                  onBack={closeOverlay}
+                  onOpenCase={(id) => pushOverlay({ kind: 'case', patientId: id })}
+                  onOpenFollowUp={(id) => pushOverlay({ kind: 'compare', patientId: id })}
+                  onPrescribe={() => exitOverlayToRx(overlay.patientId)}
+                  onOrderInvestigations={() => pushOverlay({ kind: 'investigations', patientId: overlay.patientId })}
                 />
               )}
             </EdgeSwipeBack>
@@ -231,13 +276,13 @@ export function PractitionerApp() {
       <PatientSearchSheet
         open={searchOpen}
         onClose={() => setSearchOpen(false)}
-        onSelect={(id) => { setSearchOpen(false); setOverlay({ kind: 'patient-detail', patientId: id }) }}
+        onSelect={(id) => { setSearchOpen(false); openOverlay({ kind: 'patient-detail', patientId: id }) }}
         onAddPatient={() => { setSearchOpen(false); setAddPatientOpen(true) }}
       />
       <AddPatientSheet
         open={addPatientOpen}
         onClose={() => setAddPatientOpen(false)}
-        onAdded={(id) => { setAddPatientOpen(false); setOverlay({ kind: 'case', patientId: id }) }}
+        onAdded={(id) => { setAddPatientOpen(false); openOverlay({ kind: 'case', patientId: id }) }}
       />
       <PatientSearchSheet
         open={billSearchOpen}
@@ -341,9 +386,10 @@ function ProfileSheet({ open, onClose }: { open: boolean; onClose: () => void })
 }
 
 // ── FOLLOW-UPS ──
-function FollowupsScreen({ openCompare }: { openCompare: (id: string) => void }) {
+function FollowupsScreen({ openCompare, openCase, goRx }: { openCompare: (id: string) => void; openCase: (id: string) => void; goRx: (id: string) => void }) {
   const patients = useClinic((s) => s.patients)
   const appointments = useClinic((s) => s.appointments)
+  const [peekPatientId, setPeekPatientId] = useState<string | null>(null)
   const rows = useMemo(() => {
     return patients
       .filter((p) => p.currentRemedy)
@@ -382,7 +428,12 @@ function FollowupsScreen({ openCompare }: { openCompare: (id: string) => void })
             <Pressable as="div" hap="tick" scale={0.99} onClick={() => openCompare(r.id)} className="flex w-full cursor-pointer items-center gap-3 rounded-[20px] border border-border bg-surface px-3.5 py-3 shadow-card">
               <Avatar initials={r.i} size={40} />
               <div className="flex-1">
-                <div className="font-display text-[14px] font-semibold text-ink">{r.name}</div>
+                <div
+                  onClick={(e) => { e.stopPropagation(); haptic('tick'); setPeekPatientId(r.id) }}
+                  className="font-display text-[14px] font-semibold text-ink underline decoration-border-dash decoration-1 underline-offset-2"
+                >
+                  {r.name}
+                </div>
                 <div className="text-[12px] text-muted">{r.remedy}</div>
               </div>
               <div className="text-right">
@@ -394,6 +445,7 @@ function FollowupsScreen({ openCompare }: { openCompare: (id: string) => void })
         ))}
       </motion.div>
       )}
+      <PatientQuickView patientId={peekPatientId} onClose={() => setPeekPatientId(null)} onOpenCase={openCase} onPrescribe={goRx} />
     </div>
   )
 }

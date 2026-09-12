@@ -533,7 +533,7 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
               <Avatar initials={p.initials} size={38} />
               <div className="flex-1">
                 <div className="font-display text-[14px] font-semibold text-ink">{p.name}</div>
-                <div className="text-[12px] text-muted">{p.age} &middot; #{p.wsCode}</div>
+                <div className="text-[12px] text-muted">{p.age} &middot; {p.wsCode}</div>
               </div>
             </Pressable>
           ))}
@@ -556,7 +556,7 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
         <Avatar initials={currentPatient.initials} size={40} />
         <div className="flex-1">
           <div className="font-display text-[14px] font-semibold text-ink">{currentPatient.name} · {currentPatient.age}</div>
-          <div className="text-[12px] text-muted">#{currentPatient.wsCode}</div>
+          <div className="text-[12px] text-muted">{currentPatient.wsCode}</div>
         </div>
         <Pressable hap="tick" onClick={() => onPatientPicked(null)} className="text-[12px] font-semibold text-brand">Change</Pressable>
       </Card>

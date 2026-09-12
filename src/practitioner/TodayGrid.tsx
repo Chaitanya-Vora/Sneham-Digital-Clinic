@@ -19,6 +19,7 @@ import {
   Warning,
   CalendarBlank,
   CurrencyInr,
+  DotsThreeVertical,
 } from '@phosphor-icons/react'
 import { todayISO, toISO, formatDayLabel, firstAvailableMorningSlot, isPastISO, isTodayISO } from '../core/day'
 import { useClinic } from '../core/store'
@@ -103,6 +104,7 @@ export function TodayGrid({
   // defaulting to "mine": a practitioner's own day first, not the whole
   // clinic merged into one grid with no indication of whose slot is whose.
   const [viewMode, setViewMode] = useState<'mine' | 'everyone'>('mine')
+  const [quickActionsOpen, setQuickActionsOpen] = useState(false)
   const [endConsultSheet, setEndConsultSheet] = useState<string | null>(null)
   const [followUpSheet, setFollowUpSheet] = useState<string | null>(null)
   const [noShowSheet, setNoShowSheet] = useState<string | null>(null)
@@ -242,26 +244,13 @@ export function TodayGrid({
           <span className="text-[13px] font-medium text-danger">Could not reach the database — data below may be incomplete</span>
         </div>
       )}
-      {/* schedule header — Quick bill always available; Mine/Everyone is Owner only, mirrors the web console exactly */}
+      {/* schedule header — Quick bill/Instant meeting live behind one kebab
+          (crammed inline as three separate pills, they wrapped onto two
+          lines at phone width); Mine/Everyone is Owner only, mirrors the
+          web console exactly */}
       <div className="flex items-center justify-between">
         <Label>Today's schedule</Label>
         <div className="flex items-center gap-2">
-          <Pressable
-            hap="tick"
-            onClick={onQuickBill}
-            className="flex items-center gap-1 rounded-pill border border-border bg-surface px-2.5 py-1 text-[12px] font-semibold text-body"
-          >
-            <CurrencyInr size={13} weight="bold" /> Quick bill
-          </Pressable>
-          {onInstantMeeting && (
-            <Pressable
-              hap="tick"
-              onClick={onInstantMeeting}
-              className="flex items-center gap-1 rounded-pill border border-border bg-surface px-2.5 py-1 text-[12px] font-semibold text-body"
-            >
-              <VideoCamera size={13} weight="bold" /> Instant meeting
-            </Pressable>
-          )}
           {role === 'Owner' && (
             <div className="inline-flex rounded-pill border border-border bg-surface p-0.5">
               {(['mine', 'everyone'] as const).map((m) => (
@@ -276,8 +265,42 @@ export function TodayGrid({
               ))}
             </div>
           )}
+          <Pressable
+            ariaLabel="quick actions"
+            hap="tick"
+            onClick={() => setQuickActionsOpen(true)}
+            className="flex h-7 w-7 items-center justify-center rounded-full border border-border bg-surface"
+          >
+            <DotsThreeVertical size={16} weight="bold" className="text-body" />
+          </Pressable>
         </div>
       </div>
+
+      <BottomSheet open={quickActionsOpen} onClose={() => setQuickActionsOpen(false)}>
+        <div className="font-display text-[17px] font-bold text-ink">Quick actions</div>
+        <div className="mt-3 space-y-1">
+          <Pressable
+            as="div"
+            hap="tick"
+            onClick={() => { setQuickActionsOpen(false); onQuickBill() }}
+            className="flex cursor-pointer items-center gap-3 rounded-[14px] px-2 py-3"
+          >
+            <CurrencyInr size={18} className="text-body" />
+            <span className="text-[14px] font-medium text-ink">Quick bill</span>
+          </Pressable>
+          {onInstantMeeting && (
+            <Pressable
+              as="div"
+              hap="tick"
+              onClick={() => { setQuickActionsOpen(false); onInstantMeeting() }}
+              className="flex cursor-pointer items-center gap-3 rounded-[14px] px-2 py-3"
+            >
+              <VideoCamera size={18} className="text-body" />
+              <span className="text-[14px] font-medium text-ink">Instant meeting</span>
+            </Pressable>
+          )}
+        </div>
+      </BottomSheet>
 
       {/* header row: stats + view toggle */}
       <div className="flex items-center gap-3">

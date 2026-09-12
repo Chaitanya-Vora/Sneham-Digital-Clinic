@@ -2,7 +2,7 @@ import { jsPDF } from 'jspdf'
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 import QRCode from 'qrcode'
 import { Capacitor } from '@capacitor/core'
-import type { Prescription, Patient, InvestigationOrder, Invoice } from './types'
+import type { Prescription, Patient, InvestigationOrder, Invoice, Outcome } from './types'
 import { CLINIC_DETAILS, SNEHAM_LOGO_BASE64, NEHA_SIGNATURE_BASE64, ROBOTO_REGULAR_URL, ROBOTO_BOLD_URL } from './letterheadAssets'
 import { INVESTIGATION_CATALOG } from './investigations'
 import { invoiceTotal, invoiceBalance, numberToWordsIndian, buildUpiLink } from './billing'
@@ -475,4 +475,228 @@ export async function exportInvoicePdf(invoice: Invoice, patient: Patient) {
 
   const fileName = `Invoice_${invoice.invoiceNo}_${patient.name.replace(/\s/g, '_')}.pdf`
   await savePdf(doc, fileName)
+}
+// ── PATIENT HISTORY SUMMARY (for a second-opinion / referral export) ──
+// One consolidated document a practitioner can hand to another doctor —
+// real remedy names throughout (this is doctor-to-doctor, not the
+// patient-facing prescription slip's bodyText-only convention). Cancelled
+// prescriptions are included, clearly marked, for a complete clinical
+// picture; drafts are excluded (never finalized). Built on the same
+// general letterhead/font helpers exportInvoicePdf uses, not the
+// prescription-slip-specific helpers, since this is its own multi-page,
+// multi-section document.
+function historyDateFmt(iso: string) {
+  return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
+// A section header with a thin brand-colored rule beneath it and a
+// generous gap before — the visual device that gives this document real
+// hierarchy instead of same-weight text stacked top to bottom.
+function drawHistorySectionHeader(doc: jsPDF, margin: number, contentW: number, y: number, label: string): number {
+  doc.setFont('Roboto', 'bold')
+  doc.setFontSize(11.5)
+  doc.setTextColor(BRAND)
+  doc.text(label.toUpperCase(), margin, y)
+  doc.setDrawColor(BRAND)
+  doc.setLineWidth(0.5)
+  doc.line(margin, y + 2, margin + contentW, y + 2)
+  return y + 9
+}
+
+function drawHistoryDivider(doc: jsPDF, margin: number, contentW: number, y: number) {
+  doc.setDrawColor(BORDER)
+  doc.setLineWidth(0.15)
+  doc.line(margin, y, margin + contentW, y)
+}
+
+export async function exportPatientHistoryPdf(
+  patient: Patient,
+  prescriptions: Prescription[],
+  investigationOrders: InvestigationOrder[],
+  outcomes: Outcome[],
+) {
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' })
+  await registerInvoiceFont(doc)
+  const pw = doc.internal.pageSize.getWidth()
+  const ph = doc.internal.pageSize.getHeight()
+  const margin = 18
+  const contentW = pw - margin * 2
+  const pageBottom = ph - margin - 8
+
+  const ensureRoom = (needed: number, y: number): number => {
+    if (y + needed <= pageBottom) return y
+    doc.addPage()
+    return drawLetterhead(doc, pw, margin)
+  }
+
+  let y = drawLetterhead(doc, pw, margin)
+
+  doc.setFont('Roboto', 'bold')
+  doc.setFontSize(19)
+  doc.setTextColor(BRAND)
+  doc.text('Patient Summary', pw / 2, y + 5, { align: 'center' })
+  doc.setFont('Roboto', 'normal')
+  doc.setFontSize(8.5)
+  doc.setTextColor(MUTED)
+  doc.text('Prepared for professional reference / clinical consultation', pw / 2, y + 11, { align: 'center' })
+  y += 20
+
+  // Patient info block — a real card, not just left-aligned text, so this
+  // reads as the document's anchor rather than one more line of copy.
+  const infoBoxH = 30
+  doc.setFillColor('#F4F6F8')
+  doc.setDrawColor('#E2E5E9')
+  doc.setLineWidth(0.2)
+  doc.roundedRect(margin, y, contentW, infoBoxH, 2.5, 2.5, 'FD')
+  doc.setFont('Roboto', 'bold')
+  doc.setFontSize(13)
+  doc.setTextColor(INK)
+  doc.text(patient.name, margin + 6, y + 8)
+  doc.setFont('Roboto', 'normal')
+  doc.setFontSize(8.5)
+  doc.setTextColor(MUTED)
+  doc.text(`${patient.age}y · ${patient.sex} · ${patient.wsCode} · ${patient.location}`, margin + 6, y + 13.5)
+
+  const col2X = margin + contentW * 0.52
+  doc.setFont('Roboto', 'bold')
+  doc.setFontSize(8.2)
+  doc.setTextColor(MUTED)
+  doc.text('CHIEF COMPLAINT', margin + 6, y + 20)
+  doc.text('CURRENT REMEDY', col2X, y + 20)
+  doc.setFont('Roboto', 'normal')
+  doc.setFontSize(9)
+  doc.setTextColor(INK)
+  doc.text(patient.chiefComplaint || '—', margin + 6, y + 24.5, { maxWidth: contentW * 0.48 - 8 })
+  doc.text(patient.currentRemedy || '—', col2X, y + 24.5, { maxWidth: contentW * 0.48 - 8 })
+  y += infoBoxH + 5
+
+  doc.setFont('Roboto', 'normal')
+  doc.setFontSize(8.2)
+  doc.setTextColor(MUTED)
+  doc.text(`Allergies: ${patient.allergies || 'None recorded'}   ·   Regular medication: ${patient.regularMedication || 'None recorded'}`, margin, y)
+  y += 10
+
+  const sortedRx = [...prescriptions]
+    .filter((r) => r.status !== 'draft')
+    .sort((a, b) => (b.publishedAt ?? b.createdAt).localeCompare(a.publishedAt ?? a.createdAt))
+  const sortedInvestigations = [...investigationOrders].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  const sortedOutcomes = [...outcomes].sort((a, b) => b.date.localeCompare(a.date))
+
+  // Prescription history
+  y = ensureRoom(20, y)
+  y = drawHistorySectionHeader(doc, margin, contentW, y, 'Prescription history')
+  if (sortedRx.length === 0) {
+    doc.setFont('Roboto', 'normal')
+    doc.setFontSize(9)
+    doc.setTextColor(MUTED)
+    doc.text('No prescriptions on record.', margin, y)
+    y += 8
+  } else {
+    sortedRx.forEach((r, i) => {
+      y = ensureRoom(13, y)
+      const cancelled = r.status === 'cancelled'
+      doc.setFont('Roboto', 'bold')
+      doc.setFontSize(10)
+      doc.setTextColor(cancelled ? MUTED : INK)
+      const title = `${r.remedy} ${r.potency}`
+      doc.text(title, margin, y)
+      if (cancelled) {
+        const w = doc.getTextWidth(title)
+        doc.setDrawColor(MUTED)
+        doc.setLineWidth(0.3)
+        doc.line(margin, y - 1.3, margin + w, y - 1.3)
+      }
+      doc.setFont('Roboto', 'normal')
+      doc.setFontSize(8.5)
+      doc.setTextColor(MUTED)
+      doc.text(historyDateFmt(r.publishedAt ?? r.createdAt), pw - margin, y, { align: 'right' })
+      y += 4.8
+      doc.setTextColor(cancelled ? MUTED : MUTED)
+      doc.text(
+        `${r.repetition} · ${r.doseGlobules} globules${r.durationDays ? ` · ${r.durationDays} days` : ' · until settled'}${cancelled ? '  ·  Cancelled — not an active prescription' : ''}`,
+        margin, y,
+      )
+      y += 5
+      if (i < sortedRx.length - 1) { drawHistoryDivider(doc, margin, contentW, y); y += 3.5 }
+    })
+    y += 4
+  }
+
+  // Investigation orders
+  y = ensureRoom(20, y)
+  y = drawHistorySectionHeader(doc, margin, contentW, y, 'Investigation orders')
+  if (sortedInvestigations.length === 0) {
+    doc.setFont('Roboto', 'normal')
+    doc.setFontSize(9)
+    doc.setTextColor(MUTED)
+    doc.text('No investigations ordered.', margin, y)
+    y += 8
+  } else {
+    sortedInvestigations.forEach((order, i) => {
+      y = ensureRoom(16, y)
+      doc.setFont('Roboto', 'bold')
+      doc.setFontSize(9.5)
+      doc.setTextColor(INK)
+      doc.text(historyDateFmt(order.createdAt), margin, y)
+      y += 4.8
+      doc.setFont('Roboto', 'normal')
+      doc.setFontSize(9)
+      doc.setTextColor(INK)
+      const testLines = doc.splitTextToSize(order.tests.join(', ') || '—', contentW)
+      doc.text(testLines, margin, y)
+      y += testLines.length * 4.2
+      if (order.notes.trim()) {
+        doc.setTextColor(MUTED)
+        doc.setFontSize(8.5)
+        const noteLines = doc.splitTextToSize(`Note: ${order.notes.trim()}`, contentW)
+        doc.text(noteLines, margin, y)
+        y += noteLines.length * 4
+      }
+      y += 2
+      if (i < sortedInvestigations.length - 1) { drawHistoryDivider(doc, margin, contentW, y); y += 3.5 }
+    })
+    y += 4
+  }
+
+  // Outcomes / clinical assessments
+  y = ensureRoom(20, y)
+  y = drawHistorySectionHeader(doc, margin, contentW, y, 'Clinical outcomes')
+  if (sortedOutcomes.length === 0) {
+    doc.setFont('Roboto', 'normal')
+    doc.setFontSize(9)
+    doc.setTextColor(MUTED)
+    doc.text('No outcomes recorded.', margin, y)
+    y += 8
+  } else {
+    sortedOutcomes.forEach((o, i) => {
+      y = ensureRoom(13, y)
+      doc.setFont('Roboto', 'bold')
+      doc.setFontSize(10)
+      doc.setTextColor(INK)
+      doc.text(`${o.outcome} — ${o.remedy}`, margin, y)
+      doc.setFont('Roboto', 'normal')
+      doc.setFontSize(8.5)
+      doc.setTextColor(MUTED)
+      doc.text(historyDateFmt(o.date), pw - margin, y, { align: 'right' })
+      y += 4.8
+      if (o.note.trim()) {
+        doc.setTextColor(MUTED)
+        const noteLines = doc.splitTextToSize(o.note.trim(), contentW)
+        doc.text(noteLines, margin, y)
+        y += noteLines.length * 4
+      }
+      y += 2
+      if (i < sortedOutcomes.length - 1) { drawHistoryDivider(doc, margin, contentW, y); y += 3.5 }
+    })
+  }
+
+  y = ensureRoom(20, y)
+  drawSignatureFooter(doc, pw, margin, Math.min(y + 10, ph - margin - 2))
+
+  const fileName = `Patient_Summary_${patient.name.replace(/\s/g, '_')}_${todayFileStamp()}.pdf`
+  await savePdf(doc, fileName)
+}
+
+function todayFileStamp() {
+  return new Date().toISOString().slice(0, 10)
 }

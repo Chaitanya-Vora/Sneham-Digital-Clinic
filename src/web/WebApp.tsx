@@ -76,7 +76,7 @@ import { CommandPalette, type Command } from './CommandPalette'
 import { WebCalendar } from './WebCalendar'
 import { AppointmentModal, type AppointmentModalRequest } from './AppointmentModal'
 import { VideoConsult } from '../video/VideoConsult'
-import { exportPrescriptionPdf, exportInvoicePdf, exportInvestigationOrderPdf } from '../core/pdfExport'
+import { exportPrescriptionPdf, exportInvoicePdf, exportInvestigationOrderPdf, exportPatientHistoryPdf } from '../core/pdfExport'
 
 type Screen = 'today' | 'calendar' | 'patients' | 'patient' | 'prescription' | 'investigations' | 'casesheet' | 'followup' | 'reports' | 'settings' | 'restricted' | 'prescriptions-all' | 'casenotes-all' | 'followups-all' | 'messages'
 const POTENCIES: Potency[] = ['6C', '12C', '30C', '200C', '1M', '10M', '50M', 'CM', 'LM', 'Q']
@@ -94,6 +94,14 @@ const NAV = [
   { id: 'reports', icon: ChartLineUp, label: 'Reports' },
   { id: 'settings', icon: GearSix, label: 'Settings' },
 ] as const
+
+// The command palette shortcut itself already listens for either key
+// (metaKey OR ctrlKey, below) — this is purely the visible hint, which
+// was previously hardcoded to the Mac symbol even on Windows/Linux,
+// showing the wrong key entirely for most of the world's desktop users.
+const CMD_KEY_LABEL = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
+  ? '⌘K'
+  : 'Ctrl+K'
 
 export function WebApp() {
   const { signOut } = useAuth()
@@ -306,7 +314,7 @@ export function WebApp() {
             >
               <MagnifyingGlass size={15} className="text-faint" />
               <span className="w-[200px] text-[13px] text-faint">Search patients, cases, invoices</span>
-              <kbd className="rounded-[6px] border border-border bg-screen px-1.5 py-0.5 text-[11px] font-semibold text-faint">⌘K</kbd>
+              <kbd className="rounded-[6px] border border-border bg-screen px-1.5 py-0.5 text-[11px] font-semibold text-faint">{CMD_KEY_LABEL}</kbd>
             </button>
             <Badge tone={offline || dbError ? 'amber' : 'green'}>
               <CloudCheck size={13} weight="fill" />
@@ -1737,6 +1745,7 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
   const rx = useClinic((s) => s.prescriptions.filter((r) => r.patientId === patientId))
   const docs = useClinic((s) => s.documents.filter((d) => d.patientId === patientId))
   const outcomes = useClinic((s) => s.outcomes.filter((o) => o.patientId === patientId))
+  const investigationOrders = useClinic((s) => s.investigationOrders.filter((o) => o.patientId === patientId))
   const checkIns = useClinic((s) => s.checkIns.filter((c) => c.patientId === patientId))
   const handoffs = useClinic((s) => s.handoffs.filter((h) => h.patientId === patientId))
   const secondOpinions = useClinic((s) => s.secondOpinions.filter((o) => o.patientId === patientId))
@@ -1909,6 +1918,18 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
                 className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-[13px] text-body transition hover:bg-surface-hover"
               >
                 <PencilSimple size={15} /> Edit patient details
+              </button>
+              <button
+                onClick={async () => {
+                  setPatientMenuOpen(false)
+                  await exportPatientHistoryPdf(patient, rx, investigationOrders, outcomes).catch((e) => {
+                    console.error('Patient history PDF export failed', e)
+                    toast({ title: 'Export failed', message: e instanceof Error ? e.message : 'Please try again.' })
+                  })
+                }}
+                className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-[13px] text-body transition hover:bg-surface-hover"
+              >
+                <DownloadSimple size={15} /> Export patient summary (PDF)
               </button>
               {(role !== 'Assistant' && role !== 'Receptionist') && (
                 patient.archivedAt ? (
@@ -3308,10 +3329,12 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
 // ── SETTINGS ──
 function SettingsView() {
   const practitioners = useClinic((s) => s.practitioners)
+  const patients = useClinic((s) => s.patients)
   const currentId = useClinic((s) => s.currentPractitionerId)
   const role = useClinic((s) => s.role)
   const updatePractitioner = useClinic((s) => s.updatePractitioner)
   const rejectPractitioner = useClinic((s) => s.rejectPractitioner)
+  const assignPatient = useClinic((s) => s.assignPatient)
   const customCaseTemplates = useClinic((s) => s.caseTemplates)
   const deleteCaseTemplate = useClinic((s) => s.deleteCaseTemplate)
   const me = practitioners.find((p) => p.id === currentId)
@@ -3639,9 +3662,20 @@ function SettingsView() {
               {role === 'Owner' && pr.id !== currentId && pr.role !== 'Owner' && (
                 <button
                   onClick={() => {
-                    if (!window.confirm(`Remove ${pr.name} from the active team? Their existing patients, appointments, and case history stay exactly as they are — this just ends their access and takes them off the roster. You can reinstate them any time.`)) return
+                    const owner = practitioners.find((p) => p.role === 'Owner')
+                    const owned = patients.filter((p) => p.owningPractitionerId === pr.id)
+                    const reassignNote = owned.length > 0
+                      ? ` ${owned.length} of their patient${owned.length !== 1 ? 's' : ''} will be automatically reassigned to ${owner?.name ?? 'you'} so no one is left without an owner.`
+                      : ''
+                    if (!window.confirm(`Remove ${pr.name} from the active team?${reassignNote} Their appointments, prescriptions, and case history all stay exactly as they are — this just ends their access. You can reinstate them any time.`)) return
                     updatePractitioner(pr.id, { status: 'inactive' })
-                    toast({ title: 'Practitioner removed', message: `${pr.name} no longer has access. Reinstate any time below.` })
+                    if (owner) owned.forEach((p) => assignPatient(p.id, owner.id))
+                    toast({
+                      title: 'Practitioner removed',
+                      message: owned.length > 0
+                        ? `${pr.name} no longer has access. ${owned.length} patient${owned.length !== 1 ? 's' : ''} reassigned to ${owner?.name ?? 'the clinic owner'}.`
+                        : `${pr.name} no longer has access. Reinstate any time below.`,
+                    })
                   }}
                   className="rounded-full p-1.5 text-faint transition hover:bg-danger/10 hover:text-danger"
                   title="Remove from team"

@@ -14,7 +14,7 @@ const TABLES = [
   "remedy_stock", "video_rooms",
 ] as const;
 
-const RETENTION_DAYS = 30;
+const RETENTION_DAYS = 90;
 
 Deno.serve(async (req: Request) => {
   // The cron invocation authenticates with the project's own anon key
@@ -43,7 +43,7 @@ Deno.serve(async (req: Request) => {
   }
 
   const today = new Date().toISOString().slice(0, 10);
-  const path = `daily/${today}.json`;
+  const path = `weekly/${today}.json`;
   const body = JSON.stringify(snapshot);
 
   const { error: uploadError } = await supabase.storage
@@ -54,7 +54,7 @@ Deno.serve(async (req: Request) => {
 
   // Prune backups older than the retention window so storage doesn't
   // grow unbounded — this is a safety net, not a permanent archive.
-  const { data: existing } = await supabase.storage.from("backups").list("daily", { limit: 1000 });
+  const { data: existing } = await supabase.storage.from("backups").list("weekly", { limit: 1000 });
   if (existing) {
     const cutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000;
     const stale = existing
@@ -63,7 +63,7 @@ Deno.serve(async (req: Request) => {
         if (!m) return false;
         return new Date(m[1] + "T00:00:00Z").getTime() < cutoff;
       })
-      .map((f) => `daily/${f.name}`);
+      .map((f) => `weekly/${f.name}`);
     if (stale.length > 0) await supabase.storage.from("backups").remove(stale);
   }
 

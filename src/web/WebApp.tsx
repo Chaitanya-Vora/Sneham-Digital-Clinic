@@ -48,6 +48,8 @@ import {
   FilePdf,
   DotsThreeVertical,
   Eye,
+  Archive,
+  ArrowCounterClockwise,
 } from '@phosphor-icons/react'
 import { todayISO, formatDayLabel, addDaysISO } from '../core/day'
 import { getSections, CASE_TEMPLATES } from '../core/caseTemplate'
@@ -1175,7 +1177,7 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
               }}
               className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-[13px] font-semibold text-brand transition hover:bg-surface-hover"
             >
-              Restore patient
+              <ArrowCounterClockwise size={15} /> Restore patient
             </button>
           ) : (
             <>
@@ -1189,7 +1191,7 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
                 }}
                 className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-[13px] font-semibold text-body transition hover:bg-surface-hover"
               >
-                Archive patient
+                <Archive size={15} /> Archive patient
               </button>
               <div className="border-t border-border px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-faint">Reassign to</div>
               {practitioners.map((pr) => (
@@ -1897,7 +1899,13 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
             </div>
           </div>
           <div className="text-[13px] text-muted">
-            {patient.age} · {patient.sex} · {patient.wsCode} · {patient.location} · patient since {patient.patientSince}
+            {[
+              `${patient.age} · ${patient.sex}`,
+              patient.wsCode,
+              patient.location,
+              patient.phone,
+              `patient since ${patient.patientSince}`,
+            ].filter(Boolean).join(' · ')}
           </div>
         </div>
         <Button variant="ghost" size="sm" onClick={onFollowUp}><ArrowsClockwise size={15} /> Follow-up</Button>
@@ -1941,7 +1949,7 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
                     }}
                     className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-[13px] font-semibold text-brand transition hover:bg-surface-hover"
                   >
-                    Restore patient
+                    <ArrowCounterClockwise size={15} /> Restore patient
                   </button>
                 ) : (
                   <button
@@ -1953,7 +1961,7 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
                     }}
                     className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-[13px] text-body transition hover:bg-surface-hover"
                   >
-                    Archive patient
+                    <Archive size={15} /> Archive patient
                   </button>
                 )
               )}

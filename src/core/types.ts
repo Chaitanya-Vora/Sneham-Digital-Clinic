@@ -17,6 +17,16 @@ export interface RolePermissionSet {
   acceptHandoffs: boolean
 }
 
+// Saved preferences shown on Settings — none of these currently change app
+// behavior (no auto-assign, shared-queue, or out-of-office-delegation
+// mechanism exists yet). Persisted so the toggle state survives a reload
+// instead of silently resetting; see migration_v33.
+export interface AssignmentRules {
+  autoAssignBookings: boolean
+  walkInsSharedQueue: boolean
+  outOfOfficeDelegation: boolean
+}
+
 export type AssignmentState =
   | 'Mine'
   | 'Unassigned'

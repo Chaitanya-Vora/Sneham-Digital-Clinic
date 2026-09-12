@@ -55,7 +55,7 @@ import { todayISO, formatDayLabel, addDaysISO } from '../core/day'
 import { getSections, CASE_TEMPLATES } from '../core/caseTemplate'
 import { useClinic, type PublishRxInput } from '../core/store'
 import { useAuth } from '../auth/AuthProvider'
-import type { Appointment, Patient, Potency, Repetition, RxTemplate, Invoice, InvoiceLineItem, PaymentMode, ChatMessage, ReferralSource, Role, EditableRole, RolePermissionSet } from '../core/types'
+import type { Appointment, Patient, Potency, Repetition, RxTemplate, Invoice, InvoiceLineItem, PaymentMode, ChatMessage, ReferralSource, Role, EditableRole, RolePermissionSet, AssignmentRules } from '../core/types'
 import { isOneOffRepetition } from '../core/types'
 import { MASTER_REMEDIES } from '../core/remedies'
 import { INVESTIGATION_CATALOG, ALL_INVESTIGATIONS, wordsOf, matchesAllWords } from '../core/investigations'
@@ -3462,6 +3462,8 @@ function SettingsView() {
   const assignPatient = useClinic((s) => s.assignPatient)
   const rolePermissions = useClinic((s) => s.rolePermissions)
   const updateRolePermission = useClinic((s) => s.updateRolePermission)
+  const assignmentRules = useClinic((s) => s.assignmentRules)
+  const updateAssignmentRules = useClinic((s) => s.updateAssignmentRules)
   const customCaseTemplates = useClinic((s) => s.caseTemplates)
   const deleteCaseTemplate = useClinic((s) => s.deleteCaseTemplate)
   const me = practitioners.find((p) => p.id === currentId)
@@ -3471,7 +3473,6 @@ function SettingsView() {
   const [clinicName, setClinicName] = useState('Sneham Digital Clinic')
   const [consultDuration, setConsultDuration] = useState('20')
   const [notifPrefs, setNotifPrefs] = useState({ newBooking: true, followUpDue: true, lowStock: false, patientCheckIn: true })
-  const [assignmentRules, setAssignmentRules] = useState({ autoAssignBookings: true, walkInsSharedQueue: true, outOfOfficeDelegation: false })
   const [editingProfile, setEditingProfile] = useState(false)
   const [profileForm, setProfileForm] = useState({
     name: me?.name ?? '',
@@ -3501,8 +3502,8 @@ function SettingsView() {
     { key: 'patientCheckIn' as const, label: 'Patient check-in notifications' },
   ]
 
-  const toggleRule = (key: keyof typeof assignmentRules) =>
-    setAssignmentRules((r) => ({ ...r, [key]: !r[key] }))
+  const toggleRule = (key: keyof AssignmentRules) =>
+    updateAssignmentRules({ [key]: !assignmentRules[key] })
 
   const removeRemedy = (remedy: string) =>
     updatePractitioner(currentId, { remedyList: me.remedyList.filter((r) => r !== remedy) })
@@ -3913,8 +3914,15 @@ function SettingsView() {
 
       <Card className="p-5">
         <h2 className="font-display text-[15px] font-bold text-ink">Assignment rules</h2>
+        <p className="mt-1 text-[12.5px] text-muted">
+          Saved as your preference for now — none of these change app behavior yet, so treat them as a note to build toward rather than a live switch.
+        </p>
         <div className="mt-3 space-y-3">
-          <button onClick={() => toggleRule('autoAssignBookings')} className="flex w-full items-start justify-between gap-4 text-left">
+          <button
+            onClick={() => role === 'Owner' && toggleRule('autoAssignBookings')}
+            disabled={role !== 'Owner'}
+            className="flex w-full items-start justify-between gap-4 text-left disabled:cursor-default"
+          >
             <div>
               <div className="text-[13px] font-medium text-ink">Auto-assign new bookings</div>
               <div className="text-[12px] text-muted">New appointments go to the practitioner the patient booked with.</div>
@@ -3923,7 +3931,11 @@ function SettingsView() {
               ? <ToggleRight size={28} weight="fill" className="shrink-0 text-accent" />
               : <ToggleLeft size={28} weight="fill" className="shrink-0 text-faint" />}
           </button>
-          <button onClick={() => toggleRule('walkInsSharedQueue')} className="flex w-full items-start justify-between gap-4 text-left">
+          <button
+            onClick={() => role === 'Owner' && toggleRule('walkInsSharedQueue')}
+            disabled={role !== 'Owner'}
+            className="flex w-full items-start justify-between gap-4 text-left disabled:cursor-default"
+          >
             <div>
               <div className="text-[13px] font-medium text-ink">Walk-ins to shared queue</div>
               <div className="text-[12px] text-muted">Unassigned patients wait in a shared queue anyone can pick up.</div>
@@ -3932,7 +3944,11 @@ function SettingsView() {
               ? <ToggleRight size={28} weight="fill" className="shrink-0 text-accent" />
               : <ToggleLeft size={28} weight="fill" className="shrink-0 text-faint" />}
           </button>
-          <button onClick={() => toggleRule('outOfOfficeDelegation')} className="flex w-full items-start justify-between gap-4 text-left">
+          <button
+            onClick={() => role === 'Owner' && toggleRule('outOfOfficeDelegation')}
+            disabled={role !== 'Owner'}
+            className="flex w-full items-start justify-between gap-4 text-left disabled:cursor-default"
+          >
             <div>
               <div className="text-[13px] font-medium text-ink">Out-of-office delegation</div>
               <div className="text-[12px] text-muted">While you're away, follow-ups pass to your covering practitioner.</div>

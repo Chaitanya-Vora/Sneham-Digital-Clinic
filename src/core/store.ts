@@ -30,6 +30,7 @@ import type {
   TimeBlock,
   EditableRole,
   RolePermissionSet,
+  AssignmentRules,
 } from './types'
 import { type CaseState, type CaseSectionDef, type CustomCaseTemplate, emptyCase } from './caseTemplate'
 import { useToasts } from '../design-system/toast'
@@ -76,6 +77,8 @@ import {
   deleteCaseTemplateDb,
   updateRolePermission as updateRolePermissionDb,
   DEFAULT_ROLE_PERMISSIONS,
+  updateAssignmentRules as updateAssignmentRulesDb,
+  DEFAULT_ASSIGNMENT_RULES,
 } from './db'
 
 const caseTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -147,6 +150,7 @@ interface ClinicState {
   investigationOrders: InvestigationOrder[]
   secondOpinions: SecondOpinion[]
   rolePermissions: Record<EditableRole, RolePermissionSet>
+  assignmentRules: AssignmentRules
   invoices: Invoice[]
   doseReminders: DoseReminder[]
   checkIns: CheckIn[]
@@ -220,6 +224,7 @@ interface ClinicState {
   submitCheckIn: (input: { patientId: string; prescriptionId: string; marked: CheckIn['marked']; improvementPct: number; changeChips: string[]; freeText: string }) => void
   updatePractitioner: (id: string, patch: Partial<Practitioner>) => void
   updateRolePermission: (role: EditableRole, patch: Partial<RolePermissionSet>) => void
+  updateAssignmentRules: (patch: Partial<AssignmentRules>) => void
   rejectPractitioner: (id: string) => void
   assignPatient: (patientId: string, practitionerId: string) => void
   addDocument: (doc: ClinicDocument) => void
@@ -281,6 +286,7 @@ const emptyState = () => ({
   investigationOrders: [] as InvestigationOrder[],
   secondOpinions: [] as SecondOpinion[],
   rolePermissions: DEFAULT_ROLE_PERMISSIONS,
+  assignmentRules: DEFAULT_ASSIGNMENT_RULES,
   invoices: [] as Invoice[],
   doseReminders: [] as DoseReminder[],
   checkIns: [] as CheckIn[],
@@ -1289,6 +1295,11 @@ export const useClinic = create<ClinicState>()(
           rolePermissions: { ...s.rolePermissions, [role]: { ...s.rolePermissions[role], ...patch } },
         }))
         writeThrough(updateRolePermissionDb(role, patch), 'Permission change may not have saved.')
+      },
+
+      updateAssignmentRules: (patch) => {
+        set((s) => ({ assignmentRules: { ...s.assignmentRules, ...patch } }))
+        writeThrough(updateAssignmentRulesDb(patch), 'Assignment rule may not have saved.')
       },
 
       rejectPractitioner: (id) => {

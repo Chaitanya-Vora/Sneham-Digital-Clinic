@@ -19,6 +19,7 @@ import type {
   TimeBlock,
   EditableRole,
   RolePermissionSet,
+  AssignmentRules,
 } from './types'
 import type { CaseState, CustomCaseTemplate } from './caseTemplate'
 import { DEFAULT_PRACTITIONER_REMEDIES } from './remedies'
@@ -492,6 +493,36 @@ export async function updateRolePermission(role: EditableRole, patch: Partial<Ro
   if (patch.acceptHandoffs !== undefined) db.accept_handoffs = patch.acceptHandoffs
   const { error } = await supabase.from('role_permissions').update(db).eq('role', role)
   if (error) { console.error('updateRolePermission:', error.message); return false }
+  return true
+}
+
+// The "Assignment rules" toggles on Settings. These are saved preferences
+// only — no auto-assign/shared-queue/out-of-office mechanism reads them
+// yet — but they used to reset to these same defaults on every reload
+// since they lived in plain useState. Persisting them at least fixes that.
+export const DEFAULT_ASSIGNMENT_RULES: AssignmentRules = {
+  autoAssignBookings: true,
+  walkInsSharedQueue: true,
+  outOfOfficeDelegation: false,
+}
+
+export async function fetchAssignmentRules(): Promise<AssignmentRules> {
+  const { data, error } = await supabase.from('assignment_rules').select('*').eq('id', 'default').maybeSingle()
+  if (error || !data) { console.error('fetchAssignmentRules:', error?.message); return DEFAULT_ASSIGNMENT_RULES }
+  return {
+    autoAssignBookings: data.auto_assign_bookings,
+    walkInsSharedQueue: data.walk_ins_shared_queue,
+    outOfOfficeDelegation: data.out_of_office_delegation,
+  }
+}
+
+export async function updateAssignmentRules(patch: Partial<AssignmentRules>): Promise<boolean> {
+  const db: Record<string, unknown> = { updated_at: new Date().toISOString() }
+  if (patch.autoAssignBookings !== undefined) db.auto_assign_bookings = patch.autoAssignBookings
+  if (patch.walkInsSharedQueue !== undefined) db.walk_ins_shared_queue = patch.walkInsSharedQueue
+  if (patch.outOfOfficeDelegation !== undefined) db.out_of_office_delegation = patch.outOfOfficeDelegation
+  const { error } = await supabase.from('assignment_rules').update(db).eq('id', 'default')
+  if (error) { console.error('updateAssignmentRules:', error.message); return false }
   return true
 }
 
@@ -1203,6 +1234,7 @@ export interface HydratedData {
   caseTemplates: CustomCaseTemplate[]
   secondOpinions: SecondOpinion[]
   rolePermissions: Record<EditableRole, RolePermissionSet>
+  assignmentRules: AssignmentRules
   currentPractitionerId: string
 }
 
@@ -1234,6 +1266,7 @@ export async function hydrateAll(userId: string, userName: string, isPatientSurf
     caseTemplates,
     secondOpinions,
     rolePermissions,
+    assignmentRules,
   ] = await Promise.all([
     fetchPractitioners(),
     fetchPatients(),
@@ -1255,6 +1288,7 @@ export async function hydrateAll(userId: string, userName: string, isPatientSurf
     fetchCaseTemplates(),
     fetchSecondOpinions(),
     fetchRolePermissions(),
+    fetchAssignmentRules(),
   ])
 
   const hasSelf = practitioner ? allPractitioners.some(p => p.id === practitioner.id) : true
@@ -1281,6 +1315,7 @@ export async function hydrateAll(userId: string, userName: string, isPatientSurf
     caseTemplates,
     secondOpinions,
     rolePermissions,
+    assignmentRules,
     currentPractitionerId: practitioner?.id ?? '',
   }
 }

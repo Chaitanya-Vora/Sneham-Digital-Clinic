@@ -3364,59 +3364,31 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
           )}
         </Card>
 
-        <div className="space-y-4">
-          <Card className="p-5">
-            <h2 className="font-display text-[15px] font-bold text-ink">Most prescribed</h2>
-            <div className="mb-4 text-[11.5px] text-faint">From your own remedy list</div>
-            {remedyCount.length === 0 ? (
-              <p className="py-8 text-center text-[13px] text-faint">No prescriptions issued yet</p>
-            ) : (
-              <div className="space-y-3">
-                {remedyCount.map(([name, count], i) => (
-                  <div key={name} className="flex items-center gap-3">
-                    <span className="w-5 text-right font-display text-[12px] font-bold text-faint">{i + 1}</span>
-                    <div className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-body">{name}</div>
-                    <div className="w-[60px] h-[22px] rounded-[6px] bg-screen overflow-hidden">
-                      <motion.div
-                        initial={{ width: 0 }}
-                        animate={{ width: `${(count / maxRemedy) * 100}%` }}
-                        transition={{ duration: 0.8, delay: i * 0.06, ease: easeCalm }}
-                        className="h-full rounded-[6px] bg-accent"
-                      />
-                    </div>
-                    <span className="w-6 text-right font-display text-[13px] font-bold text-ink">{count}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-
-          <Card className="p-5">
-            <div className="mb-1 flex items-center justify-between">
-              <h2 className="font-display text-[15px] font-bold text-ink">Caseload by practitioner</h2>
-            </div>
-            <div className="mb-4 text-[11.5px] text-faint">A scheduling aid, not a scoreboard</div>
+        <Card className="p-5">
+          <h2 className="font-display text-[15px] font-bold text-ink">Most prescribed</h2>
+          <div className="mb-4 text-[11.5px] text-faint">From your own remedy list</div>
+          {remedyCount.length === 0 ? (
+            <p className="py-8 text-center text-[13px] text-faint">No prescriptions issued yet</p>
+          ) : (
             <div className="space-y-3">
-              {practitionerLoad.map((p) => (
-                <div key={p.name} className="flex items-center gap-3">
-                  <div className="w-[70px] truncate text-[12.5px] font-medium text-body">{p.name}</div>
-                  <div className="flex-1 h-[22px] rounded-[6px] bg-screen overflow-hidden">
+              {remedyCount.map(([name, count], i) => (
+                <div key={name} className="flex items-center gap-3">
+                  <span className="w-5 text-right font-display text-[12px] font-bold text-faint">{i + 1}</span>
+                  <div className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-body">{name}</div>
+                  <div className="w-[60px] h-[22px] rounded-[6px] bg-screen overflow-hidden">
                     <motion.div
                       initial={{ width: 0 }}
-                      animate={{ width: `${(p.cases / maxCases) * 100}%` }}
-                      transition={{ duration: 0.8, ease: easeCalm }}
+                      animate={{ width: `${(count / maxRemedy) * 100}%` }}
+                      transition={{ duration: 0.8, delay: i * 0.06, ease: easeCalm }}
                       className="h-full rounded-[6px] bg-accent"
                     />
                   </div>
-                  <span className="w-14 text-right text-[12px] text-faint">{p.cases} open</span>
+                  <span className="w-6 text-right font-display text-[13px] font-bold text-ink">{count}</span>
                 </div>
               ))}
             </div>
-            <Button variant="ghost" size="sm" className="mt-4 w-full" onClick={onGoToPatients}>
-              <UsersThree size={14} /> Rebalance gently
-            </Button>
-          </Card>
-        </div>
+          )}
+        </Card>
       </div>
 
       <div className="grid grid-cols-3 gap-4">
@@ -3426,7 +3398,7 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
           <DonutChart segments={referralBreakdown} />
         </Card>
 
-        <Card className="col-span-2 p-5">
+        <Card className="p-5">
           <h2 className="font-display text-[15px] font-bold text-ink">Age mix</h2>
           <div className="mb-4 text-[11.5px] text-faint">Whole roster, by age band</div>
           <div className="space-y-3">
@@ -3445,6 +3417,30 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
               </div>
             ))}
           </div>
+        </Card>
+
+        <Card className="p-5">
+          <h2 className="font-display text-[15px] font-bold text-ink">Caseload by practitioner</h2>
+          <div className="mb-4 text-[11.5px] text-faint">A scheduling aid, not a scoreboard</div>
+          <div className="space-y-3">
+            {practitionerLoad.map((p) => (
+              <div key={p.name} className="flex items-center gap-3">
+                <div className="w-[70px] truncate text-[12.5px] font-medium text-body">{p.name}</div>
+                <div className="flex-1 h-[22px] rounded-[6px] bg-screen overflow-hidden">
+                  <motion.div
+                    initial={{ width: 0 }}
+                    animate={{ width: `${(p.cases / maxCases) * 100}%` }}
+                    transition={{ duration: 0.8, ease: easeCalm }}
+                    className="h-full rounded-[6px] bg-accent"
+                  />
+                </div>
+                <span className="w-14 text-right text-[12px] text-faint">{p.cases} open</span>
+              </div>
+            ))}
+          </div>
+          <Button variant="ghost" size="sm" className="mt-4 w-full" onClick={onGoToPatients}>
+            <UsersThree size={14} /> Rebalance gently
+          </Button>
         </Card>
       </div>
     </div>

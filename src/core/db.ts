@@ -194,6 +194,7 @@ function toAppPatient(r: any): Patient {
     regularMedication: r.regular_medication,
     lastOutcome: r.last_outcome ?? undefined,
     archivedAt: r.archived_at ?? null,
+    referralSource: r.referral_source ?? undefined,
   }
 }
 
@@ -217,6 +218,7 @@ function toDbPatient(p: Patient) {
     regular_medication: p.regularMedication,
     last_outcome: p.lastOutcome ?? null,
     archived_at: p.archivedAt,
+    referral_source: p.referralSource ?? null,
   }
 }
 
@@ -258,6 +260,7 @@ export async function updatePatient(id: string, patch: Partial<Patient>): Promis
   if (patch.sex !== undefined) db.sex = patch.sex
   if (patch.location !== undefined) db.location = patch.location
   if (patch.archivedAt !== undefined) db.archived_at = patch.archivedAt
+  if (patch.referralSource !== undefined) db.referral_source = patch.referralSource
   if (Object.keys(db).length === 0) return true
   const { error } = await supabase.from('patients').update(db).eq('id', id)
   if (error) { console.error('updatePatient:', error.message); return false }

@@ -117,7 +117,12 @@ export interface Patient {
   // Soft-delete: an archived patient is hidden from active rosters/pickers
   // but never destroyed — mirrors Invoice.cancelledAt. null = active.
   archivedAt: string | null
+  // How this patient found the clinic — optional and unset for every
+  // patient added before this field existed; feeds the Reports referral chart.
+  referralSource?: ReferralSource
 }
+
+export type ReferralSource = 'Offline' | 'Instagram' | 'References' | 'Referral'
 
 export type PaymentStatus = 'unpaid' | 'paid' | 'waived'
 export type PaymentMode = 'Cash' | 'UPI' | 'Card' | 'Bank transfer' | 'Other'

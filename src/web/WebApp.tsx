@@ -55,7 +55,7 @@ import { todayISO, formatDayLabel, addDaysISO } from '../core/day'
 import { getSections, CASE_TEMPLATES } from '../core/caseTemplate'
 import { useClinic, type PublishRxInput } from '../core/store'
 import { useAuth } from '../auth/AuthProvider'
-import type { Appointment, Patient, Potency, Repetition, RxTemplate, Invoice, InvoiceLineItem, PaymentMode, ChatMessage } from '../core/types'
+import type { Appointment, Patient, Potency, Repetition, RxTemplate, Invoice, InvoiceLineItem, PaymentMode, ChatMessage, ReferralSource } from '../core/types'
 import { isOneOffRepetition } from '../core/types'
 import { MASTER_REMEDIES } from '../core/remedies'
 import { INVESTIGATION_CATALOG, ALL_INVESTIGATIONS, wordsOf, matchesAllWords } from '../core/investigations'
@@ -84,6 +84,7 @@ type Screen = 'today' | 'calendar' | 'patients' | 'patient' | 'prescription' | '
 const POTENCIES: Potency[] = ['6C', '12C', '30C', '200C', '1M', '10M', '50M', 'CM', 'LM', 'Q']
 const REPS: Repetition[] = ['Once daily · night', 'Twice daily', 'Alternate day', 'Weekly', 'As needed', 'Once only today']
 const CLINIC_LOCATIONS = ['Chiplun clinic', 'Pune clinic']
+const REFERRAL_SOURCES: ReferralSource[] = ['Offline', 'Instagram', 'References', 'Referral']
 
 const NAV = [
   { id: 'today', icon: SunHorizon, label: 'Today' },
@@ -1741,6 +1742,53 @@ function ProgressChart({ points }: { points: { date: string; value: number }[] }
   )
 }
 
+// A ring built from stacked stroke-dasharray arcs, one per segment — reused
+// for the referral-source breakdown on Reports. Segments with value 0 are
+// skipped so a thin sliver of a zero-count category never renders.
+function DonutChart({ segments, size = 120, strokeWidth = 18 }: { segments: { label: string; value: number; color: string }[]; size?: number; strokeWidth?: number }) {
+  const total = segments.reduce((sum, s) => sum + s.value, 0)
+  const r = (size - strokeWidth) / 2
+  const c = 2 * Math.PI * r
+  let offset = 0
+
+  return (
+    <div className="flex items-center gap-5">
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90 shrink-0">
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#EDEBE0" strokeWidth={strokeWidth} />
+        {total > 0 && segments.filter((s) => s.value > 0).map((s) => {
+          const len = (s.value / total) * c
+          const dash = `${len} ${c - len}`
+          const dashOffset = -offset
+          offset += len
+          return (
+            <circle
+              key={s.label}
+              cx={size / 2}
+              cy={size / 2}
+              r={r}
+              fill="none"
+              stroke={s.color}
+              strokeWidth={strokeWidth}
+              strokeDasharray={dash}
+              strokeDashoffset={dashOffset}
+              strokeLinecap={segments.filter((x) => x.value > 0).length > 1 ? 'butt' : 'round'}
+            />
+          )
+        })}
+      </svg>
+      <div className="min-w-0 flex-1 space-y-2">
+        {segments.map((s) => (
+          <div key={s.label} className="flex items-center gap-2 text-[12px]">
+            <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: s.color }} />
+            <span className="min-w-0 flex-1 truncate text-body">{s.label}</span>
+            <span className="font-display font-bold text-ink">{s.value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ── PATIENT DETAIL ──
 function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSheet, onFollowUp, onOpenMessages, onBack }: { patientId: string; onPrescribe: (draftId?: string) => void; onOrderInvestigations: () => void; onCaseSheet: () => void; onFollowUp: () => void; onOpenMessages: () => void; onBack: () => void }) {
   const patient = useClinic((s) => s.patients.find((p) => p.id === patientId))
@@ -3134,6 +3182,35 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
   const maxMonthly = Math.max(...visitsByMonth.map((m) => m.new + m.returning), 1)
   const totalVisitsInWindow = visitsByMonth.reduce((sum, m) => sum + m.new + m.returning, 0)
 
+  // Where patients come from — her own idea for filling the empty space
+  // below the visits chart. Every patient added before this field existed
+  // shows up honestly as "Not recorded" rather than being silently dropped
+  // or guessed at.
+  const REFERRAL_COLORS: Record<string, string> = {
+    Offline: '#41603C', Instagram: '#7A9B66', References: '#D8A24A', Referral: '#5C4A66', 'Not recorded': '#D6D9C8',
+  }
+  const referralBreakdown = useMemo(() => {
+    const counts: Record<string, number> = { Offline: 0, Instagram: 0, References: 0, Referral: 0, 'Not recorded': 0 }
+    patients.forEach((p) => { counts[p.referralSource ?? 'Not recorded']++ })
+    return Object.entries(counts).map(([label, value]) => ({ label, value, color: REFERRAL_COLORS[label] }))
+  }, [patients])
+
+  // Age bands — real data every patient already has, so (unlike referral
+  // source) this is fully populated from day one. Bands chosen for clinical
+  // relevance in a homeopathy practice (paediatric/adult/senior caseload
+  // mix), not just even statistical buckets.
+  const AGE_BANDS = [
+    { label: 'Child (0–12)', test: (a: number) => a <= 12 },
+    { label: 'Teen (13–19)', test: (a: number) => a >= 13 && a <= 19 },
+    { label: 'Adult (20–59)', test: (a: number) => a >= 20 && a <= 59 },
+    { label: 'Senior (60+)', test: (a: number) => a >= 60 },
+  ]
+  const ageBreakdown = useMemo(
+    () => AGE_BANDS.map((band) => ({ label: band.label, count: patients.filter((p) => band.test(p.age)).length })),
+    [patients],
+  )
+  const maxAgeBand = Math.max(...ageBreakdown.map((b) => b.count), 1)
+
   return (
     <div className="space-y-5">
       <div className="flex items-start justify-between gap-4">
@@ -3255,7 +3332,7 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
             {visitsByMonth.map((m, i) => (
               <div key={m.key} className="flex flex-1 flex-col items-center gap-1.5">
                 <div className="text-[11px] font-semibold text-faint">{m.new + m.returning || ''}</div>
-                <div className="flex w-full flex-col justify-end overflow-hidden rounded-t-[8px] bg-screen" style={{ height: 120 }}>
+                <div className="flex flex-col justify-end overflow-hidden rounded-t-[8px] bg-screen" style={{ height: 120, width: 28 }}>
                   <motion.div
                     initial={{ height: 0 }}
                     animate={{ height: `${(m.returning / maxMonthly) * 120}px` }}
@@ -3329,6 +3406,35 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
             </Button>
           </Card>
         </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-4">
+        <Card className="p-5">
+          <h2 className="font-display text-[15px] font-bold text-ink">Where patients come from</h2>
+          <div className="mb-4 text-[11.5px] text-faint">Referral source, whole roster</div>
+          <DonutChart segments={referralBreakdown} />
+        </Card>
+
+        <Card className="col-span-2 p-5">
+          <h2 className="font-display text-[15px] font-bold text-ink">Age mix</h2>
+          <div className="mb-4 text-[11.5px] text-faint">Whole roster, by age band</div>
+          <div className="space-y-3">
+            {ageBreakdown.map((b, i) => (
+              <div key={b.label} className="flex items-center gap-3">
+                <div className="w-[110px] shrink-0 text-[12.5px] font-medium text-body">{b.label}</div>
+                <div className="h-[22px] flex-1 overflow-hidden rounded-[6px] bg-screen">
+                  <motion.div
+                    initial={{ width: 0 }}
+                    animate={{ width: `${(b.count / maxAgeBand) * 100}%` }}
+                    transition={{ duration: 0.8, delay: i * 0.06, ease: easeCalm }}
+                    className="h-full rounded-[6px] bg-brand"
+                  />
+                </div>
+                <span className="w-6 text-right font-display text-[13px] font-bold text-ink">{b.count}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
       </div>
     </div>
   )
@@ -3893,7 +3999,7 @@ function ScheduleSettings({ practitionerId, consultDuration }: { practitionerId:
 function NewPatientModal({ onClose }: { onClose: () => void }) {
   const addPatient = useClinic((s) => s.addPatient)
   const toast = useToast()
-  const [form, setForm] = useState({ name: '', age: '', sex: 'Female' as Patient['sex'], phone: '', chiefComplaint: '', location: '' })
+  const [form, setForm] = useState({ name: '', age: '', sex: 'Female' as Patient['sex'], phone: '', chiefComplaint: '', location: '', referralSource: undefined as Patient['referralSource'] })
   const set = (key: string, value: string) => setForm((f) => ({ ...f, [key]: value }))
 
   const onSubmit = () => {
@@ -3905,6 +4011,7 @@ function NewPatientModal({ onClose }: { onClose: () => void }) {
       location: form.location.trim() || 'Mumbai',
       chiefComplaint: form.chiefComplaint.trim(),
       phone: form.phone.trim(),
+      referralSource: form.referralSource,
     })
     toast({ title: 'Patient added', message: `${p.name} (${p.wsCode}) is now in your roster.` })
     onClose()
@@ -3959,6 +4066,20 @@ function NewPatientModal({ onClose }: { onClose: () => void }) {
               ))}
             </div>
           </div>
+          <div>
+            <Label>How did they find us?</Label>
+            <div className="mt-1.5 flex flex-wrap gap-2">
+              {REFERRAL_SOURCES.map((r) => (
+                <Chip
+                  key={r}
+                  selected={form.referralSource === r}
+                  onClick={() => setForm((f) => ({ ...f, referralSource: f.referralSource === r ? undefined : r }))}
+                >
+                  {r}
+                </Chip>
+              ))}
+            </div>
+          </div>
         </div>
         <div className="mt-6 flex justify-end gap-2">
           <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
@@ -3984,6 +4105,7 @@ function EditPatientModal({ patient, onClose }: { patient: Patient; onClose: () 
     location: patient.location,
     allergies: patient.allergies,
     regularMedication: patient.regularMedication,
+    referralSource: patient.referralSource,
   })
   const set = (key: string, value: string) => setForm((f) => ({ ...f, [key]: value }))
 
@@ -3998,6 +4120,7 @@ function EditPatientModal({ patient, onClose }: { patient: Patient; onClose: () 
       chiefComplaint: form.chiefComplaint.trim(),
       allergies: form.allergies.trim(),
       regularMedication: form.regularMedication.trim(),
+      referralSource: form.referralSource,
     })
     toast({ title: 'Patient details updated', message: `${form.name.trim()}'s record has been saved.` })
     onClose()
@@ -4051,6 +4174,20 @@ function EditPatientModal({ patient, onClose }: { patient: Patient; onClose: () 
             <div className="mt-1.5 flex gap-2">
               {(['Female', 'Male', 'Other'] as const).map((s) => (
                 <Chip key={s} selected={form.sex === s} onClick={() => set('sex', s)}>{s}</Chip>
+              ))}
+            </div>
+          </div>
+          <div>
+            <Label>How did they find us?</Label>
+            <div className="mt-1.5 flex flex-wrap gap-2">
+              {REFERRAL_SOURCES.map((r) => (
+                <Chip
+                  key={r}
+                  selected={form.referralSource === r}
+                  onClick={() => setForm((f) => ({ ...f, referralSource: f.referralSource === r ? undefined : r }))}
+                >
+                  {r}
+                </Chip>
               ))}
             </div>
           </div>

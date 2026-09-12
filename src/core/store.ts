@@ -197,9 +197,9 @@ interface ClinicState {
   markSectionDone: (patientId: string, sectionId: string, done: boolean) => void
   saveOutcome: (input: { patientId: string; practitionerId: string; remedy: string; outcome: OutcomeKind; note: string }) => void
   createHandoff: (input: { patientId: string; fromId: string; toId: string; coveringUntil: string; note: Handoff['note'] }) => void
-  addPatient: (input: { name: string; age: number; sex: Patient['sex']; location: string; chiefComplaint: string; phone: string }) => Patient
+  addPatient: (input: { name: string; age: number; sex: Patient['sex']; location: string; chiefComplaint: string; phone: string; referralSource?: Patient['referralSource'] }) => Patient
   linkPatientIdentity: (patientId: string, userId: string) => void
-  updatePatientDetails: (id: string, patch: Partial<Pick<Patient, 'name' | 'age' | 'sex' | 'location' | 'phone' | 'chiefComplaint' | 'allergies' | 'regularMedication'>>) => void
+  updatePatientDetails: (id: string, patch: Partial<Pick<Patient, 'name' | 'age' | 'sex' | 'location' | 'phone' | 'chiefComplaint' | 'allergies' | 'regularMedication' | 'referralSource'>>) => void
   archivePatient: (id: string) => void
   restorePatient: (id: string) => void
   permanentlyDeletePatient: (id: string) => Promise<{ ok: boolean; error?: string }>
@@ -1039,6 +1039,7 @@ export const useClinic = create<ClinicState>()(
           allergies: '',
           regularMedication: '',
           archivedAt: null,
+          referralSource: input.referralSource,
         }
         set((s) => ({ patients: [patient, ...s.patients] }))
         writeThrough(insertPatient(patient), 'Patient may not have saved — check your connection.')

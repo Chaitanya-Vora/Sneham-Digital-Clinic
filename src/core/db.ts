@@ -20,6 +20,8 @@ import type {
   EditableRole,
   RolePermissionSet,
   AssignmentRules,
+  ClinicSettings,
+  PractitionerSettings,
 } from './types'
 import type { CaseState, CustomCaseTemplate } from './caseTemplate'
 import { DEFAULT_PRACTITIONER_REMEDIES } from './remedies'
@@ -523,6 +525,77 @@ export async function updateAssignmentRules(patch: Partial<AssignmentRules>): Pr
   if (patch.outOfOfficeDelegation !== undefined) db.out_of_office_delegation = patch.outOfOfficeDelegation
   const { error } = await supabase.from('assignment_rules').update(db).eq('id', 'default')
   if (error) { console.error('updateAssignmentRules:', error.message); return false }
+  return true
+}
+
+// The "Clinic details" card's clinicName/consultDuration — clinic-wide,
+// Owner-editable.
+export const DEFAULT_CLINIC_SETTINGS: ClinicSettings = {
+  clinicName: 'Sneham Digital Clinic',
+  consultDurationMin: 20,
+}
+
+export async function fetchClinicSettings(): Promise<ClinicSettings> {
+  const { data, error } = await supabase.from('clinic_settings').select('*').eq('id', 'default').maybeSingle()
+  if (error || !data) { console.error('fetchClinicSettings:', error?.message); return DEFAULT_CLINIC_SETTINGS }
+  return { clinicName: data.clinic_name, consultDurationMin: data.consult_duration_min }
+}
+
+export async function updateClinicSettings(patch: Partial<ClinicSettings>): Promise<boolean> {
+  const db: Record<string, unknown> = { updated_at: new Date().toISOString() }
+  if (patch.clinicName !== undefined) db.clinic_name = patch.clinicName
+  if (patch.consultDurationMin !== undefined) db.consult_duration_min = patch.consultDurationMin
+  const { error } = await supabase.from('clinic_settings').update(db).eq('id', 'default')
+  if (error) { console.error('updateClinicSettings:', error.message); return false }
+  return true
+}
+
+// The logged-in practitioner's own working hours + notification
+// preferences (ScheduleSettings has only ever rendered for currentId —
+// there's no cross-practitioner schedule editor). No row exists until
+// the practitioner's first save, so a missing row falls back to the same
+// defaults the old useState had.
+export const DEFAULT_PRACTITIONER_SETTINGS: PractitionerSettings = {
+  workingDays: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+  morningStart: '09:00',
+  morningEnd: '13:00',
+  eveningStart: '16:00',
+  eveningEnd: '19:00',
+  notifNewBooking: true,
+  notifFollowUpDue: true,
+  notifLowStock: false,
+  notifPatientCheckin: true,
+}
+
+export async function fetchPractitionerSettings(practitionerId: string): Promise<PractitionerSettings> {
+  const { data, error } = await supabase.from('practitioner_settings').select('*').eq('practitioner_id', practitionerId).maybeSingle()
+  if (error || !data) { if (error) console.error('fetchPractitionerSettings:', error.message); return DEFAULT_PRACTITIONER_SETTINGS }
+  return {
+    workingDays: data.working_days,
+    morningStart: data.morning_start,
+    morningEnd: data.morning_end,
+    eveningStart: data.evening_start,
+    eveningEnd: data.evening_end,
+    notifNewBooking: data.notif_new_booking,
+    notifFollowUpDue: data.notif_follow_up_due,
+    notifLowStock: data.notif_low_stock,
+    notifPatientCheckin: data.notif_patient_checkin,
+  }
+}
+
+export async function upsertPractitionerSettings(practitionerId: string, patch: Partial<PractitionerSettings>): Promise<boolean> {
+  const db: Record<string, unknown> = { practitioner_id: practitionerId, updated_at: new Date().toISOString() }
+  if (patch.workingDays !== undefined) db.working_days = patch.workingDays
+  if (patch.morningStart !== undefined) db.morning_start = patch.morningStart
+  if (patch.morningEnd !== undefined) db.morning_end = patch.morningEnd
+  if (patch.eveningStart !== undefined) db.evening_start = patch.eveningStart
+  if (patch.eveningEnd !== undefined) db.evening_end = patch.eveningEnd
+  if (patch.notifNewBooking !== undefined) db.notif_new_booking = patch.notifNewBooking
+  if (patch.notifFollowUpDue !== undefined) db.notif_follow_up_due = patch.notifFollowUpDue
+  if (patch.notifLowStock !== undefined) db.notif_low_stock = patch.notifLowStock
+  if (patch.notifPatientCheckin !== undefined) db.notif_patient_checkin = patch.notifPatientCheckin
+  const { error } = await supabase.from('practitioner_settings').upsert(db, { onConflict: 'practitioner_id' })
+  if (error) { console.error('upsertPractitionerSettings:', error.message); return false }
   return true
 }
 
@@ -1235,6 +1308,8 @@ export interface HydratedData {
   secondOpinions: SecondOpinion[]
   rolePermissions: Record<EditableRole, RolePermissionSet>
   assignmentRules: AssignmentRules
+  clinicSettings: ClinicSettings
+  practitionerSettings: PractitionerSettings
   currentPractitionerId: string
 }
 
@@ -1267,6 +1342,8 @@ export async function hydrateAll(userId: string, userName: string, isPatientSurf
     secondOpinions,
     rolePermissions,
     assignmentRules,
+    clinicSettings,
+    practitionerSettings,
   ] = await Promise.all([
     fetchPractitioners(),
     fetchPatients(),
@@ -1289,6 +1366,8 @@ export async function hydrateAll(userId: string, userName: string, isPatientSurf
     fetchSecondOpinions(),
     fetchRolePermissions(),
     fetchAssignmentRules(),
+    fetchClinicSettings(),
+    practitioner ? fetchPractitionerSettings(practitioner.id) : Promise.resolve(DEFAULT_PRACTITIONER_SETTINGS),
   ])
 
   const hasSelf = practitioner ? allPractitioners.some(p => p.id === practitioner.id) : true
@@ -1316,6 +1395,8 @@ export async function hydrateAll(userId: string, userName: string, isPatientSurf
     secondOpinions,
     rolePermissions,
     assignmentRules,
+    clinicSettings,
+    practitionerSettings,
     currentPractitionerId: practitioner?.id ?? '',
   }
 }

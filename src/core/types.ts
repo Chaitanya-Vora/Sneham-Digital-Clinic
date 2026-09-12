@@ -27,6 +27,26 @@ export interface AssignmentRules {
   outOfOfficeDelegation: boolean
 }
 
+// Clinic-wide — Owner-editable. See migration_v34.
+export interface ClinicSettings {
+  clinicName: string
+  consultDurationMin: number
+}
+
+// Personal to whichever practitioner is logged in — each practitioner
+// only ever sees/edits their own. See migration_v34.
+export interface PractitionerSettings {
+  workingDays: string[]
+  morningStart: string
+  morningEnd: string
+  eveningStart: string
+  eveningEnd: string
+  notifNewBooking: boolean
+  notifFollowUpDue: boolean
+  notifLowStock: boolean
+  notifPatientCheckin: boolean
+}
+
 export type AssignmentState =
   | 'Mine'
   | 'Unassigned'

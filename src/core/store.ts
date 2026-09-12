@@ -31,6 +31,8 @@ import type {
   EditableRole,
   RolePermissionSet,
   AssignmentRules,
+  ClinicSettings,
+  PractitionerSettings,
 } from './types'
 import { type CaseState, type CaseSectionDef, type CustomCaseTemplate, emptyCase } from './caseTemplate'
 import { useToasts } from '../design-system/toast'
@@ -79,6 +81,10 @@ import {
   DEFAULT_ROLE_PERMISSIONS,
   updateAssignmentRules as updateAssignmentRulesDb,
   DEFAULT_ASSIGNMENT_RULES,
+  updateClinicSettings as updateClinicSettingsDb,
+  DEFAULT_CLINIC_SETTINGS,
+  upsertPractitionerSettings,
+  DEFAULT_PRACTITIONER_SETTINGS,
 } from './db'
 
 const caseTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -151,6 +157,8 @@ interface ClinicState {
   secondOpinions: SecondOpinion[]
   rolePermissions: Record<EditableRole, RolePermissionSet>
   assignmentRules: AssignmentRules
+  clinicSettings: ClinicSettings
+  practitionerSettings: PractitionerSettings
   invoices: Invoice[]
   doseReminders: DoseReminder[]
   checkIns: CheckIn[]
@@ -225,6 +233,8 @@ interface ClinicState {
   updatePractitioner: (id: string, patch: Partial<Practitioner>) => void
   updateRolePermission: (role: EditableRole, patch: Partial<RolePermissionSet>) => void
   updateAssignmentRules: (patch: Partial<AssignmentRules>) => void
+  updateClinicSettings: (patch: Partial<ClinicSettings>) => void
+  updatePractitionerSettings: (patch: Partial<PractitionerSettings>) => void
   rejectPractitioner: (id: string) => void
   assignPatient: (patientId: string, practitionerId: string) => void
   addDocument: (doc: ClinicDocument) => void
@@ -287,6 +297,8 @@ const emptyState = () => ({
   secondOpinions: [] as SecondOpinion[],
   rolePermissions: DEFAULT_ROLE_PERMISSIONS,
   assignmentRules: DEFAULT_ASSIGNMENT_RULES,
+  clinicSettings: DEFAULT_CLINIC_SETTINGS,
+  practitionerSettings: DEFAULT_PRACTITIONER_SETTINGS,
   invoices: [] as Invoice[],
   doseReminders: [] as DoseReminder[],
   checkIns: [] as CheckIn[],
@@ -1300,6 +1312,17 @@ export const useClinic = create<ClinicState>()(
       updateAssignmentRules: (patch) => {
         set((s) => ({ assignmentRules: { ...s.assignmentRules, ...patch } }))
         writeThrough(updateAssignmentRulesDb(patch), 'Assignment rule may not have saved.')
+      },
+
+      updateClinicSettings: (patch) => {
+        set((s) => ({ clinicSettings: { ...s.clinicSettings, ...patch } }))
+        writeThrough(updateClinicSettingsDb(patch), 'Clinic settings may not have saved.')
+      },
+
+      updatePractitionerSettings: (patch) => {
+        set((s) => ({ practitionerSettings: { ...s.practitionerSettings, ...patch } }))
+        const id = get().currentPractitionerId
+        if (id) writeThrough(upsertPractitionerSettings(id, patch), 'Your settings may not have saved.')
       },
 
       rejectPractitioner: (id) => {

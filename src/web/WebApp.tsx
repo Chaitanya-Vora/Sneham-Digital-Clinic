@@ -55,7 +55,7 @@ import { todayISO, formatDayLabel, addDaysISO } from '../core/day'
 import { getSections, CASE_TEMPLATES } from '../core/caseTemplate'
 import { useClinic, type PublishRxInput } from '../core/store'
 import { useAuth } from '../auth/AuthProvider'
-import type { Appointment, Patient, Potency, Repetition, RxTemplate, Invoice, InvoiceLineItem, PaymentMode, ChatMessage, ReferralSource, Role, EditableRole, RolePermissionSet, AssignmentRules } from '../core/types'
+import type { Appointment, Patient, Potency, Repetition, RxTemplate, Invoice, InvoiceLineItem, PaymentMode, ChatMessage, ReferralSource, Role, EditableRole, RolePermissionSet, AssignmentRules, PractitionerSettings } from '../core/types'
 import { isOneOffRepetition } from '../core/types'
 import { MASTER_REMEDIES } from '../core/remedies'
 import { INVESTIGATION_CATALOG, ALL_INVESTIGATIONS, wordsOf, matchesAllWords } from '../core/investigations'
@@ -3464,15 +3464,22 @@ function SettingsView() {
   const updateRolePermission = useClinic((s) => s.updateRolePermission)
   const assignmentRules = useClinic((s) => s.assignmentRules)
   const updateAssignmentRules = useClinic((s) => s.updateAssignmentRules)
+  const clinicSettings = useClinic((s) => s.clinicSettings)
+  const updateClinicSettings = useClinic((s) => s.updateClinicSettings)
+  const practitionerSettings = useClinic((s) => s.practitionerSettings)
+  const updatePractitionerSettings = useClinic((s) => s.updatePractitionerSettings)
   const customCaseTemplates = useClinic((s) => s.caseTemplates)
   const deleteCaseTemplate = useClinic((s) => s.deleteCaseTemplate)
   const me = practitioners.find((p) => p.id === currentId)
   const pending = practitioners.filter((p) => p.status === 'pending')
   const active = practitioners.filter((p) => p.status === 'active')
   const inactive = practitioners.filter((p) => p.status === 'inactive')
-  const [clinicName, setClinicName] = useState('Sneham Digital Clinic')
-  const [consultDuration, setConsultDuration] = useState('20')
-  const [notifPrefs, setNotifPrefs] = useState({ newBooking: true, followUpDue: true, lowStock: false, patientCheckIn: true })
+  const [clinicName, setClinicName] = useState(clinicSettings.clinicName)
+  const [consultDuration, setConsultDuration] = useState(String(clinicSettings.consultDurationMin))
+  useEffect(() => {
+    setClinicName(clinicSettings.clinicName)
+    setConsultDuration(String(clinicSettings.consultDurationMin))
+  }, [clinicSettings])
   const [editingProfile, setEditingProfile] = useState(false)
   const [profileForm, setProfileForm] = useState({
     name: me?.name ?? '',
@@ -3492,14 +3499,14 @@ function SettingsView() {
     )
   }
 
-  const togglePref = (key: keyof typeof notifPrefs) =>
-    setNotifPrefs((p) => ({ ...p, [key]: !p[key] }))
+  const togglePref = (key: keyof Pick<PractitionerSettings, 'notifNewBooking' | 'notifFollowUpDue' | 'notifLowStock' | 'notifPatientCheckin'>) =>
+    updatePractitionerSettings({ [key]: !practitionerSettings[key] })
 
   const prefs = [
-    { key: 'newBooking' as const, label: 'New booking alerts' },
-    { key: 'followUpDue' as const, label: 'Follow-up due reminders' },
-    { key: 'lowStock' as const, label: 'Low stock warnings' },
-    { key: 'patientCheckIn' as const, label: 'Patient check-in notifications' },
+    { key: 'notifNewBooking' as const, label: 'New booking alerts' },
+    { key: 'notifFollowUpDue' as const, label: 'Follow-up due reminders' },
+    { key: 'notifLowStock' as const, label: 'Low stock warnings' },
+    { key: 'notifPatientCheckin' as const, label: 'Patient check-in notifications' },
   ]
 
   const toggleRule = (key: keyof AssignmentRules) =>
@@ -3703,12 +3710,14 @@ function SettingsView() {
       <div className="grid grid-cols-2 gap-4">
         <Card className="space-y-5 p-5">
           <h2 className="font-display text-[15px] font-bold text-ink">Clinic details</h2>
+          {role !== 'Owner' && <p className="text-[12px] text-faint">Only the Owner can change these.</p>}
           <div>
             <Label>Clinic name</Label>
             <input
               value={clinicName}
               onChange={(e) => setClinicName(e.target.value)}
-              className="mt-1.5 w-full rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-[13px] text-body outline-none focus:border-green-border"
+              disabled={role !== 'Owner'}
+              className="mt-1.5 w-full rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-[13px] text-body outline-none focus:border-green-border disabled:opacity-60"
             />
           </div>
           <div>
@@ -3716,7 +3725,8 @@ function SettingsView() {
             <select
               value={consultDuration}
               onChange={(e) => setConsultDuration(e.target.value)}
-              className="mt-1.5 w-full appearance-none rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-[13px] text-body outline-none focus:border-green-border"
+              disabled={role !== 'Owner'}
+              className="mt-1.5 w-full appearance-none rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-[13px] text-body outline-none focus:border-green-border disabled:opacity-60"
             >
               <option value="15">15 minutes</option>
               <option value="20">20 minutes</option>
@@ -3725,9 +3735,18 @@ function SettingsView() {
               <option value="60">60 minutes</option>
             </select>
           </div>
-          <Button variant="primary" size="sm" onClick={() => toast({ title: 'Settings saved', message: `Clinic: ${clinicName}, duration: ${consultDuration} min` })}>
-            Save changes
-          </Button>
+          {role === 'Owner' && (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                updateClinicSettings({ clinicName, consultDurationMin: parseInt(consultDuration) })
+                toast({ title: 'Settings saved', message: `Clinic: ${clinicName}, duration: ${consultDuration} min` })
+              }}
+            >
+              Save changes
+            </Button>
+          )}
         </Card>
 
         <Card className="space-y-5 p-5">
@@ -3739,7 +3758,7 @@ function SettingsView() {
               className="flex w-full items-center justify-between"
             >
               <span className="text-[13px] text-body">{pref.label}</span>
-              {notifPrefs[pref.key]
+              {practitionerSettings[pref.key]
                 ? <ToggleRight size={28} weight="fill" className="text-accent" />
                 : <ToggleLeft size={28} weight="fill" className="text-faint" />}
             </button>
@@ -3969,14 +3988,24 @@ function ScheduleSettings({ practitionerId, consultDuration }: { practitionerId:
   const timeBlocks = useClinic((s) => s.timeBlocks.filter((t) => t.practitionerId === practitionerId))
   const addTimeBlock = useClinic((s) => s.addTimeBlock)
   const removeTimeBlock = useClinic((s) => s.removeTimeBlock)
+  const practitionerSettings = useClinic((s) => s.practitionerSettings)
+  const updatePractitionerSettings = useClinic((s) => s.updatePractitionerSettings)
   const toast = useToast()
 
   const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-  const [workingDays, setWorkingDays] = useState<Set<string>>(new Set(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']))
-  const [morningStart, setMorningStart] = useState('09:00')
-  const [morningEnd, setMorningEnd] = useState('13:00')
-  const [eveningStart, setEveningStart] = useState('16:00')
-  const [eveningEnd, setEveningEnd] = useState('19:00')
+  const [workingDays, setWorkingDays] = useState<Set<string>>(new Set(practitionerSettings.workingDays))
+  const [morningStart, setMorningStart] = useState(practitionerSettings.morningStart)
+  const [morningEnd, setMorningEnd] = useState(practitionerSettings.morningEnd)
+  const [eveningStart, setEveningStart] = useState(practitionerSettings.eveningStart)
+  const [eveningEnd, setEveningEnd] = useState(practitionerSettings.eveningEnd)
+
+  useEffect(() => {
+    setWorkingDays(new Set(practitionerSettings.workingDays))
+    setMorningStart(practitionerSettings.morningStart)
+    setMorningEnd(practitionerSettings.morningEnd)
+    setEveningStart(practitionerSettings.eveningStart)
+    setEveningEnd(practitionerSettings.eveningEnd)
+  }, [practitionerSettings])
 
   const toggleDay = (day: string) => {
     setWorkingDays((prev) => {
@@ -4052,7 +4081,17 @@ function ScheduleSettings({ practitionerId, consultDuration }: { practitionerId:
         </div>
       )}
 
-      <Button variant="primary" size="sm" onClick={() => toast({ title: 'Schedule saved', message: `${workingDays.size} working days, ${totalSlots} weekly slots` })}>
+      <Button
+        variant="primary"
+        size="sm"
+        onClick={() => {
+          updatePractitionerSettings({
+            workingDays: Array.from(workingDays),
+            morningStart, morningEnd, eveningStart, eveningEnd,
+          })
+          toast({ title: 'Schedule saved', message: `${workingDays.size} working days, ${totalSlots} weekly slots` })
+        }}
+      >
         Save schedule
       </Button>
     </Card>

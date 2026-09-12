@@ -37,6 +37,7 @@ import {
   WhatsappLogo,
   DeviceMobile,
   EnvelopeSimple,
+  Copy,
 } from '@phosphor-icons/react'
 import { todayISO, toISO, formatDayLabel, addDaysISO } from '../core/day'
 import { useClinic } from '../core/store'
@@ -54,9 +55,10 @@ import { spring, springSoft, tabVariants, pushVariants, listContainer, listItem 
 import { CountUp } from '../design-system/feedback'
 import { PullToRefresh, useHorizontalSwipe, EdgeSwipeBack } from '../design-system/gestures'
 import { useToast } from '../design-system/toast'
-import { shareViaWhatsApp, shareViaSms, shareViaEmail } from '../core/share'
+import { shareViaWhatsApp, shareViaSms, shareViaEmail, shareTextViaWhatsApp } from '../core/share'
 import { STANDARD_MEDICINE_INSTRUCTIONS } from '../core/rxInstructions'
 import { exportPrescriptionPdf, exportInvoicePdf, exportInvestigationOrderPdf } from '../core/pdfExport'
+import { newId } from '../core/db'
 import { MobileCaseSheet } from './MobileCaseSheet'
 import { MobileFollowUp } from './MobileFollowUp'
 import { CalendarScreen } from './Calendar'
@@ -88,6 +90,8 @@ export function PractitionerApp() {
   const [rxPatientId, setRxPatientId] = useState<string | null>(null)
   const [billSearchOpen, setBillSearchOpen] = useState(false)
   const [billPatientId, setBillPatientId] = useState<string | null>(null)
+  const [instantMeetingOpen, setInstantMeetingOpen] = useState(false)
+  const [guestMeeting, setGuestMeeting] = useState<{ id: string; guestName: string } | null>(null)
 
   const ME = useClinic((s) => s.currentPractitionerId)
   const doctor = useClinic((s) => s.practitioners.find((p) => p.id === s.currentPractitionerId))
@@ -180,7 +184,7 @@ export function PractitionerApp() {
                 <CalendarScreen onOpenPatient={(id) => setOverlay({ kind: 'patient-detail', patientId: id })} />
               ) : (
                 <PullToRefresh onRefresh={refresh} className="h-full px-[18px] pb-[120px] pt-2">
-                  {tab === 'today' && <TodayGrid openCase={(id) => setOverlay({ kind: 'case', patientId: id })} goRx={goToRx} startVideo={(apptId) => setOverlay({ kind: 'video', appointmentId: apptId })} onQuickBill={() => setBillSearchOpen(true)} />}
+                  {tab === 'today' && <TodayGrid openCase={(id) => setOverlay({ kind: 'case', patientId: id })} goRx={goToRx} startVideo={(apptId) => setOverlay({ kind: 'video', appointmentId: apptId })} onQuickBill={() => setBillSearchOpen(true)} onInstantMeeting={() => setInstantMeetingOpen(true)} />}
                   {tab === 'followups' && <FollowupsScreen openCompare={(id) => setOverlay({ kind: 'compare', patientId: id })} />}
                   {tab === 'rx' && <QuickRxScreen patientId={rxPatientId} onPatientPicked={setRxPatientId} />}
                   {tab === 'inbox' && <InboxScreen onOpenPatient={(id) => setOverlay({ kind: 'patient-detail', patientId: id })} onOpenChat={(id, name) => setOverlay({ kind: 'chat', patientId: id, patientName: name })} />}
@@ -246,6 +250,21 @@ export function PractitionerApp() {
         open={billPatientId !== null}
         onClose={() => setBillPatientId(null)}
       />
+      <InstantMeetingSheet
+        open={instantMeetingOpen}
+        onClose={() => setInstantMeetingOpen(false)}
+        onStart={(id, guestName) => { setGuestMeeting({ id, guestName }); setInstantMeetingOpen(false) }}
+      />
+      {guestMeeting && (
+        <div className="absolute inset-0 z-50 bg-[#1a1a1a]">
+          <VideoConsult
+            patientName={guestMeeting.guestName || 'Guest'}
+            practitionerName={doctor?.name ?? 'Doctor'}
+            appointmentId={guestMeeting.id}
+            onEnd={() => setGuestMeeting(null)}
+          />
+        </div>
+      )}
     </div>
   )
 }
@@ -1059,6 +1078,85 @@ function VideoConsultOverlay({ appointmentId, onClose }: { appointmentId: string
         onClose()
       }}
     />
+  )
+}
+
+// ── INSTANT MEETING ──
+// A video call for someone who isn't a registered patient (a referral
+// consult, a prospective patient) — no appointment required. The room id
+// is generated once, on open, so the link shown and the room actually
+// joined are always the same one.
+function InstantMeetingSheet({ open, onClose, onStart }: { open: boolean; onClose: () => void; onStart: (id: string, guestName: string) => void }) {
+  const [id, setId] = useState(() => newId())
+  const [guestName, setGuestName] = useState('')
+  const [copied, setCopied] = useState(false)
+
+  // A fresh room id each time the sheet opens (not while it's closed/idle).
+  useEffect(() => { if (open) { setId(newId()); setGuestName(''); setCopied(false) } }, [open])
+
+  const roomName = `sneham-consult-${id.replace(/[^a-zA-Z0-9]/g, '')}`
+  const link = `https://meet.jit.si/${roomName}`
+  const shareMessage = `Join our video consultation${guestName.trim() ? ` (${guestName.trim()})` : ''}: ${link}`
+
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(link)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Clipboard API can be blocked — link is still visible/selectable below.
+    }
+  }
+
+  return (
+    <BottomSheet open={open} onClose={onClose}>
+      <div className="font-display text-[17px] font-bold text-ink">Instant meeting</div>
+      <p className="mt-1 text-[12.5px] text-muted">
+        For anyone not in your patient roster — share the link however you like; whoever opens it joins this same call.
+      </p>
+
+      <div className="mt-4">
+        <Label>Who is this with? (optional)</Label>
+        <input
+          value={guestName}
+          onChange={(e) => setGuestName(e.target.value)}
+          placeholder="e.g. Dr. Mehta (referral)"
+          className="mt-1.5 w-full rounded-[14px] border border-border bg-surface px-3.5 py-2.5 text-[13px] text-body outline-none placeholder:text-faint focus:border-green-border"
+          data-selectable="true"
+        />
+      </div>
+
+      <div className="mt-3">
+        <Label>Meeting link</Label>
+        <div className="mt-1.5 flex items-center gap-2">
+          <input
+            readOnly
+            value={link}
+            onClick={(e) => (e.target as HTMLInputElement).select()}
+            className="w-full flex-1 rounded-[14px] border border-border bg-screen px-3.5 py-2.5 text-[12px] text-muted outline-none"
+          />
+          <Pressable hap="tick" onClick={copyLink} className="flex items-center gap-1.5 rounded-pill border border-border bg-surface px-3 py-2.5 text-[12.5px] font-semibold text-body">
+            <Copy size={14} weight="bold" /> {copied ? 'Copied' : 'Copy'}
+          </Pressable>
+        </div>
+      </div>
+
+      <Pressable
+        hap="tick"
+        onClick={() => shareTextViaWhatsApp(shareMessage)}
+        className="mt-3 flex w-full items-center justify-center gap-2 rounded-pill border border-border bg-surface py-2.5 text-[13.5px] font-semibold text-body"
+      >
+        <WhatsappLogo size={16} weight="fill" className="text-success" /> Share via WhatsApp
+      </Pressable>
+
+      <Pressable
+        hap="impact"
+        onClick={() => onStart(id, guestName.trim())}
+        className="mt-3 flex w-full items-center justify-center gap-2 rounded-pill bg-accent py-3 font-display text-[15px] font-semibold text-white shadow-float"
+      >
+        <VideoCamera size={18} weight="fill" /> Join now
+      </Pressable>
+    </BottomSheet>
   )
 }
 

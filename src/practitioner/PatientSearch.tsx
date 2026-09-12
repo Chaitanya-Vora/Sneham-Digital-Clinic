@@ -20,7 +20,7 @@ import {
   TestTube,
 } from '@phosphor-icons/react'
 import { useClinic, selPrescriptionsFor, selDosesFor } from '../core/store'
-import type { Appointment, Patient, Invoice, InvoiceLineItem, PaymentMode } from '../core/types'
+import type { Appointment, Patient, Invoice, InvoiceLineItem, PaymentMode, ReferralSource } from '../core/types'
 import { Avatar, Badge, BottomSheet, Button, Card, Chip, Label } from '../design-system/ui'
 import { Pressable } from '../design-system/Pressable'
 import { haptic } from '../design-system/haptics'
@@ -28,8 +28,11 @@ import { spring, springSoft, pushVariants, listContainer, listItem } from '../de
 import { CountUp, ProgressBar } from '../design-system/feedback'
 import { PullToRefresh } from '../design-system/gestures'
 import { useToast } from '../design-system/toast'
-import { exportInvoicePdf } from '../core/pdfExport'
+import { exportInvoicePdf, exportPatientHistoryPdf } from '../core/pdfExport'
 import { DEFAULT_CONSULT_FEE, invoiceTotal } from '../core/billing'
+import { Archive, ArrowCounterClockwise, DownloadSimple, DotsThreeVertical } from '@phosphor-icons/react'
+
+const REFERRAL_SOURCES: ReferralSource[] = ['Offline', 'Instagram', 'References', 'Referral']
 
 const PAYMENT_MODES: PaymentMode[] = ['Cash', 'UPI', 'Card', 'Bank transfer', 'Other']
 const INVOICE_STATUS_TONE = { paid: 'green', partial: 'amber', unpaid: 'amber', waived: 'neutral', cancelled: 'danger' } as const
@@ -204,7 +207,10 @@ export function PatientDetailScreen({
   const prescriptions = useClinic(selPrescriptionsFor(patientId))
   const doses = useClinic(selDosesFor(patientId))
   const outcomes = useClinic((s) => s.outcomes.filter((o) => o.patientId === patientId))
+  const investigationOrders = useClinic((s) => s.investigationOrders.filter((o) => o.patientId === patientId))
   const checkIns = useClinic((s) => s.checkIns.filter((c) => c.patientId === patientId))
+  const archivePatient = useClinic((s) => s.archivePatient)
+  const restorePatient = useClinic((s) => s.restorePatient)
   const toast = useToast()
 
   const scheduleFollowUpAction = useClinic((s) => s.scheduleFollowUp)
@@ -213,6 +219,9 @@ export function PatientDetailScreen({
   const [billing, setBilling] = useState<{ appointmentId?: string; existingInvoice?: Invoice } | null>(null)
   // null = showing the preset list; a date string = the "Custom" picker is open
   const [customDate, setCustomDate] = useState<string | null>(null)
+  const [actionsOpen, setActionsOpen] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
+  const [exporting, setExporting] = useState(false)
 
   if (!patient) {
     return (
@@ -289,11 +298,14 @@ export function PatientDetailScreen({
           </Pressable>
           <div className="flex-1" />
           <Badge tone="neutral">{patient.wsCode}</Badge>
+          <Pressable ariaLabel="more actions" hap="tick" onClick={() => setActionsOpen(true)} className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
+            <DotsThreeVertical size={18} weight="bold" className="text-body" />
+          </Pressable>
         </div>
         <div className="mt-2">
           <div className="font-display text-[22px] font-bold text-ink">{patient.name}</div>
           <div className="text-[13px] text-muted">
-            {patient.age}y &middot; {patient.sex} &middot; {patient.location}
+            {[`${patient.age}y`, patient.sex, patient.location, patient.phone].filter(Boolean).join(' · ')}
           </div>
         </div>
 
@@ -582,6 +594,74 @@ export function PatientDetailScreen({
         existingInvoice={billing?.existingInvoice}
         onClose={() => setBilling(null)}
       />
+
+      {/* kebab actions */}
+      <BottomSheet open={actionsOpen} onClose={() => setActionsOpen(false)}>
+        <div className="font-display text-[17px] font-bold text-ink">{patient.name}</div>
+        <div className="mt-3 space-y-1">
+          <Pressable
+            as="div"
+            hap="tick"
+            onClick={() => { setActionsOpen(false); setEditOpen(true) }}
+            className="flex cursor-pointer items-center gap-3 rounded-[14px] px-2 py-3"
+          >
+            <PencilSimple size={18} className="text-body" />
+            <span className="text-[14px] font-medium text-ink">Edit patient details</span>
+          </Pressable>
+          <Pressable
+            as="div"
+            hap="tick"
+            onClick={async () => {
+              setActionsOpen(false)
+              setExporting(true)
+              try {
+                await exportPatientHistoryPdf(patient, prescriptions, investigationOrders, outcomes)
+              } catch (e) {
+                toast({ title: 'Export failed', message: e instanceof Error ? e.message : 'Please try again.' })
+              } finally {
+                setExporting(false)
+              }
+            }}
+            className="flex cursor-pointer items-center gap-3 rounded-[14px] px-2 py-3"
+          >
+            <DownloadSimple size={18} className="text-body" />
+            <span className="text-[14px] font-medium text-ink">{exporting ? 'Exporting…' : 'Export patient summary (PDF)'}</span>
+          </Pressable>
+          {patient.archivedAt ? (
+            <Pressable
+              as="div"
+              hap="tick"
+              onClick={() => {
+                restorePatient(patient.id)
+                setActionsOpen(false)
+                toast({ title: 'Patient restored', message: `${patient.name} is back in the active roster.` })
+              }}
+              className="flex cursor-pointer items-center gap-3 rounded-[14px] px-2 py-3"
+            >
+              <ArrowCounterClockwise size={18} className="text-brand" />
+              <span className="text-[14px] font-semibold text-brand">Restore patient</span>
+            </Pressable>
+          ) : (
+            <Pressable
+              as="div"
+              hap="warn"
+              onClick={() => {
+                if (!window.confirm(`Archive ${patient.name}? They'll be hidden from the active roster but nothing is deleted.`)) return
+                archivePatient(patient.id)
+                setActionsOpen(false)
+                toast({ title: 'Patient archived', message: `${patient.name} is hidden from the active roster.` })
+                onBack()
+              }}
+              className="flex cursor-pointer items-center gap-3 rounded-[14px] px-2 py-3"
+            >
+              <Archive size={18} className="text-body" />
+              <span className="text-[14px] font-medium text-ink">Archive patient</span>
+            </Pressable>
+          )}
+        </div>
+      </BottomSheet>
+
+      <EditPatientSheet patient={patient} open={editOpen} onClose={() => setEditOpen(false)} />
     </div>
   )
 }
@@ -785,6 +865,130 @@ export function InvoiceSheet({
 }
 
 // ─────────────────────────────────────────────────────────────
+// EditPatientSheet — bottom sheet to edit an existing patient
+// ─────────────────────────────────────────────────────────────
+function EditPatientSheet({ patient, open, onClose }: { patient: Patient; open: boolean; onClose: () => void }) {
+  const updatePatientDetails = useClinic((s) => s.updatePatientDetails)
+  const toast = useToast()
+
+  const [name, setName] = useState(patient.name)
+  const [age, setAge] = useState(String(patient.age))
+  const [sex, setSex] = useState(patient.sex)
+  const [phone, setPhone] = useState(patient.phone ?? '')
+  const [complaint, setComplaint] = useState(patient.chiefComplaint)
+  const [location, setLocation] = useState(patient.location)
+  const [allergies, setAllergies] = useState(patient.allergies)
+  const [regularMedication, setRegularMedication] = useState(patient.regularMedication)
+  const [referralSource, setReferralSource] = useState<ReferralSource | undefined>(patient.referralSource)
+
+  // Re-sync whenever a different patient's sheet opens (not on every
+  // keystroke — patient identity is the only thing that should reset the form).
+  useEffect(() => {
+    setName(patient.name)
+    setAge(String(patient.age))
+    setSex(patient.sex)
+    setPhone(patient.phone ?? '')
+    setComplaint(patient.chiefComplaint)
+    setLocation(patient.location)
+    setAllergies(patient.allergies)
+    setRegularMedication(patient.regularMedication)
+    setReferralSource(patient.referralSource)
+  }, [patient.id])
+
+  const inputCls = 'w-full rounded-[14px] border border-border bg-surface px-3.5 py-2.5 text-[13px] text-body outline-none focus:border-green-border'
+
+  const onSave = () => {
+    if (!name.trim() || !complaint.trim()) { haptic('warn'); return }
+    updatePatientDetails(patient.id, {
+      name: name.trim(),
+      age: parseInt(age, 10) || 0,
+      sex,
+      location: location.trim(),
+      phone: phone.trim(),
+      chiefComplaint: complaint.trim(),
+      allergies: allergies.trim(),
+      regularMedication: regularMedication.trim(),
+      referralSource,
+    })
+    haptic('success')
+    toast({ title: 'Patient details updated' })
+    onClose()
+  }
+
+  return (
+    <BottomSheet open={open} onClose={onClose}>
+      <div className="font-display text-[17px] font-bold text-ink">Edit patient details</div>
+
+      <div className="mt-3 space-y-3">
+        <div>
+          <Label>Name</Label>
+          <input value={name} onChange={(e) => setName(e.target.value)} className={`mt-1.5 ${inputCls}`} data-selectable="true" />
+        </div>
+
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <Label>Age</Label>
+            <input value={age} onChange={(e) => setAge(e.target.value)} type="number" className={`mt-1.5 ${inputCls}`} data-selectable="true" />
+          </div>
+          <div className="flex-[2]">
+            <Label>Sex</Label>
+            <div className="mt-1.5 flex gap-2">
+              {(['Female', 'Male', 'Other'] as const).map((s) => (
+                <Chip key={s} selected={sex === s} onClick={() => { haptic('select'); setSex(s) }} className="flex-1 text-center">{s}</Chip>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <Label>Phone</Label>
+          <input value={phone} onChange={(e) => setPhone(e.target.value)} type="tel" placeholder="+91 98765 43210" className={`mt-1.5 ${inputCls}`} data-selectable="true" />
+        </div>
+
+        <div>
+          <Label>Chief complaint</Label>
+          <textarea value={complaint} onChange={(e) => setComplaint(e.target.value)} rows={2} className={`mt-1.5 ${inputCls}`} data-selectable="true" />
+        </div>
+
+        <div>
+          <Label>Location</Label>
+          <input value={location} onChange={(e) => setLocation(e.target.value)} className={`mt-1.5 ${inputCls}`} data-selectable="true" />
+        </div>
+
+        <div>
+          <Label>Allergies</Label>
+          <input value={allergies} onChange={(e) => setAllergies(e.target.value)} placeholder="e.g. Dust, penicillin — or “No allergies”" className={`mt-1.5 ${inputCls}`} data-selectable="true" />
+        </div>
+
+        <div>
+          <Label>Regular medication</Label>
+          <input value={regularMedication} onChange={(e) => setRegularMedication(e.target.value)} placeholder="e.g. None" className={`mt-1.5 ${inputCls}`} data-selectable="true" />
+        </div>
+
+        <div>
+          <Label>How did they find us?</Label>
+          <div className="mt-1.5 flex flex-wrap gap-2">
+            {REFERRAL_SOURCES.map((r) => (
+              <Chip key={r} selected={referralSource === r} onClick={() => { haptic('select'); setReferralSource((cur) => (cur === r ? undefined : r)) }}>
+                {r}
+              </Chip>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <Pressable
+        hap="none"
+        onClick={onSave}
+        className="mt-4 flex w-full items-center justify-center gap-2 rounded-pill bg-accent py-3 font-display text-[15px] font-semibold text-white shadow-float"
+      >
+        Save changes
+      </Pressable>
+    </BottomSheet>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
 // 3. AddPatientSheet — bottom sheet to register a new patient
 // ─────────────────────────────────────────────────────────────
 
@@ -806,6 +1010,7 @@ export function AddPatientSheet({
   const [phone, setPhone] = useState('')
   const [complaint, setComplaint] = useState('')
   const [location, setLocation] = useState('')
+  const [referralSource, setReferralSource] = useState<ReferralSource | undefined>(undefined)
   const [nameError, setNameError] = useState('')
   const [ageError, setAgeError] = useState('')
 
@@ -816,6 +1021,7 @@ export function AddPatientSheet({
     setPhone('')
     setComplaint('')
     setLocation('')
+    setReferralSource(undefined)
     setNameError('')
     setAgeError('')
   }
@@ -833,6 +1039,7 @@ export function AddPatientSheet({
       location: location.trim(),
       chiefComplaint: complaint.trim(),
       phone: phone.trim(),
+      referralSource,
     })
     haptic('success')
     toast({ title: `${patient.name} registered` })
@@ -896,6 +1103,17 @@ export function AddPatientSheet({
         <div>
           <Label>Location</Label>
           <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Chiplun" className={`mt-1.5 ${inputCls}`} data-selectable="true" />
+        </div>
+
+        <div>
+          <Label>How did they find us?</Label>
+          <div className="mt-1.5 flex flex-wrap gap-2">
+            {REFERRAL_SOURCES.map((r) => (
+              <Chip key={r} selected={referralSource === r} onClick={() => { haptic('select'); setReferralSource((cur) => (cur === r ? undefined : r)) }}>
+                {r}
+              </Chip>
+            ))}
+          </div>
         </div>
       </div>
 

@@ -66,11 +66,13 @@ export function TodayGrid({
   goRx,
   startVideo,
   onQuickBill,
+  onInstantMeeting,
 }: {
   openCase: (id: string) => void
   goRx: (patientId: string) => void
   startVideo?: (appointmentId: string) => void
   onQuickBill: () => void
+  onInstantMeeting?: () => void
 }) {
   const dbError = useClinic((s) => s.dbError)
   // Cancelled appointments stay in the database (never deleted — an
@@ -251,6 +253,15 @@ export function TodayGrid({
           >
             <CurrencyInr size={13} weight="bold" /> Quick bill
           </Pressable>
+          {onInstantMeeting && (
+            <Pressable
+              hap="tick"
+              onClick={onInstantMeeting}
+              className="flex items-center gap-1 rounded-pill border border-border bg-surface px-2.5 py-1 text-[12px] font-semibold text-body"
+            >
+              <VideoCamera size={13} weight="bold" /> Instant meeting
+            </Pressable>
+          )}
           {role === 'Owner' && (
             <div className="inline-flex rounded-pill border border-border bg-surface p-0.5">
               {(['mine', 'everyone'] as const).map((m) => (

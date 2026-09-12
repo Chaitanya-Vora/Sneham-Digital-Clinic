@@ -29,6 +29,7 @@ import { Pressable } from '../design-system/Pressable'
 import { haptic } from '../design-system/haptics'
 import { springSoft, listContainer, listItem } from '../design-system/motion'
 import { useToast } from '../design-system/toast'
+import { PatientQuickView } from './PatientQuickView'
 
 // ME is resolved from store's currentPractitionerId inside the component
 const HOURS = Array.from({ length: 12 }, (_, i) => i + 8) // 8 AM – 7 PM
@@ -114,6 +115,7 @@ export function TodayGrid({
   const [blockReason, setBlockReason] = useState('Lunch')
   const [selectedAppt, setSelectedAppt] = useState<string | null>(null)
   const [dragTarget, setDragTarget] = useState<number | null>(null)
+  const [peekPatientId, setPeekPatientId] = useState<string | null>(null)
 
   const gridRef = useRef<HTMLDivElement>(null)
 
@@ -386,6 +388,7 @@ export function TodayGrid({
           onSelectForReschedule={(id) => setSelectedAppt(id)}
           onGridTap={handleGridTap}
           onRemoveBlock={removeTimeBlock}
+          onPeekPatient={setPeekPatientId}
         />
       ) : (
         <ListView
@@ -396,6 +399,7 @@ export function TodayGrid({
           activeAppt={activeAppt ?? null}
           onStartConsult={(id) => { startConsult(id); startTimer(); haptic('success'); const a = appts.find((x) => x.id === id); toast({ title: `Consult started · ${pFind(a?.patientId ?? '')?.name}` }); if (a?.type === 'Video' && startVideo) startVideo(id) }}
           onNoShow={(id) => setNoShowSheet(id)}
+          onPeekPatient={setPeekPatientId}
           onOpenCase={openCase}
           onSelectForReschedule={(id) => setSelectedAppt(id)}
         />
@@ -411,7 +415,7 @@ export function TodayGrid({
       </Pressable>
 
       {/* team card — Owner only, below her own schedule, matching web */}
-      {role === 'Owner' && team.length > 0 && (
+      {role === 'Owner' && viewMode === 'everyone' && team.length > 0 && (
         <Card className="p-4">
           <div className="mb-3 flex items-center justify-between">
             <div className="font-display text-[15px] font-bold text-ink">Your team today</div>
@@ -460,12 +464,13 @@ export function TodayGrid({
       <FollowUpSheet open={followUpSheet !== null} patientName={followUpSheet ? pFind(followUpSheet)?.name ?? 'patient' : ''} onClose={() => setFollowUpSheet(null)} onSelect={(p) => followUpSheet && handleScheduleFollowUp(followUpSheet, p)} />
       <NoShowSheet open={noShowSheet !== null} appts={allAppts} pFind={pFind} noShowId={noShowSheet} onClose={() => setNoShowSheet(null)} onConfirm={() => noShowSheet && handleNoShow(noShowSheet)} />
       <BlockTimeSheet open={blockOpen} startHour={blockStartHour} duration={blockDuration} reason={blockReason} onStartHourChange={setBlockStartHour} onDurationChange={setBlockDuration} onReasonChange={setBlockReason} onClose={() => setBlockOpen(false)} onConfirm={handleBlockTime} />
+      <PatientQuickView patientId={peekPatientId} onClose={() => setPeekPatientId(null)} onOpenCase={openCase} onPrescribe={goRx} />
     </div>
   )
 }
 
 // ── DAY GRID VIEW ──
-function DayGridView({ appts, timeBlocks, patients, practitioners, myId, activeAppt, selectedAppt, onStartConsult, onEndConsult, onNoShow, onOpenCase, onSelectForReschedule, onGridTap, onRemoveBlock }: {
+function DayGridView({ appts, timeBlocks, patients, practitioners, myId, activeAppt, selectedAppt, onStartConsult, onEndConsult, onNoShow, onOpenCase, onSelectForReschedule, onGridTap, onRemoveBlock, onPeekPatient }: {
   appts: Appointment[]
   timeBlocks: TimeBlock[]
   patients: { id: string; name: string; initials: string }[]
@@ -481,6 +486,7 @@ function DayGridView({ appts, timeBlocks, patients, practitioners, myId, activeA
   onSelectForReschedule: (id: string) => void
   onGridTap: (hour: number, half: 'top' | 'bottom') => void
   onRemoveBlock: (id: string) => void
+  onPeekPatient: (id: string) => void
 }) {
   const pFind = (id: string) => patients.find((p) => p.id === id)
   const prFind = (id: string) => practitioners.find((p) => p.id === id)
@@ -584,7 +590,12 @@ function DayGridView({ appts, timeBlocks, patients, practitioners, myId, activeA
                         <Avatar initials={p.initials} size={28} />
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-1.5">
-                            <span className="truncate text-[12px] font-semibold text-ink">{p.name}</span>
+                            <span
+                              onClick={(e) => { e.stopPropagation(); haptic('tick'); onPeekPatient(p.id) }}
+                              className="truncate text-[12px] font-semibold text-ink underline decoration-border-dash decoration-1 underline-offset-2"
+                            >
+                              {p.name}
+                            </span>
                             {a.type === 'Video' && <VideoCamera size={11} weight="fill" className="shrink-0 text-brand" />}
                             {!isMine && <Badge tone="neutral" className="!px-1.5 !py-0 !text-[9px]">{prFind(a.practitionerId)?.name ?? 'Team'}</Badge>}
                           </div>
@@ -631,6 +642,7 @@ function ListView({
   onNoShow,
   onOpenCase,
   onSelectForReschedule,
+  onPeekPatient,
 }: {
   appts: Appointment[]
   patients: { id: string; name: string; initials: string }[]
@@ -641,6 +653,7 @@ function ListView({
   onNoShow: (id: string) => void
   onOpenCase: (id: string) => void
   onSelectForReschedule: (id: string) => void
+  onPeekPatient: (id: string) => void
 }) {
   const pFind = (id: string) => patients.find((p) => p.id === id)
   const prFind = (id: string) => practitioners.find((p) => p.id === id)
@@ -676,7 +689,12 @@ function ListView({
               <Avatar initials={p.initials} size={38} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
-                  <div className="truncate font-display text-[14px] font-semibold text-ink">{p.name}</div>
+                  <div
+                    onClick={(e) => { e.stopPropagation(); haptic('tick'); onPeekPatient(p.id) }}
+                    className="truncate font-display text-[14px] font-semibold text-ink underline decoration-border-dash decoration-1 underline-offset-2"
+                  >
+                    {p.name}
+                  </div>
                   {!isMine && <Badge tone="neutral" className="shrink-0">{prFind(a.practitionerId)?.name ?? 'Team'}</Badge>}
                 </div>
                 <div className="flex items-center gap-1.5 truncate text-[12px] text-muted">

@@ -225,7 +225,7 @@ interface ClinicState {
   markNoShow: (appointmentId: string) => void
   scheduleFollowUp: (input: { patientId: string; practitionerId: string; time: string; date: string; type: 'In person' | 'Video'; reason: string }) => void
   updateAppointmentStatus: (id: string, status: Appointment['status']) => void
-  updateAppointment: (id: string, patch: Partial<Pick<Appointment, 'time' | 'date' | 'type' | 'reason'>>) => void
+  updateAppointment: (id: string, patch: Partial<Pick<Appointment, 'time' | 'date' | 'type' | 'reason' | 'practitionerId'>>) => void
   rescheduleAppointment: (id: string, time: string, date?: string) => void
   addTimeBlock: (input: Omit<TimeBlock, 'id'>) => void
   removeTimeBlock: (id: string) => void
@@ -1220,8 +1220,12 @@ export const useClinic = create<ClinicState>()(
         set((s) => ({
           appointments: s.appointments.map((a) => (a.id === id ? { ...a, ...patch } : a)),
         }))
-        const { date, ...rest } = patch
-        writeThrough(updateAppointmentDb(id, { ...rest, ...(date ? { day_label: date } : {}) }), 'Appointment changes may not have saved.')
+        const { date, practitionerId, ...rest } = patch
+        writeThrough(updateAppointmentDb(id, {
+          ...rest,
+          ...(date ? { day_label: date } : {}),
+          ...(practitionerId ? { practitioner_id: practitionerId } : {}),
+        }), 'Appointment changes may not have saved.')
       },
 
       rescheduleAppointment: (id, time, date) => {

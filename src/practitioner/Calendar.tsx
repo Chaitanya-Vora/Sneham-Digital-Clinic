@@ -19,6 +19,7 @@ import { haptic } from '../design-system/haptics'
 import { spring, springSoft, listContainer, listItem } from '../design-system/motion'
 import { PullToRefresh } from '../design-system/gestures'
 import { useToast } from '../design-system/toast'
+import { PatientQuickView } from './PatientQuickView'
 
 // ── helpers ──
 
@@ -126,8 +127,8 @@ type ViewMode = 'week' | 'month'
 
 // ── main export ──
 
-export function CalendarScreen({ onOpenPatient }: { onOpenPatient: (patientId: string) => void }) {
-  const appointments = useClinic((s) => s.appointments)
+export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatient: (patientId: string) => void; openCase: (patientId: string) => void; goRx: (patientId: string) => void }) {
+  const allAppointments = useClinic((s) => s.appointments)
   const patients = useClinic((s) => s.patients)
   const patientMap = useMemo(() => {
     const m = new Map<string, Patient>()
@@ -136,10 +137,23 @@ export function CalendarScreen({ onOpenPatient }: { onOpenPatient: (patientId: s
   }, [patients])
 
   const ME = useClinic((s) => s.currentPractitionerId)
+  const role = useClinic((s) => s.role)
+  const team = useClinic((s) => s.practitioners.filter((p) => p.status === 'active'))
   const scheduleFollowUp = useClinic((s) => s.scheduleFollowUp)
   const updateAppointment = useClinic((s) => s.updateAppointment)
   const updateAppointmentStatus = useClinic((s) => s.updateAppointmentStatus)
   const toast = useToast()
+  const [peekPatientId, setPeekPatientId] = useState<string | null>(null)
+
+  // Whose schedule is showing — null means "mine". Only the Owner gets the
+  // switcher (matches Today's Mine/Everyone, which is Owner-only too); a
+  // practitioner's own calendar is always just their own day otherwise.
+  const [viewPractitionerId, setViewPractitionerId] = useState<string | null>(null)
+  const scopedPractitionerId = role === 'Owner' && viewPractitionerId ? viewPractitionerId : ME
+  const appointments = useMemo(
+    () => allAppointments.filter((a) => a.practitionerId === scopedPractitionerId),
+    [allAppointments, scopedPractitionerId],
+  )
 
   const today = useMemo(() => new Date(), [])
   const [selectedDate, setSelectedDate] = useState(today)
@@ -256,7 +270,7 @@ export function CalendarScreen({ onOpenPatient }: { onOpenPatient: (patientId: s
       toast({ title: 'Appointment updated', message: `${time} · ${patientMap.get(bookPatientId)?.name ?? 'Patient'}` })
     } else {
       if (!ME) return
-      scheduleFollowUp({ patientId: bookPatientId, practitionerId: ME, time, date: bookDate, type: bookType, reason: bookReason.trim() || 'Consultation' })
+      scheduleFollowUp({ patientId: bookPatientId, practitionerId: scopedPractitionerId, time, date: bookDate, type: bookType, reason: bookReason.trim() || 'Consultation' })
       haptic('success')
       toast({ title: 'Appointment booked', message: `${time} · ${patientMap.get(bookPatientId)?.name ?? 'Patient'}` })
     }
@@ -268,6 +282,15 @@ export function CalendarScreen({ onOpenPatient }: { onOpenPatient: (patientId: s
     haptic('impact')
     toast({ title: 'Appointment cancelled' })
     setCancelApptId(null)
+  }
+
+  // Owner, looking at a colleague's day, taking one of their appointments
+  // onto her own schedule — e.g. covering while they're out.
+  function handleReassignToMe(apptId: string, patientName?: string) {
+    if (!ME) return
+    updateAppointment(apptId, { practitionerId: ME })
+    haptic('success')
+    toast({ title: 'Reassigned to you', message: patientName ? `${patientName}'s appointment now on your schedule.` : 'Appointment now on your schedule.' })
   }
 
   return (
@@ -313,6 +336,30 @@ export function CalendarScreen({ onOpenPatient }: { onOpenPatient: (patientId: s
             </Pressable>
           ))}
         </div>
+
+        {/* whose schedule — Owner only, so everyone's day can line up for
+            comparison instead of everything blurring into one shared list */}
+        {role === 'Owner' && team.length > 1 && (
+          <div className="mt-3 flex gap-2 overflow-x-auto pb-0.5">
+            {team.map((p) => {
+              const isMe = p.id === ME
+              const selected = isMe ? !viewPractitionerId : viewPractitionerId === p.id
+              return (
+                <Pressable
+                  key={p.id}
+                  hap="select"
+                  onClick={() => setViewPractitionerId(isMe ? null : p.id)}
+                  className={`flex shrink-0 items-center gap-1.5 rounded-pill border px-3 py-1.5 text-[12.5px] font-semibold transition-colors ${
+                    selected ? 'border-brand bg-brand text-screen' : 'border-border bg-surface text-body'
+                  }`}
+                >
+                  <Avatar initials={p.initials} size={18} />
+                  {isMe ? 'You' : p.name.replace(/^Dr\.?\s*/i, '')}
+                </Pressable>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {/* view body */}
@@ -398,6 +445,8 @@ export function CalendarScreen({ onOpenPatient }: { onOpenPatient: (patientId: s
                                     onTap={() => onOpenPatient(a.patientId)}
                                     onEdit={canModify ? () => openEditSheet(a) : undefined}
                                     onCancel={canModify ? () => setCancelApptId(a.id) : undefined}
+                                    onPeekPatient={() => setPeekPatientId(a.patientId)}
+                                    onReassign={canModify && viewPractitionerId && viewPractitionerId !== ME ? () => handleReassignToMe(a.id, patientMap.get(a.patientId)?.name) : undefined}
                                   />
                                 </motion.div>
                               )
@@ -459,6 +508,7 @@ export function CalendarScreen({ onOpenPatient }: { onOpenPatient: (patientId: s
         onClose={() => setCancelApptId(null)}
         onConfirm={() => cancelApptId && handleCancelAppt(cancelApptId)}
       />
+      <PatientQuickView patientId={peekPatientId} onClose={() => setPeekPatientId(null)} onOpenCase={openCase} onPrescribe={goRx} />
     </div>
   )
 }
@@ -555,12 +605,16 @@ function AppointmentCard({
   onTap,
   onEdit,
   onCancel,
+  onPeekPatient,
+  onReassign,
 }: {
   appointment: Appointment
   patient: Patient | undefined
   onTap: () => void
   onEdit?: () => void
   onCancel?: () => void
+  onPeekPatient?: () => void
+  onReassign?: () => void
 }) {
   const statusTone = a.status === 'In consult' ? 'green' : a.status === 'New' ? 'amber' : a.status === 'Seen' ? 'neutral' : a.status === 'Waiting' ? 'amber' : 'neutral'
 
@@ -582,7 +636,10 @@ function AppointmentCard({
       </div>
       <Avatar initials={p?.initials ?? '??'} size={38} />
       <div className="min-w-0 flex-1">
-        <div className="truncate font-display text-[14px] font-semibold text-ink">
+        <div
+          onClick={onPeekPatient ? (e) => { e.stopPropagation(); haptic('tick'); onPeekPatient() } : undefined}
+          className={`truncate font-display text-[14px] font-semibold text-ink ${onPeekPatient ? 'underline decoration-border-dash decoration-1 underline-offset-2' : ''}`}
+        >
           {p?.name ?? 'Unknown'}
         </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
@@ -616,6 +673,15 @@ function AppointmentCard({
               className="text-[11px] font-medium text-danger/70"
             >
               Cancel
+            </Pressable>
+          )}
+          {onReassign && (
+            <Pressable
+              hap="tick"
+              onClick={(e) => { e?.stopPropagation(); onReassign() }}
+              className="text-[11px] font-medium text-brand"
+            >
+              Reassign to me
             </Pressable>
           )}
         </div>

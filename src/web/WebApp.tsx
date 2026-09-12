@@ -50,6 +50,8 @@ import {
   Eye,
   Archive,
   ArrowCounterClockwise,
+  VideoCamera,
+  Copy,
 } from '@phosphor-icons/react'
 import { todayISO, formatDayLabel, addDaysISO } from '../core/day'
 import { getSections, CASE_TEMPLATES } from '../core/caseTemplate'
@@ -62,8 +64,8 @@ import { INVESTIGATION_CATALOG, ALL_INVESTIGATIONS, wordsOf, matchesAllWords } f
 import { DEFAULT_CONSULT_FEE, invoiceTotal, invoiceBalance } from '../core/billing'
 import { toCsv, downloadCsv } from '../core/csvExport'
 import { STANDARD_MEDICINE_INSTRUCTIONS } from '../core/rxInstructions'
-import { shareViaWhatsApp, shareViaSms, shareViaEmail } from '../core/share'
-import { uploadDocument, getDocumentUrl, fetchPatientDeletionImpact } from '../core/db'
+import { shareViaWhatsApp, shareViaSms, shareViaEmail, shareTextViaWhatsApp } from '../core/share'
+import { uploadDocument, getDocumentUrl, fetchPatientDeletionImpact, newId } from '../core/db'
 import { Avatar, Badge, Button, Card, Chip, Label, Stepper, PatientNotFound } from '../design-system/ui'
 import { PendingApproval } from '../design-system/PendingApproval'
 import { Pressable } from '../design-system/Pressable'
@@ -123,6 +125,8 @@ export function WebApp() {
   const [selectedClinic, setSelectedClinic] = useState('Chiplun clinic')
   const [newPatientOpen, setNewPatientOpen] = useState(false)
   const [videoApptId, setVideoApptId] = useState<string | null>(null)
+  const [guestMeeting, setGuestMeeting] = useState<{ id: string; guestName: string } | null>(null)
+  const [instantMeetingOpen, setInstantMeetingOpen] = useState(false)
   const [messagesPatientId, setMessagesPatientId] = useState<string | null>(null)
   const [calendarFocusPractitionerId, setCalendarFocusPractitionerId] = useState<string | null>(null)
   const [rxDraftId, setRxDraftId] = useState<string | null>(null)
@@ -355,7 +359,7 @@ export function WebApp() {
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.24, ease: easeCalm }}
             >
-              {screen === 'today' && <TodayView onOpenPatient={openPatient} onStartVideo={setVideoApptId} onOpenCalendarForPractitioner={openCalendarForPractitioner} />}
+              {screen === 'today' && <TodayView onOpenPatient={openPatient} onStartVideo={setVideoApptId} onOpenCalendarForPractitioner={openCalendarForPractitioner} onOpenInstantMeeting={() => setInstantMeetingOpen(true)} />}
               {screen === 'calendar' && <WebCalendar onOpenPatient={openPatient} focusPractitionerId={calendarFocusPractitionerId} />}
               {screen === 'patients' && <PatientsView onOpenPatient={openPatient} onNewPatient={() => setNewPatientOpen(true)} />}
               {screen === 'messages' && <MessagesView initialPatientId={messagesPatientId} onOpenPatient={openPatient} />}
@@ -393,7 +397,25 @@ export function WebApp() {
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} commands={commands} />
       <AnimatePresence>
         {newPatientOpen && <NewPatientModal onClose={() => setNewPatientOpen(false)} />}
+        {instantMeetingOpen && (
+          <InstantMeetingModal
+            onClose={() => setInstantMeetingOpen(false)}
+            onStart={(id, guestName) => { setGuestMeeting({ id, guestName }); setInstantMeetingOpen(false) }}
+          />
+        )}
       </AnimatePresence>
+
+      {guestMeeting && createPortal(
+        <div className="fixed inset-0 z-[200] bg-[#1a1a1a]">
+          <VideoConsult
+            patientName={guestMeeting.guestName || 'Guest'}
+            practitionerName={doctor.name}
+            appointmentId={guestMeeting.id}
+            onEnd={() => setGuestMeeting(null)}
+          />
+        </div>,
+        document.body,
+      )}
 
       {videoApptId && createPortal(
         <div className="fixed inset-0 z-[200] bg-[#1a1a1a]">
@@ -415,7 +437,7 @@ export function WebApp() {
 }
 
 // ── TODAY ──
-function TodayView({ onOpenPatient, onStartVideo, onOpenCalendarForPractitioner }: { onOpenPatient: (id: string) => void; onStartVideo: (apptId: string) => void; onOpenCalendarForPractitioner: (practitionerId: string) => void }) {
+function TodayView({ onOpenPatient, onStartVideo, onOpenCalendarForPractitioner, onOpenInstantMeeting }: { onOpenPatient: (id: string) => void; onStartVideo: (apptId: string) => void; onOpenCalendarForPractitioner: (practitionerId: string) => void; onOpenInstantMeeting: () => void }) {
   // Cancelled appointments stay in the database (never deleted — an
   // accidental walk-in can now be cancelled instead of being permanently
   // stuck with no way to edit or remove it), just excluded from every
@@ -494,6 +516,12 @@ function TodayView({ onOpenPatient, onStartVideo, onOpenCalendarForPractitioner 
               className="flex items-center gap-1.5 rounded-pill border border-border bg-surface px-3 py-1.5 text-[12px] font-semibold text-body transition hover:border-green-border hover:text-brand"
             >
               <CurrencyInr size={14} weight="bold" /> Quick bill
+            </button>
+            <button
+              onClick={onOpenInstantMeeting}
+              className="flex items-center gap-1.5 rounded-pill border border-border bg-surface px-3 py-1.5 text-[12px] font-semibold text-body transition hover:border-green-border hover:text-brand"
+            >
+              <VideoCamera size={14} weight="bold" /> Instant meeting
             </button>
             <WalkInButton />
             {role === 'Owner' && (
@@ -4091,6 +4119,103 @@ function ScheduleSettings({ practitionerId, consultDuration }: { practitionerId:
         Save schedule
       </Button>
     </Card>
+  )
+}
+
+// ── INSTANT MEETING ──
+// A video call for someone who isn't a registered patient (a referral
+// consult, a prospective patient, anyone outside the roster) — no
+// appointment or patient record required. The room id is generated once,
+// on open, so the link shown and the room actually joined are always the
+// same one — sharing it first and joining a few minutes later still lands
+// in the same call.
+function InstantMeetingModal({ onClose, onStart }: { onClose: () => void; onStart: (id: string, guestName: string) => void }) {
+  const [id] = useState(() => newId())
+  const [guestName, setGuestName] = useState('')
+  const [copied, setCopied] = useState(false)
+  const roomName = `sneham-consult-${id.replace(/[^a-zA-Z0-9]/g, '')}`
+  const link = `https://meet.jit.si/${roomName}`
+  const shareMessage = `Join our video consultation${guestName.trim() ? ` (${guestName.trim()})` : ''}: ${link}`
+
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(link)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Clipboard API can be blocked (permissions, non-secure context) —
+      // the link is still visible and selectable in the field below.
+    }
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.96, y: 12 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.97, y: 8 }}
+        transition={{ type: 'spring', stiffness: 400, damping: 32 }}
+        onClick={(e) => e.stopPropagation()}
+        className="w-[440px] rounded-[20px] border border-border bg-surface p-6 shadow-modal"
+      >
+        <div className="mb-1 flex items-center justify-between">
+          <h2 className="font-display text-[17px] font-bold text-ink">Instant meeting</h2>
+          <button onClick={onClose} className="text-faint hover:text-body"><X size={18} weight="bold" /></button>
+        </div>
+        <p className="mb-5 text-[12.5px] text-muted">
+          For anyone not in your patient roster — a referral consult, a prospective patient, anyone. Share the link however you like; whoever opens it joins this same call.
+        </p>
+
+        <div>
+          <Label>Who is this with? (optional, just for your reference)</Label>
+          <input
+            value={guestName}
+            onChange={(e) => setGuestName(e.target.value)}
+            placeholder="e.g. Dr. Mehta (referral) or Priya (prospective patient)"
+            className="mt-1.5 w-full rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-[13px] text-body outline-none placeholder:text-faint focus:border-green-border"
+          />
+        </div>
+
+        <div className="mt-4">
+          <Label>Meeting link</Label>
+          <div className="mt-1.5 flex items-center gap-2">
+            <input
+              readOnly
+              value={link}
+              onClick={(e) => (e.target as HTMLInputElement).select()}
+              className="w-full flex-1 rounded-[12px] border border-border bg-screen px-3.5 py-2.5 text-[12.5px] text-muted outline-none"
+            />
+            <Button variant="ghost" size="sm" onClick={copyLink}>
+              <Copy size={14} weight="bold" /> {copied ? 'Copied' : 'Copy'}
+            </Button>
+          </div>
+        </div>
+
+        <div className="mt-3">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full"
+            onClick={() => shareTextViaWhatsApp(shareMessage)}
+          >
+            <WhatsappLogo size={16} weight="fill" className="text-success" /> Share via WhatsApp
+          </Button>
+        </div>
+
+        <div className="mt-6 flex justify-end gap-2">
+          <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" size="sm" onClick={() => onStart(id, guestName.trim())}>
+            <VideoCamera size={15} weight="fill" /> Join now
+          </Button>
+        </div>
+      </motion.div>
+    </motion.div>
   )
 }
 

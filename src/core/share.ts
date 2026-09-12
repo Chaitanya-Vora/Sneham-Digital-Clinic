@@ -26,6 +26,14 @@ export function shareViaWhatsApp(phone: string | undefined, message: string): bo
   return true
 }
 
+// No specific recipient on file (or none needed) — opens WhatsApp's own
+// contact/chat picker with the message pre-filled, letting the sender pick
+// who to send it to. Used for the instant-meeting link, which by design
+// goes to someone who isn't necessarily a registered patient.
+export function shareTextViaWhatsApp(message: string) {
+  openExternal(`https://wa.me/?text=${encodeURIComponent(message)}`)
+}
+
 export function shareViaSms(phone: string | undefined, message: string): boolean {
   const target = phone ? normalizeIndianPhone(phone) : null
   if (!target) return false

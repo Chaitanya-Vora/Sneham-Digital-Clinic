@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   SunHorizon,
@@ -48,12 +48,13 @@ import { isOneOffRepetition } from '../core/types'
 import { MASTER_REMEDIES } from '../core/remedies'
 import { INVESTIGATION_CATALOG, ALL_INVESTIGATIONS, wordsOf, matchesAllWords } from '../core/investigations'
 import { Avatar, Badge, BottomSheet, Card, Chip, Label, Stepper } from '../design-system/ui'
-import { PendingApproval } from '../design-system/PendingApproval'
+import { PendingApproval, AccessRemoved } from '../design-system/PendingApproval'
 import { Pressable } from '../design-system/Pressable'
 import { haptic } from '../design-system/haptics'
 import { spring, springSoft, tabVariants, pushVariants, listContainer, listItem } from '../design-system/motion'
 import { CountUp } from '../design-system/feedback'
-import { PullToRefresh, useHorizontalSwipe, EdgeSwipeBack } from '../design-system/gestures'
+import { PullToRefresh, useHorizontalSwipe, EdgeSwipeBack, useNativeBackButton } from '../design-system/gestures'
+import { App as CapApp } from '@capacitor/app'
 import { useToast } from '../design-system/toast'
 import { shareViaWhatsApp, shareViaSms, shareViaEmail, shareTextViaWhatsApp } from '../core/share'
 import { STANDARD_MEDICINE_INSTRUCTIONS } from '../core/rxInstructions'
@@ -81,6 +82,16 @@ const refresh = async () => {
   if (s.userId) await s.hydrate(s.userId, '')
 }
 
+// Condenses a legal name with a middle name ("Dr. Neha Bharadwajan Tripathi")
+// down to title + first + surname ("Dr. Neha Tripathi") for the persistent
+// header, which doesn't have room for the full legal name. Names of 3 words
+// or fewer are already that shape and pass through unchanged.
+function headerDisplayName(name: string) {
+  const parts = name.trim().split(/\s+/)
+  if (parts.length <= 3) return name
+  return [...parts.slice(0, 2), parts[parts.length - 1]].join(' ')
+}
+
 export function PractitionerApp() {
   const [tab, setTab] = useState<Tab>('today')
   const [dir, setDir] = useState(1)
@@ -92,6 +103,11 @@ export function PractitionerApp() {
   // updater functions turned that into a real bug (Back silently needing an
   // extra tap) the moment the updater had a side effect in it.
   const [overlayNav, setOverlayNav] = useState<{ current: Overlay; history: Overlay[]; dir: number }>({ current: null, history: [], dir: 1 })
+  // Android WebView renders native popups (date/time pickers, long-press paste) as a
+  // blank box when anchored beneath an ancestor with a resting CSS transform, and
+  // framer-motion leaves one applied after this slide finishes — see the identical
+  // fix + explanation on BottomSheet in design-system/ui.tsx.
+  const overlayTransformRef = useRef<HTMLDivElement>(null)
   const overlay = overlayNav.current
   const overlayDir = overlayNav.dir
   const [switchOpen, setSwitchOpen] = useState(false)
@@ -102,6 +118,31 @@ export function PractitionerApp() {
   const [billPatientId, setBillPatientId] = useState<string | null>(null)
   const [instantMeetingOpen, setInstantMeetingOpen] = useState(false)
   const [guestMeeting, setGuestMeeting] = useState<{ id: string; guestName: string } | null>(null)
+  const toast = useToast()
+  // Android's back gesture/button exits the app the instant there's nothing
+  // in browser history to pop — and this app's screens are React state, not
+  // history entries, so a stray swipe on a tab root with nothing open used
+  // to close the app outright. Overlay screens already handle their own
+  // back via EdgeSwipeBack; this covers everything else: close whichever
+  // sheet is open, or — if truly nothing is — require a second press within
+  // 2s before actually exiting, the same "press back again to exit"
+  // convention every native Android app uses.
+  const [exitArmed, setExitArmed] = useState(false)
+  const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useNativeBackButton(useCallback(() => {
+    if (overlayNav.current) return
+    if (switchOpen) { setSwitchOpen(false); return }
+    if (searchOpen) { setSearchOpen(false); return }
+    if (addPatientOpen) { setAddPatientOpen(false); return }
+    if (billSearchOpen) { setBillSearchOpen(false); return }
+    if (instantMeetingOpen) { setInstantMeetingOpen(false); return }
+    if (exitArmed) { CapApp.exitApp(); return }
+    setExitArmed(true)
+    haptic('warn')
+    toast({ title: 'Press back again to exit' })
+    if (exitTimerRef.current) clearTimeout(exitTimerRef.current)
+    exitTimerRef.current = setTimeout(() => setExitArmed(false), 2000)
+  }, [overlayNav, switchOpen, searchOpen, addPatientOpen, billSearchOpen, instantMeetingOpen, exitArmed, toast]))
 
   const ME = useClinic((s) => s.currentPractitionerId)
   const doctor = useClinic((s) => s.practitioners.find((p) => p.id === s.currentPractitionerId))
@@ -192,6 +233,9 @@ export function PractitionerApp() {
   if (doctor.status === 'pending') {
     return <PendingApproval name={doctor.name} />
   }
+  if (doctor.status === 'inactive') {
+    return <AccessRemoved name={doctor.name} />
+  }
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-screen">
@@ -203,7 +247,7 @@ export function PractitionerApp() {
             <Avatar initials={doctor.initials} size={38} />
           </Pressable>
           <div className="min-w-0 flex-1">
-            <div className="truncate font-display text-[15px] font-bold text-ink">{doctor.name.split(' ').slice(0, 2).join(' ')}</div>
+            <div className="truncate font-display text-[15px] font-bold text-ink">{headerDisplayName(doctor.name)}</div>
             <div className="truncate text-[11px] text-faint">{new Date().toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })} · Chiplun clinic</div>
           </div>
           <Pressable ariaLabel="search patients" hap="tick" onClick={() => setSearchOpen(true)} className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
@@ -245,7 +289,20 @@ export function PractitionerApp() {
           the slide direction matches native forward/back conventions */}
       <AnimatePresence custom={overlayDir}>
         {overlay && (
-          <motion.div key={overlay.kind + ('patientId' in overlay ? overlay.patientId : overlay.appointmentId)} className="absolute inset-0 z-40 bg-screen" custom={overlayDir} variants={pushVariants} initial="enter" animate="center" exit="exit" transition={spring}>
+          <motion.div
+            key={overlay.kind + ('patientId' in overlay ? overlay.patientId : overlay.appointmentId)}
+            className="absolute inset-0 z-40 bg-screen"
+            custom={overlayDir}
+            variants={pushVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={spring}
+            onAnimationComplete={(def) => {
+              if (def === 'center') overlayTransformRef.current?.style.setProperty('transform', 'none')
+            }}
+            ref={overlayTransformRef}
+          >
             <EdgeSwipeBack onBack={closeOverlay}>
               {overlay.kind === 'video' ? (
                 <VideoConsultOverlay appointmentId={overlay.appointmentId} onClose={closeOverlay} />
@@ -278,6 +335,10 @@ export function PractitionerApp() {
         onClose={() => setSearchOpen(false)}
         onSelect={(id) => { setSearchOpen(false); openOverlay({ kind: 'patient-detail', patientId: id }) }}
         onAddPatient={() => { setSearchOpen(false); setAddPatientOpen(true) }}
+        quickView={{
+          onOpenCase: (id) => { setSearchOpen(false); openOverlay({ kind: 'case', patientId: id }) },
+          onPrescribe: (id) => { setSearchOpen(false); goToRx(id) },
+        }}
       />
       <AddPatientSheet
         open={addPatientOpen}
@@ -814,9 +875,9 @@ function QuickInvestigationScreen({ patientId, onBack }: { patientId: string; on
   return (
     <div className="flex h-full flex-col bg-screen">
       <div className="px-[18px] pb-2 pt-[var(--app-top)]">
-        <button onClick={onBack} className="flex items-center gap-1 text-[13px] font-semibold text-brand">
-          <CaretLeft size={15} weight="bold" /> Back
-        </button>
+        <Pressable ariaLabel="back" hap="tick" onClick={onBack} className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
+          <CaretLeft size={18} className="text-body" />
+        </Pressable>
         <div className="mt-1 font-display text-[18px] font-bold text-ink">Investigations</div>
         <div className="text-[12px] text-faint">{patient.name} · same letterhead as prescriptions</div>
       </div>

@@ -4,6 +4,7 @@ import { useClinic } from '../core/store'
 import { uploadDocument } from '../core/db'
 import { allTemplates, type CaseTemplateName, getSections } from '../core/caseTemplate'
 import { Button, Label } from '../design-system/ui'
+import { Pressable } from '../design-system/Pressable'
 import { VoiceRecorder } from '../design-system/VoiceRecorder'
 import { useToast } from '../design-system/toast'
 import { CaseFieldEditor, useCaseProgress, useCaseSaveStatus } from '../components/CaseFields'
@@ -56,9 +57,9 @@ export function MobileCaseSheet({
     <div className="flex h-full flex-col bg-screen">
       <div className="px-[18px] pb-2 pt-[var(--app-top)]">
         <div className="flex items-center justify-between">
-          <button onClick={onBack} className="-ml-2 -my-3 flex items-center gap-1 py-3 pl-2 pr-3 text-[13px] font-semibold text-brand">
-            <CaretLeft size={15} weight="bold" /> Back
-          </button>
+          <Pressable ariaLabel="back" hap="tick" onClick={onBack} className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
+            <CaretLeft size={18} className="text-body" />
+          </Pressable>
           {saveStatus === 'saving' && (
             <span className="flex items-center gap-1 text-[11.5px] font-semibold text-muted">
               <CircleNotch size={13} className="animate-spin" /> Saving…

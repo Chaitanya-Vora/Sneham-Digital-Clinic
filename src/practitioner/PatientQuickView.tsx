@@ -2,7 +2,9 @@ import { useClinic } from '../core/store'
 import { Avatar, Badge, BottomSheet, Label } from '../design-system/ui'
 import { Pressable } from '../design-system/Pressable'
 import { haptic } from '../design-system/haptics'
-import { Phone, Prescription as RxIcon, NotePencil } from '@phosphor-icons/react'
+import { useToast } from '../design-system/toast'
+import { shareViaWhatsApp } from '../core/share'
+import { Phone, WhatsappLogo, Prescription as RxIcon, NotePencil } from '@phosphor-icons/react'
 
 // A quick "peek" at a patient — tapping a name on Today or Follow-ups opens
 // this instead of committing straight to the full case sheet. Deliberately
@@ -12,14 +14,17 @@ export function PatientQuickView({
   onClose,
   onOpenCase,
   onPrescribe,
+  onViewProfile,
 }: {
   patientId: string | null
   onClose: () => void
   onOpenCase: (id: string) => void
   onPrescribe: (id: string) => void
+  onViewProfile?: (id: string) => void
 }) {
   const patient = useClinic((s) => s.patients.find((p) => p.id === patientId))
   const rxCount = useClinic((s) => (patientId ? s.prescriptions.filter((r) => r.patientId === patientId && r.status !== 'draft').length : 0))
+  const toast = useToast()
 
   return (
     <BottomSheet open={!!patient} onClose={onClose}>
@@ -33,13 +38,27 @@ export function PatientQuickView({
             </div>
             <Badge tone={patient.assignment === 'Mine' ? 'neutral' : 'amber'}>{patient.assignment}</Badge>
             {patient.phone && (
-              <a
-                href={`tel:${patient.phone}`}
-                onClick={(e) => { e.stopPropagation(); haptic('tick') }}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-body"
-              >
-                <Phone size={16} />
-              </a>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <a
+                  href={`tel:${patient.phone}`}
+                  onClick={(e) => { e.stopPropagation(); haptic('tick') }}
+                  className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface text-body"
+                >
+                  <Phone size={16} />
+                </a>
+                <Pressable
+                  ariaLabel="message on whatsapp"
+                  hap="tick"
+                  onClick={(e) => {
+                    e?.stopPropagation()
+                    const ok = shareViaWhatsApp(patient.phone, `Hi ${patient.name.split(' ')[0]}, this is Sneham Digital Clinic.`)
+                    if (!ok) toast({ title: 'No phone number on file', message: 'Add a phone number for this patient first.' })
+                  }}
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-[#25D366] text-white"
+                >
+                  <WhatsappLogo size={17} weight="fill" />
+                </Pressable>
+              </div>
             )}
           </div>
 
@@ -78,6 +97,16 @@ export function PatientQuickView({
               <RxIcon size={16} weight="fill" /> New prescription
             </Pressable>
           </div>
+
+          {onViewProfile && (
+            <Pressable
+              hap="tick"
+              onClick={() => { onClose(); onViewProfile(patient.id) }}
+              className="mt-3 w-full text-center text-[13px] font-semibold text-brand"
+            >
+              View full profile &rsaquo;
+            </Pressable>
+          )}
         </>
       )}
     </BottomSheet>

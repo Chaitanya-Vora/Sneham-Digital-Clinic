@@ -11,6 +11,8 @@ import type { Surface } from './core/types'
 import { useClinic } from './core/store'
 import { useShell } from './core/shell'
 import { SnehamMark, SnehamLockup } from './design-system/Logo'
+import { SplashIntro } from './design-system/SplashIntro'
+import { registerForPushNotifications } from './core/push'
 import { PhoneFrame } from './design-system/ui'
 import { Onboarding } from './web/Onboarding'
 
@@ -59,10 +61,22 @@ function useIsMobile() {
 
 export default function App() {
   const isMobile = useIsMobile()
-  const { user } = useAuth()
+  const { user, loading: authLoading } = useAuth()
   const hydrate = useClinic((s) => s.hydrate)
   const hydrated = useClinic((s) => s.hydrated)
   const resetDailyDoses = useClinic((s) => s.resetDailyDoses)
+
+  // Animated hand-off from the native splash screen — visible only on
+  // native, only for as long as the real auth check is running (with a
+  // floor so it's never a one-frame flash on an instant/cached session).
+  // AuthProvider's own 8s safety timeout already forces `authLoading` false
+  // no matter what, so this can never get stuck showing.
+  const [splashMinElapsed, setSplashMinElapsed] = useState(false)
+  useEffect(() => {
+    const t = setTimeout(() => setSplashMinElapsed(true), 550)
+    return () => clearTimeout(t)
+  }, [])
+  const showSplash = Capacitor.isNativePlatform() && (authLoading || !splashMinElapsed)
 
   useEffect(() => {
     if (Capacitor.isNativePlatform()) {
@@ -74,7 +88,11 @@ export default function App() {
   useEffect(() => {
     if (user) {
       const name = user.user_metadata?.full_name || user.email || 'Doctor'
-      hydrate(user.id, name)
+      hydrate(user.id, name, user.email)
+      const surface = import.meta.env.VITE_DEFAULT_SURFACE as string | undefined
+      if (surface === 'practitioner' || surface === 'patient') {
+        registerForPushNotifications(user.id, surface)
+      }
     }
   }, [user, hydrate, hydrated])
 
@@ -90,6 +108,7 @@ export default function App() {
     <>
       <UpdatePrompt />
       {isMobile ? <MobileShell /> : <DesktopShell />}
+      <AnimatePresence>{showSplash && <SplashIntro key="splash" />}</AnimatePresence>
     </>
   )
 }

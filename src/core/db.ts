@@ -51,12 +51,14 @@ function toAppPractitioner(r: any): Practitioner {
     id: r.id,
     authUserId: r.auth_user_id ?? undefined,
     name: r.name,
+    email: r.email ?? undefined,
     initials: r.initials,
     role: r.role,
     status: r.status ?? 'active',
     specialty: r.specialty,
     qualifications: r.qualifications ?? undefined,
     registrationNo: r.registration_no ?? undefined,
+    fullPatientAccess: r.full_patient_access ?? false,
     openCases: r.open_cases,
     remedyList: r.remedy_list ?? [],
     rxTemplates: r.rx_templates ?? [],
@@ -67,6 +69,7 @@ function toDbPractitioner(p: Practitioner, authUserId?: string) {
   return {
     id: p.id,
     name: p.name,
+    email: p.email ?? null,
     initials: p.initials,
     role: p.role,
     status: p.status,
@@ -101,6 +104,7 @@ export async function updatePractitionerDb(id: string, patch: Partial<Practition
   if (patch.specialty !== undefined) db.specialty = patch.specialty
   if (patch.qualifications !== undefined) db.qualifications = patch.qualifications
   if (patch.registrationNo !== undefined) db.registration_no = patch.registrationNo
+  if (patch.fullPatientAccess !== undefined) db.full_patient_access = patch.fullPatientAccess
   if (patch.openCases !== undefined) db.open_cases = patch.openCases
   if (patch.remedyList !== undefined) db.remedy_list = patch.remedyList
   if (patch.rxTemplates !== undefined) db.rx_templates = patch.rxTemplates
@@ -120,7 +124,7 @@ export async function deletePractitionerDb(id: string): Promise<boolean> {
   return true
 }
 
-export async function ensurePractitioner(userId: string, userName: string): Promise<Practitioner> {
+export async function ensurePractitioner(userId: string, userName: string, userEmail?: string): Promise<Practitioner> {
   // Deliberately not .maybeSingle() — that errors out (and this call site
   // used to silently swallow the error, reading it as "no row") the moment
   // more than one row ever matched, which is exactly the condition that
@@ -160,6 +164,7 @@ export async function ensurePractitioner(userId: string, userName: string): Prom
   const practitioner: Practitioner = {
     id,
     name: userName,
+    email: userEmail,
     initials,
     role,
     status,
@@ -173,6 +178,21 @@ export async function ensurePractitioner(userId: string, userName: string): Prom
   await supabase.from('profiles').update({ practitioner_id: id }).eq('id', userId)
 
   return practitioner
+}
+
+// Both go through security-definer RPCs, not a raw update — status/role on
+// practitioners are guarded by a database trigger against exactly that (see
+// migration_v38_invite_code_system.sql), so this is the only real path in.
+export async function generateInviteCode(practitionerId: string): Promise<string | null> {
+  const { data, error } = await supabase.rpc('generate_invite_code', { target_practitioner_id: practitionerId })
+  if (error) { console.error('generateInviteCode:', error.message); return null }
+  return data as string
+}
+
+export async function redeemInviteCode(code: string): Promise<boolean> {
+  const { data, error } = await supabase.rpc('redeem_invite_code', { submitted_code: code })
+  if (error) { console.error('redeemInviteCode:', error.message); return false }
+  return data === true
 }
 
 
@@ -1039,9 +1059,10 @@ function toAppTimeBlock(r: any): TimeBlock {
     id: r.id,
     practitionerId: r.practitioner_id,
     date: normaliseDayValue(r.day_label),
-    startHour: r.start_hour,
+    startHour: Number(r.start_hour),
     durationMin: r.duration_min,
     reason: r.reason,
+    color: (r.color ?? 'green') as TimeBlock['color'],
   }
 }
 
@@ -1053,6 +1074,7 @@ function toDbTimeBlock(t: TimeBlock) {
     start_hour: t.startHour,
     duration_min: t.durationMin,
     reason: t.reason,
+    color: t.color,
   }
 }
 
@@ -1313,12 +1335,12 @@ export interface HydratedData {
   currentPractitionerId: string
 }
 
-export async function hydrateAll(userId: string, userName: string, isPatientSurface: boolean): Promise<HydratedData> {
+export async function hydrateAll(userId: string, userName: string, isPatientSurface: boolean, userEmail?: string): Promise<HydratedData> {
   // The patient app must never auto-create a practitioner profile for
   // whoever logs in — that's how a patient's own sign-up ended up showing
   // up in the doctor's team list. Only non-patient builds (practitioner
   // app, web console) get one.
-  const practitioner = isPatientSurface ? null : await ensurePractitioner(userId, userName)
+  const practitioner = isPatientSurface ? null : await ensurePractitioner(userId, userName, userEmail)
 
   const [
     allPractitioners,

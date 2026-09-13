@@ -69,6 +69,8 @@ import {
   deleteTimeBlockDb,
   updatePractitionerDb,
   deletePractitionerDb,
+  generateInviteCode as generateInviteCodeDb,
+  redeemInviteCode as redeemInviteCodeDb,
   upsertCaseData,
   insertCaseVisit,
   updateCaseVisitDb,
@@ -184,7 +186,7 @@ interface ClinicState {
   userId: string | null
   lastDoseResetDate: string
 
-  hydrate: (userId: string, userName: string) => Promise<void>
+  hydrate: (userId: string, userName: string, userEmail?: string) => Promise<void>
   setRole: (r: Role) => void
   setOffline: (v: boolean) => void
   retryPendingWrites: () => Promise<void>
@@ -236,6 +238,8 @@ interface ClinicState {
   updateClinicSettings: (patch: Partial<ClinicSettings>) => void
   updatePractitionerSettings: (patch: Partial<PractitionerSettings>) => void
   rejectPractitioner: (id: string) => void
+  generateInviteCode: (practitionerId: string) => Promise<string | null>
+  redeemInviteCode: (code: string) => Promise<boolean>
   assignPatient: (patientId: string, practitionerId: string) => void
   addDocument: (doc: ClinicDocument) => void
   snapshotCaseVisit: (patientId: string, appointmentId?: string, template?: string) => void
@@ -329,13 +333,13 @@ export const useClinic = create<ClinicState>()(
     (set, get) => ({
       ...emptyState(),
 
-      hydrate: async (userId, userName) => {
+      hydrate: async (userId, userName, userEmail) => {
         if (get().hydrating) return
         set({ hydrating: true })
         try {
           resetHydrateErrors()
           const isPatientSurface = (import.meta.env.VITE_DEFAULT_SURFACE as string | undefined) === 'patient'
-          const data = await hydrateAll(userId, userName, isPatientSurface)
+          const data = await hydrateAll(userId, userName, isPatientSurface, userEmail)
           const fetchErrors = getHydrateErrors()
 
           if (fetchErrors > 0) {
@@ -1333,6 +1337,14 @@ export const useClinic = create<ClinicState>()(
         set((s) => ({ practitioners: s.practitioners.filter((p) => p.id !== id) }))
         writeThrough(deletePractitionerDb(id), 'Removing this request may not have saved.')
       },
+
+      // Neither of these touches local state directly — status/role changes
+      // only ever happen through the security-definer RPCs these call (see
+      // migration_v38_invite_code_system.sql), so the real result comes back
+      // from the database, not an optimistic guess. The caller re-hydrates
+      // (or just waits for the next auto-refresh) to pick up the new status.
+      generateInviteCode: async (practitionerId) => generateInviteCodeDb(practitionerId),
+      redeemInviteCode: async (code) => redeemInviteCodeDb(code),
 
       assignPatient: (patientId, practitionerId) => {
         set((s) => ({

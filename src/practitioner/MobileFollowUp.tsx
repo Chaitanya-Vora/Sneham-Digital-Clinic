@@ -4,6 +4,8 @@ import { useClinic } from '../core/store'
 import type { CheckIn, OutcomeKind } from '../core/types'
 import { addDaysISO, todayISO, formatDayLabel } from '../core/day'
 import { Badge, BottomSheet, Button, Card, Chip, Label } from '../design-system/ui'
+import { Pressable } from '../design-system/Pressable'
+import { haptic } from '../design-system/haptics'
 
 const OUTCOMES: OutcomeKind[] = ['Clear improvement', 'Partial', 'No change', 'Aggravation', 'Changed remedy']
 // Compare data is derived from case visits — no hardcoded mock
@@ -25,7 +27,7 @@ export function MobileFollowUp({
 }) {
   const patient = useClinic((s) => s.patients.find((p) => p.id === patientId))
   const doctorId = useClinic((s) => s.currentPractitionerId)
-  const practitioners = useClinic((s) => s.practitioners.filter((p) => p.id !== doctorId))
+  const practitioners = useClinic((s) => s.practitioners.filter((p) => p.id !== doctorId && p.status === 'active'))
   const checkIn = useClinic((s) => s.checkIns.find((c) => c.patientId === patientId))
   const caseVisits = useClinic((s) => s.caseVisits.filter((v) => v.patientId === patientId).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()))
   const saveOutcome = useClinic((s) => s.saveOutcome)
@@ -57,9 +59,9 @@ export function MobileFollowUp({
   return (
     <div className="flex h-full flex-col bg-screen">
       <div className="px-[18px] pb-2 pt-[var(--app-top)]">
-        <button onClick={onBack} className="-ml-2 -my-3 flex items-center gap-1 py-3 pl-2 pr-3 text-[13px] font-semibold text-brand">
-          <CaretLeft size={15} weight="bold" /> Back
-        </button>
+        <Pressable ariaLabel="back" hap="tick" onClick={onBack} className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
+          <CaretLeft size={18} className="text-body" />
+        </Pressable>
         <div className="mt-1 flex items-center gap-2">
           <div className="font-display text-[18px] font-bold text-ink">Follow-up review</div>
           {checkIn?.marked === 'better' && <Badge tone="green">Improving</Badge>}

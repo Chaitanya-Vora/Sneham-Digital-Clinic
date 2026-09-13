@@ -2,17 +2,19 @@ import { useMemo, useState, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   CalendarBlank,
+  CalendarPlus,
   CaretLeft,
   CaretRight,
   Clock,
   VideoCamera,
   MapPin,
   Plus,
+  Prohibit,
   XCircle,
 } from '@phosphor-icons/react'
-import { toISO, todayISO } from '../core/day'
+import { toISO, todayISO, formatDayLabel } from '../core/day'
 import { useClinic } from '../core/store'
-import type { Appointment, Patient } from '../core/types'
+import type { Appointment, Patient, TimeBlock } from '../core/types'
 import { Avatar, Badge, BottomSheet, Card, Chip, Label } from '../design-system/ui'
 import { Pressable } from '../design-system/Pressable'
 import { haptic } from '../design-system/haptics'
@@ -20,6 +22,7 @@ import { spring, springSoft, listContainer, listItem } from '../design-system/mo
 import { PullToRefresh } from '../design-system/gestures'
 import { useToast } from '../design-system/toast'
 import { PatientQuickView } from './PatientQuickView'
+import { BlockTimeSheet, blockColorStyle } from './BlockTimeSheet'
 
 // ── helpers ──
 
@@ -58,6 +61,16 @@ function parseHour(time: string): number {
   let h = parseInt(m[1]) % 12
   if (m[3].toUpperCase() === 'PM') h += 12
   return h
+}
+
+function parseTime(time: string): number {
+  const m = time.match(/(\d+):(\d+)\s*(AM|PM)/i)
+  if (!m) return 9
+  let h = parseInt(m[1])
+  const min = parseInt(m[2])
+  if (m[3].toUpperCase() === 'PM' && h !== 12) h += 12
+  if (m[3].toUpperCase() === 'AM' && h === 12) h = 0
+  return h + min / 60
 }
 
 function formatDecimalTime(t: number): string {
@@ -142,8 +155,13 @@ export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatien
   const scheduleFollowUp = useClinic((s) => s.scheduleFollowUp)
   const updateAppointment = useClinic((s) => s.updateAppointment)
   const updateAppointmentStatus = useClinic((s) => s.updateAppointmentStatus)
+  const allTimeBlocks = useClinic((s) => s.timeBlocks)
+  const addTimeBlock = useClinic((s) => s.addTimeBlock)
+  const removeTimeBlock = useClinic((s) => s.removeTimeBlock)
   const toast = useToast()
   const [peekPatientId, setPeekPatientId] = useState<string | null>(null)
+  const [addChooserOpen, setAddChooserOpen] = useState(false)
+  const [blockOpen, setBlockOpen] = useState(false)
 
   // Whose schedule is showing — null means "mine". Only the Owner gets the
   // switcher (matches Today's Mine/Everyone, which is Owner-only too); a
@@ -153,6 +171,10 @@ export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatien
   const appointments = useMemo(
     () => allAppointments.filter((a) => a.practitionerId === scopedPractitionerId),
     [allAppointments, scopedPractitionerId],
+  )
+  const timeBlocks = useMemo(
+    () => allTimeBlocks.filter((b) => b.practitionerId === scopedPractitionerId),
+    [allTimeBlocks, scopedPractitionerId],
   )
 
   const today = useMemo(() => new Date(), [])
@@ -191,6 +213,17 @@ export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatien
 
   const selectedKey = toISO(selectedDate)
   const dayAppointments = weekSchedule.get(selectedKey) ?? []
+  const dayBlocks = useMemo(() => timeBlocks.filter((b) => b.date === selectedKey), [timeBlocks, selectedKey])
+  // One chronological agenda — blocks interleave with appointments by start
+  // time instead of being tacked on separately, so the day reads as one
+  // real schedule.
+  const dayAgenda = useMemo(() => {
+    const items: ({ kind: 'appt'; time: number; appt: Appointment } | { kind: 'block'; time: number; block: TimeBlock })[] = [
+      ...dayAppointments.map((appt) => ({ kind: 'appt' as const, time: parseTime(appt.time), appt })),
+      ...dayBlocks.map((block) => ({ kind: 'block' as const, time: block.startHour, block })),
+    ]
+    return items.sort((a, b) => a.time - b.time)
+  }, [dayAppointments, dayBlocks])
 
   const weekStart = startOfWeek(selectedDate)
   const weekDays = useMemo(() => {
@@ -310,7 +343,7 @@ export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatien
                 Today
               </Pressable>
             )}
-            <Pressable hap="tick" onClick={openBookSheet} className="flex h-8 w-8 items-center justify-center rounded-full bg-brand text-screen">
+            <Pressable hap="tick" onClick={() => setAddChooserOpen(true)} className="flex h-8 w-8 items-center justify-center rounded-full bg-brand text-screen">
               <Plus size={16} weight="bold" />
             </Pressable>
           </div>
@@ -429,28 +462,40 @@ export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatien
                       exit={{ opacity: 0, y: -8 }}
                       transition={springSoft}
                     >
-                      {dayAppointments.length === 0 ? (
+                      {dayAgenda.length === 0 ? (
                         <EmptyDay />
                       ) : (
                         <div className="space-y-1 pt-2">
-                          <Label className="mb-2">{dayAppointments.length} appointment{dayAppointments.length !== 1 ? 's' : ''}</Label>
+                          <Label className="mb-2">
+                            {dayAppointments.length} appointment{dayAppointments.length !== 1 ? 's' : ''}
+                            {dayBlocks.length > 0 ? ` · ${dayBlocks.length} blocked` : ''}
+                          </Label>
                           <motion.div variants={listContainer} initial="hidden" animate="show" className="space-y-2.5">
-                            {dayAppointments.map((a) => {
-                              const canModify = a.status !== 'Seen' && a.status !== 'In consult' && a.status !== 'Cancelled'
-                              return (
-                                <motion.div key={a.id} variants={listItem}>
-                                  <AppointmentCard
-                                    appointment={a}
-                                    patient={patientMap.get(a.patientId)}
-                                    onTap={() => onOpenPatient(a.patientId)}
-                                    onEdit={canModify ? () => openEditSheet(a) : undefined}
-                                    onCancel={canModify ? () => setCancelApptId(a.id) : undefined}
-                                    onPeekPatient={() => setPeekPatientId(a.patientId)}
-                                    onReassign={canModify && viewPractitionerId && viewPractitionerId !== ME ? () => handleReassignToMe(a.id, patientMap.get(a.patientId)?.name) : undefined}
-                                  />
+                            {dayAgenda.map((item) =>
+                              item.kind === 'appt' ? (
+                                (() => {
+                                  const a = item.appt
+                                  const canModify = a.status !== 'Seen' && a.status !== 'In consult' && a.status !== 'Cancelled'
+                                  return (
+                                    <motion.div key={a.id} variants={listItem}>
+                                      <AppointmentCard
+                                        appointment={a}
+                                        patient={patientMap.get(a.patientId)}
+                                        onTap={() => onOpenPatient(a.patientId)}
+                                        onEdit={canModify ? () => openEditSheet(a) : undefined}
+                                        onCancel={canModify ? () => setCancelApptId(a.id) : undefined}
+                                        onPeekPatient={() => setPeekPatientId(a.patientId)}
+                                        onReassign={canModify && viewPractitionerId && viewPractitionerId !== ME ? () => handleReassignToMe(a.id, patientMap.get(a.patientId)?.name) : undefined}
+                                      />
+                                    </motion.div>
+                                  )
+                                })()
+                              ) : (
+                                <motion.div key={item.block.id} variants={listItem}>
+                                  <BlockCard block={item.block} onRemove={() => removeTimeBlock(item.block.id)} />
                                 </motion.div>
-                              )
-                            })}
+                              ),
+                            )}
                           </motion.div>
                         </div>
                       )}
@@ -509,6 +554,55 @@ export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatien
         onConfirm={() => cancelApptId && handleCancelAppt(cancelApptId)}
       />
       <PatientQuickView patientId={peekPatientId} onClose={() => setPeekPatientId(null)} onOpenCase={openCase} onPrescribe={goRx} />
+
+      <BottomSheet open={addChooserOpen} onClose={() => setAddChooserOpen(false)}>
+        <div className="font-display text-[17px] font-bold text-ink">
+          {selectedDate.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' })}
+        </div>
+        <div className="mt-3 space-y-2">
+          <Pressable
+            as="div"
+            hap="tick"
+            scale={0.98}
+            onClick={() => { setAddChooserOpen(false); openBookSheet() }}
+            className="flex cursor-pointer items-center gap-3 rounded-[16px] border border-border bg-surface px-4 py-3"
+          >
+            <div className="flex h-10 w-10 items-center justify-center rounded-[12px] bg-tint text-brand"><CalendarPlus size={20} weight="fill" /></div>
+            <div className="flex-1">
+              <div className="text-[14px] font-semibold text-ink">Book appointment</div>
+              <div className="text-[12px] text-muted">A patient visit</div>
+            </div>
+            <span className="text-faint">&rsaquo;</span>
+          </Pressable>
+          <Pressable
+            as="div"
+            hap="tick"
+            scale={0.98}
+            onClick={() => { setAddChooserOpen(false); setBlockOpen(true) }}
+            className="flex cursor-pointer items-center gap-3 rounded-[16px] border border-border bg-surface px-4 py-3"
+          >
+            <div className="flex h-10 w-10 items-center justify-center rounded-[12px] bg-amber-tint text-amber-text"><Prohibit size={20} weight="fill" /></div>
+            <div className="flex-1">
+              <div className="text-[14px] font-semibold text-ink">Block time</div>
+              <div className="text-[12px] text-muted">Personal or business — visible to the whole team</div>
+            </div>
+            <span className="text-faint">&rsaquo;</span>
+          </Pressable>
+        </div>
+      </BottomSheet>
+
+      <BlockTimeSheet
+        open={blockOpen}
+        existingBlocks={dayBlocks}
+        existingAppts={dayAppointments}
+        onClose={() => setBlockOpen(false)}
+        onConfirm={(input) => {
+          addTimeBlock({ practitionerId: scopedPractitionerId, date: selectedKey, ...input })
+          haptic('success')
+          toast({ title: `${input.reason} blocked · ${formatDayLabel(selectedKey)}` })
+          setBlockOpen(false)
+        }}
+      />
     </div>
   )
 }
@@ -593,6 +687,25 @@ function MonthGrid({
       <div className="mt-4 rounded-[16px] border border-border bg-surface/50 px-4 py-3">
         <div className="text-[12px] text-muted">Tap any day to see appointments in week view</div>
       </div>
+    </div>
+  )
+}
+
+// ── block card (personal/business time, not a patient visit) ──
+
+function BlockCard({ block, onRemove }: { block: TimeBlock; onRemove: () => void }) {
+  const style = blockColorStyle(block.color)
+  return (
+    <div className={`flex items-center gap-3 rounded-[18px] border border-dashed px-4 py-3 ${style.border} ${style.bg}`}>
+      <div className="min-w-0 flex-1">
+        <div className={`text-[13.5px] font-semibold ${style.text}`}>{block.reason}</div>
+        <div className={`text-[11.5px] opacity-80 ${style.text}`}>
+          {formatDecimalTime(block.startHour)} – {formatDecimalTime(block.startHour + block.durationMin / 60)}
+        </div>
+      </div>
+      <Pressable ariaLabel="remove block" hap="tick" onClick={onRemove} className={`opacity-60 hover:opacity-100 ${style.text}`}>
+        <XCircle size={16} />
+      </Pressable>
     </div>
   )
 }

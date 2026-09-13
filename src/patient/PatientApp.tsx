@@ -1,8 +1,9 @@
 import { Capacitor } from '@capacitor/core'
 import { Browser } from '@capacitor/browser'
 import { Share } from '@capacitor/share'
+import { App as CapApp } from '@capacitor/app'
 import { formatDayLabel, todayISO, isPastISO, addDaysISO } from '../core/day'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   Bell,
@@ -40,7 +41,7 @@ import { Pressable } from '../design-system/Pressable'
 import { haptic } from '../design-system/haptics'
 import { spring, springSoft, tabVariants, pushVariants, listContainer, listItem } from '../design-system/motion'
 import { CountUp, ProgressRing } from '../design-system/feedback'
-import { PullToRefresh, useHorizontalSwipe, EdgeSwipeBack } from '../design-system/gestures'
+import { PullToRefresh, useHorizontalSwipe, EdgeSwipeBack, useNativeBackButton } from '../design-system/gestures'
 import { useToast } from '../design-system/toast'
 import { ChatThread } from '../components/ChatThread'
 import { exportPrescriptionPdf } from '../core/pdfExport'
@@ -93,6 +94,23 @@ export function PatientApp() {
   const [tab, setTab] = useState<Tab>('home')
   const [dir, setDir] = useState(1)
   const [pushed, setPushed] = useState<PushedScreen>(null)
+  const toast = useToast()
+  // Same fix as the practitioner app: Android's back gesture exits the app
+  // outright the moment there's nothing in browser history to pop, and a
+  // stray swipe on a tab root (nothing pushed) used to do exactly that.
+  // Pushed screens already handle their own back via EdgeSwipeBack; this
+  // covers the tab-root case with the standard "press back again to exit".
+  const [exitArmed, setExitArmed] = useState(false)
+  const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useNativeBackButton(useCallback(() => {
+    if (pushed) return
+    if (exitArmed) { CapApp.exitApp(); return }
+    setExitArmed(true)
+    haptic('warn')
+    toast({ title: 'Press back again to exit' })
+    if (exitTimerRef.current) clearTimeout(exitTimerRef.current)
+    exitTimerRef.current = setTimeout(() => setExitArmed(false), 2000)
+  }, [pushed, exitArmed, toast]))
 
   const patient = useMyPatient()
   const ME = patient?.id ?? ''

@@ -181,7 +181,7 @@ export function FollowUp({ patientId, onBack }: { patientId: string; onBack: () 
   )
 }
 
-function HandoffDrawer({
+export function HandoffDrawer({
   patientId,
   practitioners,
   onClose,

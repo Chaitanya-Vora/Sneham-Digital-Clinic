@@ -141,10 +141,10 @@ export function Toggle({
 }
 
 // ── Avatar (initials) ──
-export function Avatar({ initials, size = 40 }: { initials: string; size?: number }) {
+export function Avatar({ initials, size = 40, colorClass }: { initials: string; size?: number; colorClass?: string }) {
   return (
     <div
-      className="flex items-center justify-center rounded-full bg-tint text-ink-deep font-display font-semibold shrink-0"
+      className={`flex items-center justify-center rounded-full font-display font-semibold shrink-0 ${colorClass ?? 'bg-tint text-ink-deep'}`}
       style={{ width: size, height: size, fontSize: size * 0.36 }}
     >
       {initials}

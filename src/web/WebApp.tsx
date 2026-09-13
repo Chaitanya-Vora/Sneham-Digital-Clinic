@@ -67,7 +67,7 @@ import { STANDARD_MEDICINE_INSTRUCTIONS } from '../core/rxInstructions'
 import { shareViaWhatsApp, shareViaSms, shareViaEmail, shareTextViaWhatsApp } from '../core/share'
 import { uploadDocument, getDocumentUrl, fetchPatientDeletionImpact, newId } from '../core/db'
 import { Avatar, Badge, Button, Card, Chip, Label, Stepper, PatientNotFound } from '../design-system/ui'
-import { PendingApproval } from '../design-system/PendingApproval'
+import { PendingApproval, AccessRemoved } from '../design-system/PendingApproval'
 import { Pressable } from '../design-system/Pressable'
 import { CLINIC_DETAILS } from '../core/letterheadAssets'
 import { SnehamLockup } from '../design-system/Logo'
@@ -75,7 +75,7 @@ import { ToastHost, useToast } from '../design-system/toast'
 import { CountUp } from '../design-system/feedback'
 import { easeCalm, listContainer, listItem } from '../design-system/motion'
 import { CaseSheet } from './CaseSheet'
-import { FollowUp } from './FollowUp'
+import { FollowUp, HandoffDrawer } from './FollowUp'
 import { CommandPalette, type Command } from './CommandPalette'
 import { WebCalendar } from './WebCalendar'
 import { AppointmentModal, type AppointmentModalRequest } from './AppointmentModal'
@@ -184,6 +184,9 @@ export function WebApp() {
 
   if (doctor.status === 'pending') {
     return <PendingApproval name={doctor.name} />
+  }
+  if (doctor.status === 'inactive') {
+    return <AccessRemoved name={doctor.name} />
   }
 
   const openPatient = (id: string) => {
@@ -1848,6 +1851,7 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
   const activePractitioners = useMemo(() => practitioners.filter((p) => p.status === 'active'), [practitioners])
   const doctor = useClinic((s) => s.practitioners.find((p) => p.id === s.currentPractitionerId))
   const assignPatient = useClinic((s) => s.assignPatient)
+  const createHandoff = useClinic((s) => s.createHandoff)
   const addDocument = useClinic((s) => s.addDocument)
   const cancelPrescription = useClinic((s) => s.cancelPrescription)
   const role = useClinic((s) => s.role)
@@ -1865,6 +1869,7 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
   const [patientMenuOpen, setPatientMenuOpen] = useState(false)
   const [editPatientOpen, setEditPatientOpen] = useState(false)
   const [deletePatientOpen, setDeletePatientOpen] = useState(false)
+  const [handoffOpen, setHandoffOpen] = useState(false)
   const archivePatient = useClinic((s) => s.archivePatient)
   const restorePatient = useClinic((s) => s.restorePatient)
   const patientMenuRef = useRef<HTMLDivElement>(null)
@@ -2025,6 +2030,14 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
               >
                 <DownloadSimple size={15} /> Export patient summary (PDF)
               </button>
+              {hasRolePermission(role, rolePermissions, 'assignCases') && !patient.archivedAt && (
+                <button
+                  onClick={() => { setHandoffOpen(true); setPatientMenuOpen(false) }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-[13px] text-body transition hover:bg-surface-hover"
+                >
+                  <Handshake size={15} /> Hand off for coverage
+                </button>
+              )}
               {hasRolePermission(role, rolePermissions, 'assignCases') && (
                 patient.archivedAt ? (
                   <button
@@ -2069,6 +2082,34 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
 
       {editPatientOpen && <EditPatientModal patient={patient} onClose={() => setEditPatientOpen(false)} />}
       {deletePatientOpen && <PermanentDeleteModal patient={patient} onClose={() => setDeletePatientOpen(false)} onDeleted={onBack} />}
+
+      <AnimatePresence>
+        {handoffOpen && (
+          <HandoffDrawer
+            patientId={patientId}
+            fromId={doctor?.id ?? ''}
+            practitioners={activePractitioners.filter((p) => p.id !== doctor?.id)}
+            onClose={() => setHandoffOpen(false)}
+            onSend={(toId, watchFor) => {
+              createHandoff({
+                patientId,
+                fromId: doctor?.id ?? '',
+                toId,
+                coveringUntil: formatDayLabel(addDaysISO(todayISO(), 7)),
+                note: {
+                  currentRemedy: patient.currentRemedy ?? '—',
+                  caseStatus: patient.lastOutcome ?? 'No status given.',
+                  reason: 'Handed off from patient record.',
+                  watchFor,
+                },
+              })
+              setHandoffOpen(false)
+              const to = practitioners.find((p) => p.id === toId)
+              toast({ title: 'Handoff sent', message: `${to?.name ?? 'Your colleague'} is covering ${patient.name} for 7 days. Ownership stays with you.` })
+            }}
+          />
+        )}
+      </AnimatePresence>
 
       {assignOpen && createPortal(
         <div
@@ -3483,6 +3524,7 @@ function SettingsView() {
   const role = useClinic((s) => s.role)
   const updatePractitioner = useClinic((s) => s.updatePractitioner)
   const rejectPractitioner = useClinic((s) => s.rejectPractitioner)
+  const generateInviteCode = useClinic((s) => s.generateInviteCode)
   const assignPatient = useClinic((s) => s.assignPatient)
   const rolePermissions = useClinic((s) => s.rolePermissions)
   const updateRolePermission = useClinic((s) => s.updateRolePermission)
@@ -3498,6 +3540,16 @@ function SettingsView() {
   const pending = practitioners.filter((p) => p.status === 'pending')
   const active = practitioners.filter((p) => p.status === 'active')
   const inactive = practitioners.filter((p) => p.status === 'inactive')
+  // Local-only — the real code lives in the database (practitioners.invite_code),
+  // this is just so the card can keep showing it after generating without
+  // re-fetching. Clears itself once that request is no longer pending (approved
+  // via code redemption, approved directly, or rejected).
+  const [generatedCodes, setGeneratedCodes] = useState<Record<string, string>>({})
+  const handleGenerateCode = async (id: string) => {
+    const code = await generateInviteCode(id)
+    if (code) setGeneratedCodes((s) => ({ ...s, [id]: code }))
+    else toast({ title: 'Could not generate a code', message: 'Please try again.' })
+  }
   const [clinicName, setClinicName] = useState(clinicSettings.clinicName)
   const [consultDuration, setConsultDuration] = useState(String(clinicSettings.consultDurationMin))
   useEffect(() => {
@@ -3801,14 +3853,28 @@ function SettingsView() {
               migration_v19_practitioner_approval_gate.sql. */}
           <div className="space-y-2">
             {pending.map((pr) => (
-              <div key={pr.id} className="flex items-center gap-3 rounded-[14px] border border-amber/30 bg-amber-tint/20 px-4 py-3">
-                <Avatar initials={pr.initials} size={38} />
-                <div className="flex-1">
-                  <div className="font-display text-[14px] font-semibold text-ink">{pr.name}</div>
-                  <div className="text-[12px] text-muted">{pr.specialty}{pr.qualifications && ` · ${pr.qualifications}`}</div>
+              <div key={pr.id} className="rounded-[14px] border border-amber/30 bg-amber-tint/20 px-4 py-3">
+                <div className="flex items-center gap-3">
+                  <Avatar initials={pr.initials} size={38} />
+                  <div className="flex-1">
+                    <div className="font-display text-[14px] font-semibold text-ink">{pr.name}</div>
+                    {pr.email && <div className="text-[12px] text-body">{pr.email}</div>}
+                    <div className="text-[11.5px] text-muted">{pr.specialty}{pr.qualifications && ` · ${pr.qualifications}`}</div>
+                  </div>
+                  <Button variant="ghost" size="sm" className="!text-danger" onClick={() => rejectPractitioner(pr.id)}>Reject</Button>
+                  <Button variant="ghost" size="sm" onClick={() => handleGenerateCode(pr.id)}>Generate code</Button>
+                  <Button variant="accent" size="sm" onClick={() => updatePractitioner(pr.id, { status: 'active' })}>Approve directly</Button>
                 </div>
-                <Button variant="ghost" size="sm" className="!text-danger" onClick={() => rejectPractitioner(pr.id)}>Reject</Button>
-                <Button variant="accent" size="sm" onClick={() => updatePractitioner(pr.id, { status: 'active' })}>Approve</Button>
+                {generatedCodes[pr.id] && (
+                  <div className="mt-2.5 flex items-center gap-2.5 rounded-[10px] border border-green-border bg-tint px-3.5 py-2.5">
+                    <div className="flex-1 text-[12.5px] text-ink-deep">
+                      Share this code with {pr.name.replace(/^Dr\.?\s*/i, '')} — they enter it on their own "waiting for approval" screen to get in.
+                    </div>
+                    <div className="rounded-[8px] bg-surface px-3 py-1.5 font-mono text-[15px] font-bold tracking-[0.1em] text-brand">
+                      {generatedCodes[pr.id]}
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -3830,6 +3896,27 @@ function SettingsView() {
               </div>
               <Badge tone={pr.role === 'Owner' ? 'green' : 'neutral'}>{pr.role}</Badge>
               <div className="text-[12px] text-faint">{pr.openCases} open cases</div>
+              {role === 'Owner' && pr.role !== 'Owner' && (
+                <button
+                  onClick={() => {
+                    const next = !pr.fullPatientAccess
+                    updatePractitioner(pr.id, { fullPatientAccess: next })
+                    toast({
+                      title: next ? 'Full patient access granted' : 'Full patient access removed',
+                      message: next
+                        ? `${pr.name} can now see every patient in the clinic, not just their own roster.`
+                        : `${pr.name} can now only see patients assigned or handed off to them.`,
+                    })
+                  }}
+                  className="flex items-center gap-1.5"
+                  title={pr.fullPatientAccess ? 'Sees every patient — click to restrict to their own roster' : "Sees only their own roster — click to grant full patient access"}
+                >
+                  <span className="text-[11.5px] font-medium text-faint">Full access</span>
+                  {pr.fullPatientAccess
+                    ? <ToggleRight size={24} weight="fill" className="text-accent" />
+                    : <ToggleLeft size={24} weight="fill" className="text-faint" />}
+                </button>
+              )}
               {role === 'Owner' && pr.id !== currentId && pr.role !== 'Owner' && (
                 <button
                   onClick={() => {

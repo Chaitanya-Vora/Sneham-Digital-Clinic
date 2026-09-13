@@ -12,9 +12,10 @@ import {
   Prescription as RxIcon,
   Check,
   Prohibit,
-  Coffee,
-  Briefcase,
   User as UserIcon,
+  UsersThree,
+  SquaresFour,
+  Rows,
   DotsSixVertical,
   Warning,
   CalendarBlank,
@@ -30,6 +31,7 @@ import { haptic } from '../design-system/haptics'
 import { springSoft, listContainer, listItem } from '../design-system/motion'
 import { useToast } from '../design-system/toast'
 import { PatientQuickView } from './PatientQuickView'
+import { BlockTimeSheet, blockColorStyle } from './BlockTimeSheet'
 
 // ME is resolved from store's currentPractitionerId inside the component
 const HOURS = Array.from({ length: 12 }, (_, i) => i + 8) // 8 AM – 7 PM
@@ -63,6 +65,14 @@ function formatDecimalTime(t: number): string {
 
 type DayView = 'day' | 'list'
 
+// Distinct avatar tints for the Team today card only — the shared Avatar
+// component defaults to one brand tint everywhere else in the app, but the
+// team roster reads faster when each colleague has their own color.
+const TEAM_AVATAR_COLORS = ['bg-tint text-ink-deep', 'bg-amber-tint/60 text-amber-text', 'bg-[#EBE3F5] text-[#6E5296]', 'bg-[#DCEAF5] text-[#3E6B8C]']
+function teamAvatarColor(index: number) {
+  return TEAM_AVATAR_COLORS[index % TEAM_AVATAR_COLORS.length]
+}
+
 export function TodayGrid({
   openCase,
   goRx,
@@ -76,6 +86,7 @@ export function TodayGrid({
   onQuickBill: () => void
   onInstantMeeting?: () => void
 }) {
+  const hydrated = useClinic((s) => s.hydrated)
   const dbError = useClinic((s) => s.dbError)
   // Cancelled appointments stay in the database (never deleted — an
   // accidental walk-in can be cancelled instead of being permanently stuck
@@ -110,12 +121,10 @@ export function TodayGrid({
   const [followUpSheet, setFollowUpSheet] = useState<string | null>(null)
   const [noShowSheet, setNoShowSheet] = useState<string | null>(null)
   const [blockOpen, setBlockOpen] = useState(false)
-  const [blockStartHour, setBlockStartHour] = useState(13)
-  const [blockDuration, setBlockDuration] = useState('1 hour')
-  const [blockReason, setBlockReason] = useState('Lunch')
   const [selectedAppt, setSelectedAppt] = useState<string | null>(null)
   const [dragTarget, setDragTarget] = useState<number | null>(null)
   const [peekPatientId, setPeekPatientId] = useState<string | null>(null)
+  const [expandedTeamId, setExpandedTeamId] = useState<string | null>(null)
 
   const gridRef = useRef<HTMLDivElement>(null)
 
@@ -126,7 +135,7 @@ export function TodayGrid({
   const myAppts = allAppts.filter((a) => a.practitionerId === ME)
   const appts = role === 'Owner' && viewMode === 'everyone' ? allAppts : myAppts
   const timeBlocks = role === 'Owner' && viewMode === 'everyone' ? allTimeBlocks : allTimeBlocks.filter((b) => b.practitionerId === ME)
-  const team = practitioners.filter((p) => p.id !== ME)
+  const team = practitioners.filter((p) => p.id !== ME && p.status === 'active')
   const teamToday = allAppts.filter((a) => isTodayISO(a.date) && a.practitionerId !== ME)
 
   const activeAppt = myAppts.find((a) => a.status === 'In consult')
@@ -206,11 +215,10 @@ export function TodayGrid({
     if (appt) setFollowUpSheet(appt.patientId)
   }
 
-  function handleBlockTime() {
-    const durMap: Record<string, number> = { '30 min': 30, '1 hour': 60, '2 hours': 120 }
-    addTimeBlock({ practitionerId: ME, date: todayISO(), startHour: blockStartHour, durationMin: durMap[blockDuration] ?? 60, reason: blockReason })
+  function handleBlockTime(input: { startHour: number; durationMin: number; reason: string; color: TimeBlock['color'] }) {
+    addTimeBlock({ practitionerId: ME, date: todayISO(), ...input })
     haptic('success')
-    toast({ title: `${blockReason} blocked · ${fmtHour(blockStartHour)}` })
+    toast({ title: `${input.reason} blocked · ${fmtHour(Math.floor(input.startHour))}` })
     setBlockOpen(false)
   }
 
@@ -238,6 +246,30 @@ export function TodayGrid({
     ['Upcoming', upcoming, 'neutral'],
   ]
 
+  // First paint after login, before the initial fetch resolves — a shimmer
+  // placeholder instead of a flash of all-zero stats. Never shown again
+  // after that first hydrate (including the 15s background refresh), since
+  // `hydrated` only ever flips true→stays true.
+  if (!hydrated) {
+    return (
+      <div className="space-y-3 pb-20">
+        <div className="flex items-center justify-between">
+          <div className="h-3 w-24 animate-pulse rounded-full bg-border" />
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="grid flex-1 grid-cols-3 gap-2">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="h-[52px] animate-pulse rounded-[14px] border border-border bg-surface" />
+            ))}
+          </div>
+          <div className="h-9 w-24 shrink-0 animate-pulse rounded-[10px] border border-border bg-surface" />
+        </div>
+        <div className="h-64 animate-pulse rounded-[20px] border border-border bg-surface" />
+        <div className="h-64 animate-pulse rounded-[20px] border border-border bg-surface" />
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-3 pb-20">
       {dbError && (
@@ -260,8 +292,9 @@ export function TodayGrid({
                   key={m}
                   hap="tick"
                   onClick={() => setViewMode(m)}
-                  className={`rounded-pill px-3 py-1 text-[12px] font-semibold transition ${viewMode === m ? 'bg-brand text-screen' : 'text-muted'}`}
+                  className={`flex items-center gap-1 rounded-pill px-3 py-1 text-[12px] font-semibold transition ${viewMode === m ? 'bg-brand text-screen' : 'text-muted'}`}
                 >
+                  {m === 'mine' ? <UserIcon size={12} weight={viewMode === m ? 'fill' : 'regular'} /> : <UsersThree size={12} weight={viewMode === m ? 'fill' : 'regular'} />}
                   {m === 'mine' ? 'Mine' : 'Everyone'}
                 </Pressable>
               ))}
@@ -320,13 +353,76 @@ export function TodayGrid({
               key={v}
               hap="tick"
               onClick={() => setView(v)}
-              className={`px-3.5 py-2 text-[12.5px] font-semibold capitalize transition ${view === v ? 'bg-brand text-screen' : 'text-body'} ${v === 'day' ? 'rounded-l-[10px]' : 'rounded-r-[10px]'}`}
+              className={`flex items-center gap-1 px-3.5 py-2 text-[12.5px] font-semibold capitalize transition ${view === v ? 'bg-brand text-screen' : 'text-body'} ${v === 'day' ? 'rounded-l-[10px]' : 'rounded-r-[10px]'}`}
             >
+              {v === 'day' ? <SquaresFour size={13} weight={view === v ? 'fill' : 'regular'} /> : <Rows size={13} weight={view === v ? 'fill' : 'regular'} />}
               {v === 'day' ? 'Grid' : 'List'}
             </Pressable>
           ))}
         </div>
       </div>
+
+      {/* team today — Owner + Everyone only, above the schedule so the
+          roster is the first thing seen once "Everyone" is picked */}
+      {role === 'Owner' && viewMode === 'everyone' && team.length > 0 && (
+        <Card className="p-4">
+          <div className="font-display text-[15px] font-bold text-ink">Team today</div>
+          <div className="mt-3 space-y-1">
+            {team.map((p, i) => {
+              const rows = teamToday.filter((a) => a.practitionerId === p.id)
+              const expanded = expandedTeamId === p.id
+              return (
+                <div key={p.id}>
+                  <Pressable
+                    as="div"
+                    hap="tick"
+                    onClick={() => setExpandedTeamId(expanded ? null : p.id)}
+                    className="flex w-full cursor-pointer items-center gap-3 rounded-[14px] px-1.5 py-2 text-left"
+                  >
+                    <Avatar initials={p.initials} size={32} colorClass={teamAvatarColor(i)} />
+                    <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-ink">{p.name}</span>
+                    <span className="font-display text-[15px] font-bold text-ink">{rows.length}</span>
+                    <span className={`text-faint transition-transform ${expanded ? 'rotate-90' : ''}`}>&rsaquo;</span>
+                  </Pressable>
+                  <AnimatePresence initial={false}>
+                    {expanded && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.18 }}
+                        className="overflow-hidden"
+                      >
+                        {rows.length === 0 ? (
+                          <p className="py-1.5 pl-[52px] text-[12px] text-faint">Nothing scheduled today.</p>
+                        ) : (
+                          <div className="space-y-1 py-1 pl-[52px]">
+                            {rows.map((a) => {
+                              const pt = pFind(a.patientId)
+                              return (
+                                <Pressable
+                                  key={a.id}
+                                  hap="tick"
+                                  onClick={() => openCase(a.patientId)}
+                                  className="flex w-full items-center gap-2.5 rounded-[10px] px-2 py-1.5 text-left"
+                                >
+                                  <span className="w-14 shrink-0 text-[12px] font-semibold text-body">{a.time}</span>
+                                  <span className="min-w-0 flex-1 truncate text-[12px] text-ink">{pt?.name ?? 'Patient'}</span>
+                                  <Badge tone={a.status === 'In consult' ? 'green' : 'neutral'}>{a.status}</Badge>
+                                </Pressable>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              )
+            })}
+          </div>
+        </Card>
+      )}
 
       {/* active consult card */}
       {activeAppt && activePatient && (
@@ -408,62 +504,23 @@ export function TodayGrid({
       {/* block time action */}
       <Pressable
         hap="tick"
-        onClick={() => { setBlockStartHour(13); setBlockReason('Lunch'); setBlockDuration('1 hour'); setBlockOpen(true) }}
+        onClick={() => setBlockOpen(true)}
         className="flex w-full items-center justify-center gap-2 rounded-pill border border-dashed border-border-dash py-2.5 text-[13px] font-semibold text-muted"
       >
         <Prohibit size={15} /> Block time
       </Pressable>
 
-      {/* team card — Owner only, below her own schedule, matching web */}
-      {role === 'Owner' && viewMode === 'everyone' && team.length > 0 && (
-        <Card className="p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <div className="font-display text-[15px] font-bold text-ink">Your team today</div>
-            <Badge tone="neutral">{teamToday.length} appointment{teamToday.length !== 1 ? 's' : ''}</Badge>
-          </div>
-          <div className="space-y-3.5">
-            {team.map((p) => {
-              const rows = teamToday.filter((a) => a.practitionerId === p.id)
-              return (
-                <div key={p.id}>
-                  <div className="mb-1.5 flex items-center gap-2">
-                    <Avatar initials={p.initials} size={22} />
-                    <span className="text-[13px] font-semibold text-ink">{p.name}</span>
-                    <span className="text-[11.5px] text-faint">{rows.length} today</span>
-                  </div>
-                  {rows.length === 0 ? (
-                    <p className="pl-7 text-[12px] text-faint">Nothing scheduled today.</p>
-                  ) : (
-                    <div className="space-y-1 pl-7">
-                      {rows.map((a) => {
-                        const pt = pFind(a.patientId)
-                        return (
-                          <Pressable
-                            key={a.id}
-                            hap="tick"
-                            onClick={() => openCase(a.patientId)}
-                            className="flex w-full items-center gap-2.5 rounded-[10px] px-2 py-1.5 text-left"
-                          >
-                            <span className="w-14 shrink-0 text-[12px] font-semibold text-body">{a.time}</span>
-                            <span className="min-w-0 flex-1 truncate text-[12px] text-ink">{pt?.name ?? 'Patient'}</span>
-                            <Badge tone={a.status === 'In consult' ? 'green' : 'neutral'}>{a.status}</Badge>
-                          </Pressable>
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        </Card>
-      )}
-
       {/* bottom sheets */}
       <EndConsultSheet open={endConsultSheet !== null} timerStr={timerStr} onClose={() => setEndConsultSheet(null)} onConfirm={() => endConsultSheet && handleEndConsult(endConsultSheet)} />
       <FollowUpSheet open={followUpSheet !== null} patientName={followUpSheet ? pFind(followUpSheet)?.name ?? 'patient' : ''} onClose={() => setFollowUpSheet(null)} onSelect={(p) => followUpSheet && handleScheduleFollowUp(followUpSheet, p)} />
       <NoShowSheet open={noShowSheet !== null} appts={allAppts} pFind={pFind} noShowId={noShowSheet} onClose={() => setNoShowSheet(null)} onConfirm={() => noShowSheet && handleNoShow(noShowSheet)} />
-      <BlockTimeSheet open={blockOpen} startHour={blockStartHour} duration={blockDuration} reason={blockReason} onStartHourChange={setBlockStartHour} onDurationChange={setBlockDuration} onReasonChange={setBlockReason} onClose={() => setBlockOpen(false)} onConfirm={handleBlockTime} />
+      <BlockTimeSheet
+        open={blockOpen}
+        existingBlocks={allTimeBlocks.filter((b) => b.practitionerId === ME && isTodayISO(b.date))}
+        existingAppts={myTodayAppts}
+        onClose={() => setBlockOpen(false)}
+        onConfirm={handleBlockTime}
+      />
       <PatientQuickView patientId={peekPatientId} onClose={() => setPeekPatientId(null)} onOpenCase={openCase} onPrescribe={goRx} />
     </div>
   )
@@ -536,24 +593,27 @@ function DayGridView({ appts, timeBlocks, patients, practitioners, myId, activeA
               >
                 {/* time blocks */}
                 {hourBlocks.map((b) => {
-                  const startOffset = Math.max(0, (h - b.startHour)) * HOUR_HEIGHT
+                  // Blocks can now start mid-hour (e.g. 1:30 PM) — anchor
+                  // the element in the row containing its start, offset
+                  // down within that row by however far past the hour mark
+                  // it begins, then let its full height overflow into
+                  // subsequent rows the same way an hour-long block always
+                  // has (this row has no overflow clipping).
+                  const startOffset = Math.max(0, (b.startHour - h)) * HOUR_HEIGHT
                   const blockHeight = (b.durationMin / 60) * HOUR_HEIGHT
-                  const visibleHeight = Math.min(blockHeight - startOffset, HOUR_HEIGHT)
-                  const isStart = h === b.startHour
-                  const blockIcons: Record<string, typeof Coffee> = { Lunch: Coffee, Admin: Briefcase, Personal: UserIcon }
-                  const Icon = blockIcons[b.reason] ?? Prohibit
+                  const isStart = Math.floor(b.startHour) === h
+                  const style = blockColorStyle(b.color)
 
                   return isStart ? (
                     <div
                       key={b.id}
-                      className="absolute inset-x-1 z-10 flex items-center gap-2 rounded-[10px] border border-dashed border-faint/40 bg-raised/60 px-2.5"
-                      style={{ top: 0, height: `${blockHeight}px` }}
+                      className={`absolute inset-x-1 z-10 flex items-center gap-2 rounded-[10px] border border-dashed px-2.5 ${style.border} ${style.bg}`}
+                      style={{ top: `${startOffset}px`, height: `${blockHeight}px` }}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <Icon size={14} className="text-faint" />
-                      <span className="text-[11px] font-medium text-faint">{b.reason}</span>
+                      <span className={`text-[11px] font-medium ${style.text}`}>{b.reason}</span>
                       <span className="flex-1" />
-                      <Pressable hap="tick" onClick={() => onRemoveBlock(b.id)} className="text-faint/60 hover:text-danger">
+                      <Pressable hap="tick" onClick={() => onRemoveBlock(b.id)} className={`${style.text} opacity-60 hover:opacity-100`}>
                         <XCircle size={14} />
                       </Pressable>
                     </div>
@@ -777,48 +837,3 @@ function NoShowSheet({ open, appts, pFind, noShowId, onClose, onConfirm }: { ope
   )
 }
 
-function BlockTimeSheet({ open, startHour, duration, reason, onStartHourChange, onDurationChange, onReasonChange, onClose, onConfirm }: {
-  open: boolean
-  startHour: number
-  duration: string
-  reason: string
-  onStartHourChange: (h: number) => void
-  onDurationChange: (d: string) => void
-  onReasonChange: (r: string) => void
-  onClose: () => void
-  onConfirm: () => void
-}) {
-  const timeSlots = HOURS.map((h) => ({ value: h, label: fmtHour(h) }))
-  return (
-    <BottomSheet open={open} onClose={onClose}>
-      <div className="font-display text-[17px] font-bold text-ink">Block time</div>
-      <div className="mt-3">
-        <Label>Start time</Label>
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {timeSlots.map(({ value, label }) => (
-            <Chip key={value} selected={startHour === value} onClick={() => { haptic('select'); onStartHourChange(value) }} className="text-[11px]">{label}</Chip>
-          ))}
-        </div>
-      </div>
-      <div className="mt-3">
-        <Label>Duration</Label>
-        <div className="mt-2 flex gap-2">
-          {['30 min', '1 hour', '2 hours'].map((d) => (
-            <Chip key={d} selected={duration === d} onClick={() => { haptic('select'); onDurationChange(d) }} className="flex-1 text-center">{d}</Chip>
-          ))}
-        </div>
-      </div>
-      <div className="mt-3">
-        <Label>Reason</Label>
-        <div className="mt-2 flex gap-2">
-          {['Lunch', 'Admin', 'Personal'].map((r) => (
-            <Chip key={r} selected={reason === r} onClick={() => { haptic('select'); onReasonChange(r) }} className="flex-1 text-center">{r}</Chip>
-          ))}
-        </div>
-      </div>
-      <Pressable hap="success" onClick={onConfirm} className="mt-4 flex w-full items-center justify-center rounded-pill bg-accent py-3 font-display text-[15px] font-semibold text-white shadow-float">
-        Block
-      </Pressable>
-    </BottomSheet>
-  )
-}

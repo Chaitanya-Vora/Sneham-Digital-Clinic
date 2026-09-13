@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { formatDayLabel, toISO, todayISO, firstAvailableMorningSlot } from '../core/day'
+import { formatDayLabel, toISO, todayISO, addDaysISO, firstAvailableMorningSlot } from '../core/day'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   CaretLeft,
@@ -7,17 +7,23 @@ import {
   X,
   NotePencil,
   ArrowsClockwise,
+  ArrowsLeftRight,
   Prescription,
   CalendarPlus,
   Clock,
   Flask,
   Plus,
   UserPlus,
+  UsersThree,
   ChatCircleDots,
   CurrencyInr,
   Printer,
   PencilSimple,
   TestTube,
+  ClipboardText,
+  Heartbeat,
+  Handshake,
+  Check,
 } from '@phosphor-icons/react'
 import { useClinic, selPrescriptionsFor, selDosesFor } from '../core/store'
 import type { Appointment, Patient, Invoice, InvoiceLineItem, PaymentMode, ReferralSource } from '../core/types'
@@ -30,7 +36,9 @@ import { PullToRefresh } from '../design-system/gestures'
 import { useToast } from '../design-system/toast'
 import { exportInvoicePdf, exportPatientHistoryPdf } from '../core/pdfExport'
 import { DEFAULT_CONSULT_FEE, invoiceTotal } from '../core/billing'
-import { Archive, ArrowCounterClockwise, DownloadSimple, DotsThreeVertical } from '@phosphor-icons/react'
+import { Archive, ArrowCounterClockwise, DownloadSimple, DotsThreeVertical, Phone, WhatsappLogo } from '@phosphor-icons/react'
+import { shareViaWhatsApp } from '../core/share'
+import { PatientQuickView } from './PatientQuickView'
 
 const REFERRAL_SOURCES: ReferralSource[] = ['Offline', 'Instagram', 'References', 'Referral']
 
@@ -63,15 +71,23 @@ export function PatientSearchSheet({
   onClose,
   onSelect,
   onAddPatient,
+  quickView,
 }: {
   open: boolean
   onClose: () => void
   onSelect: (patientId: string) => void
   onAddPatient: () => void
+  // When provided, tapping a result opens a quick-view peek first (Case
+  // sheet / New prescription / View full profile) instead of jumping
+  // straight to patient detail — used by the header search. Omitted for the
+  // quick-bill search, which should stay a single fast tap to pick a payer.
+  quickView?: { onOpenCase: (patientId: string) => void; onPrescribe: (patientId: string) => void }
 }) {
   const patients = useClinic((s) => s.patients)
   const [query, setQuery] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const sheetTransformRef = useRef<HTMLDivElement>(null)
+  const [peekPatientId, setPeekPatientId] = useState<string | null>(null)
 
   useEffect(() => {
     if (open) {
@@ -100,6 +116,7 @@ export function PatientSearchSheet({
     <AnimatePresence>
       {open && (
         <motion.div
+          ref={sheetTransformRef}
           className="absolute inset-0 z-50 flex flex-col bg-screen"
           variants={pushVariants}
           custom={1}
@@ -107,6 +124,9 @@ export function PatientSearchSheet({
           animate="center"
           exit="exit"
           transition={spring}
+          onAnimationComplete={(def) => {
+            if (def === 'center') sheetTransformRef.current?.style.setProperty('transform', 'none')
+          }}
         >
           {/* header + search */}
           <div className="flex items-center gap-2 px-[18px] pb-2 pt-[var(--app-top)]">
@@ -149,8 +169,8 @@ export function PatientSearchSheet({
                     hap="tick"
                     scale={0.99}
                     onClick={() => {
-                      onSelect(p.id)
-                      onClose()
+                      if (quickView) setPeekPatientId(p.id)
+                      else { onSelect(p.id); onClose() }
                     }}
                     className="flex cursor-pointer items-center gap-3 rounded-[20px] border border-border bg-surface px-3.5 py-3 shadow-card"
                   >
@@ -173,6 +193,16 @@ export function PatientSearchSheet({
               )}
             </motion.div>
           </div>
+
+          {quickView && (
+            <PatientQuickView
+              patientId={peekPatientId}
+              onClose={() => setPeekPatientId(null)}
+              onOpenCase={(id) => { onClose(); quickView.onOpenCase(id) }}
+              onPrescribe={(id) => { onClose(); quickView.onPrescribe(id) }}
+              onViewProfile={(id) => { onSelect(id); onClose() }}
+            />
+          )}
         </motion.div>
       )}
     </AnimatePresence>
@@ -213,6 +243,12 @@ export function PatientDetailScreen({
   const restorePatient = useClinic((s) => s.restorePatient)
   const toast = useToast()
 
+  const ME = useClinic((s) => s.currentPractitionerId)
+  const practitioners = useClinic((s) => s.practitioners)
+  const assignPatient = useClinic((s) => s.assignPatient)
+  const createHandoff = useClinic((s) => s.createHandoff)
+  const handoffs = useClinic((s) => s.handoffs.filter((h) => h.patientId === patientId))
+
   const scheduleFollowUpAction = useClinic((s) => s.scheduleFollowUp)
   const [tab, setTab] = useState<DetailTab>('overview')
   const [followUpOpen, setFollowUpOpen] = useState(false)
@@ -222,6 +258,13 @@ export function PatientDetailScreen({
   const [actionsOpen, setActionsOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [reassignOpen, setReassignOpen] = useState(false)
+  const [handoffOpen, setHandoffOpen] = useState(false)
+  const [handoffToId, setHandoffToId] = useState('')
+  const [handoffCoveringUntil, setHandoffCoveringUntil] = useState(addDaysISO(todayISO(), 7))
+  const [handoffCaseStatus, setHandoffCaseStatus] = useState('')
+  const [handoffReason, setHandoffReason] = useState('')
+  const [handoffWatchFor, setHandoffWatchFor] = useState('')
 
   if (!patient) {
     return (
@@ -257,7 +300,10 @@ export function PatientDetailScreen({
     { id: 'prescriptions', label: 'Prescriptions' },
   ]
 
-  const ME = useClinic((s) => s.currentPractitionerId)
+  const owningDoctor = practitioners.find((p) => p.id === patient.owningPractitionerId)
+  const activeCoverage = handoffs.find((h) => h.status === 'accepted')
+  const reassignCandidates = practitioners.filter((p) => p.status === 'active' && p.id !== patient.owningPractitionerId)
+  const handoffCandidates = practitioners.filter((p) => p.status === 'active' && p.id !== ME)
 
   const bookFollowUp = (isoDate: string) => {
     const time = firstAvailableMorningSlot(allAppointments, isoDate)
@@ -302,11 +348,36 @@ export function PatientDetailScreen({
             <DotsThreeVertical size={18} weight="bold" className="text-body" />
           </Pressable>
         </div>
-        <div className="mt-2">
-          <div className="font-display text-[22px] font-bold text-ink">{patient.name}</div>
-          <div className="text-[13px] text-muted">
-            {[`${patient.age}y`, patient.sex, patient.location, patient.phone].filter(Boolean).join(' · ')}
+        <div className="mt-3 flex items-center gap-3">
+          <Avatar initials={patient.initials} size={44} />
+          <div className="min-w-0 flex-1">
+            <div className="truncate font-display text-[19px] font-bold text-ink">{patient.name}</div>
+            <div className="truncate text-[13px] text-muted">
+              {[`${patient.age}y`, patient.sex, patient.location].filter(Boolean).join(' · ')}
+            </div>
           </div>
+          {patient.phone && (
+            <div className="flex shrink-0 items-center gap-1.5">
+              <a
+                href={`tel:${patient.phone}`}
+                onClick={() => haptic('tick')}
+                className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface text-body"
+              >
+                <Phone size={15} />
+              </a>
+              <Pressable
+                ariaLabel="message on whatsapp"
+                hap="tick"
+                onClick={() => {
+                  const ok = shareViaWhatsApp(patient.phone, `Hi ${patient.name.split(' ')[0]}, this is Sneham Digital Clinic.`)
+                  if (!ok) toast({ title: 'No phone number on file', message: 'Add a phone number for this patient first.' })
+                }}
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-[#25D366] text-white"
+              >
+                <WhatsappLogo size={17} weight="fill" />
+              </Pressable>
+            </div>
+          )}
         </div>
 
         {/* status row */}
@@ -375,6 +446,44 @@ export function PatientDetailScreen({
       <div className="flex-1 overflow-y-auto px-[18px] pb-[120px] pt-3">
         {tab === 'overview' && (
           <div className="space-y-3">
+            <Card className="space-y-2.5 px-4 py-3">
+              <div className="flex items-center gap-2">
+                <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-tint text-brand">
+                  <UsersThree size={18} weight="fill" />
+                </div>
+                <div className="flex-1">
+                  <div className="font-display text-[14px] font-semibold text-ink">Care team</div>
+                  <div className="text-[12px] text-muted">
+                    {owningDoctor ? `Primary doctor: ${owningDoctor.name}` : 'Unassigned — open to the active team'}
+                  </div>
+                </div>
+              </div>
+              {activeCoverage && (
+                <div className="flex items-center gap-2 rounded-[12px] border border-green-border bg-tint px-3 py-2">
+                  <Handshake size={15} weight="fill" className="shrink-0 text-brand" />
+                  <div className="text-[12px] text-ink-deep">
+                    {practitioners.find((p) => p.id === activeCoverage.toPractitionerId)?.name ?? 'A colleague'} is covering until {activeCoverage.coveringUntil}
+                  </div>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2 border-t border-border pt-2.5">
+                <Pressable
+                  hap="tick"
+                  onClick={() => setReassignOpen(true)}
+                  className="flex items-center justify-center gap-1.5 rounded-pill border border-border bg-surface py-2 text-[12.5px] font-semibold text-body"
+                >
+                  <ArrowsLeftRight size={15} /> Reassign
+                </Pressable>
+                <Pressable
+                  hap="tick"
+                  onClick={() => { setHandoffToId(handoffCandidates[0]?.id ?? ''); setHandoffOpen(true) }}
+                  className="flex items-center justify-center gap-1.5 rounded-pill border border-border bg-surface py-2 text-[12.5px] font-semibold text-body"
+                >
+                  <Handshake size={15} /> Hand off
+                </Pressable>
+              </div>
+            </Card>
+
             {nextAppt && (
               <Card className="px-4 py-3">
                 <div className="flex items-center gap-2">
@@ -391,7 +500,13 @@ export function PatientDetailScreen({
             )}
 
             <Card className="space-y-2.5 px-4 py-3">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-tint text-brand">
+                  <ClipboardText size={18} weight="fill" />
+                </div>
+                <div className="font-display text-[14px] font-semibold text-ink">Clinical summary</div>
+              </div>
+              <div className="flex items-center justify-between border-t border-border pt-2.5">
                 <Label>Chief complaint</Label>
                 <span className="text-[13px] text-body">{patient.chiefComplaint}</span>
               </div>
@@ -411,8 +526,13 @@ export function PatientDetailScreen({
 
             {latestCheckIn && (
               <Card className="px-4 py-3">
-                <Label>Latest check-in</Label>
-                <div className="mt-1.5 flex items-center gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-tint text-brand">
+                    <Heartbeat size={18} weight="fill" />
+                  </div>
+                  <div className="font-display text-[14px] font-semibold text-ink">Latest check-in</div>
+                </div>
+                <div className="mt-2.5 flex items-center gap-2">
                   <Badge tone={latestCheckIn.marked === 'better' ? 'green' : latestCheckIn.marked === 'worse' ? 'amber' : 'neutral'}>
                     {latestCheckIn.marked === 'better' ? 'Feeling better' : latestCheckIn.marked === 'worse' ? 'Feeling worse' : 'No change'}
                   </Badge>
@@ -432,7 +552,12 @@ export function PatientDetailScreen({
 
             <Card className="px-4 py-3">
               <div className="mb-1 flex items-center justify-between">
-                <Label>Billing</Label>
+                <div className="flex items-center gap-2">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-tint text-brand">
+                    <CurrencyInr size={18} weight="fill" />
+                  </div>
+                  <div className="font-display text-[14px] font-semibold text-ink">Billing</div>
+                </div>
                 <Pressable hap="tick" onClick={() => setBilling({})} className="text-[12px] font-semibold text-brand">Quick bill</Pressable>
               </div>
               {invoices.length === 0 ? (
@@ -529,7 +654,7 @@ export function PatientDetailScreen({
         <Pressable
           hap="impact"
           onClick={() => { setCustomDate(null); setFollowUpOpen(true) }}
-          className="flex w-full items-center justify-center gap-2 rounded-pill bg-accent py-3 font-display text-[15px] font-semibold text-white shadow-float"
+          className="flex w-full items-center justify-center gap-2 rounded-pill bg-brand py-3 font-display text-[15px] font-semibold text-white shadow-float"
         >
           <CalendarPlus size={18} weight="fill" /> Schedule follow-up
         </Pressable>
@@ -662,6 +787,128 @@ export function PatientDetailScreen({
       </BottomSheet>
 
       <EditPatientSheet patient={patient} open={editOpen} onClose={() => setEditOpen(false)} />
+
+      {/* reassign — permanent change of primary doctor */}
+      <BottomSheet open={reassignOpen} onClose={() => setReassignOpen(false)}>
+        <div className="font-display text-[17px] font-bold text-ink">Reassign {patient.name}</div>
+        <div className="mt-0.5 text-[12.5px] text-muted">Change who owns this patient's care going forward.</div>
+        <div className="mt-3 space-y-2">
+          {reassignCandidates.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => {
+                assignPatient(patientId, p.id)
+                setReassignOpen(false)
+                haptic('success')
+                toast({ title: 'Patient reassigned', message: `${patient.name} is now assigned to ${p.name}.` })
+              }}
+              className="flex w-full items-center gap-3 rounded-[14px] border border-border bg-surface px-3.5 py-2.5 text-left"
+            >
+              <Avatar initials={p.initials} size={36} />
+              <div className="flex-1">
+                <div className="text-[13.5px] font-semibold text-ink">{p.name}</div>
+                <div className="text-[12px] text-muted">{p.specialty}</div>
+              </div>
+            </button>
+          ))}
+          {reassignCandidates.length === 0 && (
+            <div className="py-6 text-center text-[13px] text-muted">No other active practitioners to reassign to.</div>
+          )}
+        </div>
+      </BottomSheet>
+
+      {/* hand off — temporary coverage, ownership stays with the current doctor */}
+      <BottomSheet open={handoffOpen} onClose={() => setHandoffOpen(false)}>
+        <div className="font-display text-[17px] font-bold text-ink">Hand off {patient.name}</div>
+        <div className="mt-0.5 text-[12.5px] text-muted">Ownership stays with you while someone else covers.</div>
+        <div className="mt-3 space-y-2">
+          {handoffCandidates.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => setHandoffToId(p.id)}
+              className={`flex w-full items-center gap-3 rounded-[14px] border px-3.5 py-2.5 text-left ${
+                handoffToId === p.id ? 'border-green-border bg-tint' : 'border-border bg-surface'
+              }`}
+            >
+              <Avatar initials={p.initials} size={36} />
+              <div className="flex-1">
+                <div className="text-[13.5px] font-semibold text-ink">{p.name}</div>
+                <div className="text-[12px] text-muted">{p.specialty}</div>
+              </div>
+              {handoffToId === p.id && <Check size={18} weight="bold" className="text-brand" />}
+            </button>
+          ))}
+          {handoffCandidates.length === 0 && (
+            <div className="py-4 text-center text-[13px] text-muted">No other active practitioners to hand off to.</div>
+          )}
+        </div>
+        <div className="mt-3">
+          <Label>Covering until</Label>
+          <input
+            type="date"
+            value={handoffCoveringUntil}
+            min={addDaysISO(todayISO(), 1)}
+            onChange={(e) => setHandoffCoveringUntil(e.target.value)}
+            className="mt-1.5 w-full rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-[13px] text-body outline-none focus:border-green-border"
+            data-selectable="true"
+          />
+        </div>
+        <div className="mt-3">
+          <Label>Case status</Label>
+          <input
+            value={handoffCaseStatus}
+            onChange={(e) => setHandoffCaseStatus(e.target.value)}
+            placeholder={`e.g. Stable on ${patient.currentRemedy ?? 'current remedy'}, review in 2 weeks`}
+            className="mt-1.5 w-full rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-[13px] text-body outline-none focus:border-green-border"
+          />
+        </div>
+        <div className="mt-3">
+          <Label>Reason for handoff</Label>
+          <input
+            value={handoffReason}
+            onChange={(e) => setHandoffReason(e.target.value)}
+            placeholder="e.g. On leave next week"
+            className="mt-1.5 w-full rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-[13px] text-body outline-none focus:border-green-border"
+          />
+        </div>
+        <div className="mt-3">
+          <Label>What to watch for</Label>
+          <textarea
+            value={handoffWatchFor}
+            onChange={(e) => setHandoffWatchFor(e.target.value)}
+            rows={3}
+            className="mt-1.5 w-full resize-y rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-[13px] leading-relaxed text-body outline-none focus:border-green-border"
+          />
+        </div>
+        <Button
+          variant="primary"
+          className="mt-4 w-full"
+          disabled={!handoffReason.trim() || !handoffToId}
+          onClick={() => {
+            createHandoff({
+              patientId,
+              fromId: ME,
+              toId: handoffToId,
+              coveringUntil: formatDayLabel(handoffCoveringUntil),
+              note: {
+                currentRemedy: patient.currentRemedy ?? '—',
+                caseStatus: handoffCaseStatus.trim() || 'No status given.',
+                reason: handoffReason.trim(),
+                watchFor: handoffWatchFor,
+              },
+            })
+            setHandoffOpen(false)
+            haptic('success')
+            const to = practitioners.find((p) => p.id === handoffToId)
+            toast({ title: 'Handoff sent', message: `${to?.name ?? 'Your colleague'} will be notified.` })
+            setHandoffCaseStatus('')
+            setHandoffReason('')
+            setHandoffWatchFor('')
+          }}
+        >
+          Send handoff
+        </Button>
+      </BottomSheet>
     </div>
   )
 }

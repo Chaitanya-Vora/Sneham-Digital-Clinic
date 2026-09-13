@@ -110,12 +110,18 @@ export interface Practitioner {
   id: string
   authUserId?: string
   name: string
+  email?: string
   initials: string
   role: Role
   status: PractitionerStatus
   specialty: string
   qualifications?: string
   registrationNo?: string
+  // Owner-granted, Settings-only: lets a second doctor see every patient —
+  // not just their own roster or an accepted handoff — without making them
+  // the clinic Owner. Enforced in RLS (internal.can_access_patient), not
+  // just this flag — see migration_v42_full_patient_access.sql.
+  fullPatientAccess?: boolean
   openCases: number
   remedyList: string[] // personal list — the only source for Rx autocomplete
   rxTemplates: RxTemplate[]
@@ -383,13 +389,16 @@ export interface AppNotification {
   patientId?: string
 }
 
+export type TimeBlockColor = 'green' | 'amber' | 'coral' | 'purple' | 'blue'
+
 export interface TimeBlock {
   id: string
   practitionerId: string
   date: ISODate
-  startHour: number // 0-23
+  startHour: number // 0-23, quarter-hour precision (e.g. 13.25 = 1:15 PM)
   durationMin: number
-  reason: string // 'Lunch', 'Admin', 'Personal', etc.
+  reason: string // 'Lunch', 'Admin', 'Personal', or any custom purpose
+  color: TimeBlockColor
 }
 
 export interface RemedyStock {

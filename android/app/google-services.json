@@ -1,0 +1,68 @@
+{
+  "project_info": {
+    "project_number": "1097095259086",
+    "project_id": "sneham-digital-clinic",
+    "storage_bucket": "sneham-digital-clinic.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1097095259086:android:2c4cb59bcb14b5cbcd819f",
+        "android_client_info": {
+          "package_name": "com.sneham.patient"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1097095259086-l611d0sktjsabvpinrb47ag0aol48b2t.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyChOof9kma2m6sEoBagrPU3cUYioq08BzM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1097095259086-l611d0sktjsabvpinrb47ag0aol48b2t.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1097095259086:android:555b4cde98c0985ccd819f",
+        "android_client_info": {
+          "package_name": "com.sneham.practitioner"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1097095259086-l611d0sktjsabvpinrb47ag0aol48b2t.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyChOof9kma2m6sEoBagrPU3cUYioq08BzM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1097095259086-l611d0sktjsabvpinrb47ag0aol48b2t.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

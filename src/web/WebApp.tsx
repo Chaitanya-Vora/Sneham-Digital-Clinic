@@ -37,6 +37,7 @@ import {
   IdentificationCard,
   GraduationCap,
   MapPin,
+  Phone,
   SignOut,
   EnvelopeSimple,
   TestTube,
@@ -992,6 +993,7 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
   const archivedPatients = useMemo(() => allPatients.filter((p) => p.archivedAt), [allPatients])
   const practitioners = useClinic((s) => s.practitioners.filter((p) => p.status === 'active'))
   const assignPatient = useClinic((s) => s.assignPatient)
+  const invoices = useClinic((s) => s.invoices)
   const ME = useClinic((s) => s.currentPractitionerId)
   const role = useClinic((s) => s.role)
   const rolePermissions = useClinic((s) => s.rolePermissions)
@@ -1006,6 +1008,12 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
   const [bulkAssignOpen, setBulkAssignOpen] = useState(false)
   const [menuFor, setMenuFor] = useState<string | null>(null)
   const [menuPos, setMenuPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
+
+  // A patient has money outstanding if any non-cancelled invoice of theirs
+  // still has a balance — the exact same math the invoice PDF/UPI link
+  // already use (invoiceBalance), not a separate "unpaid" reading of it.
+  const balanceDue = (patientId: string) =>
+    invoices.filter((i) => i.patientId === patientId && i.status !== 'cancelled').reduce((sum, i) => sum + invoiceBalance(i), 0)
 
   useEffect(() => {
     if (!menuFor) return
@@ -1028,6 +1036,7 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
   const mineCount = patients.filter((p) => isMine(p, ME)).length
   const withOthersCount = patients.filter((p) => isAssignedToOthers(p, ME)).length
   const followUpDue = patients.filter((p) => isMine(p, ME) && p.currentRemedy !== null).length
+  const paymentDueCount = patients.filter((p) => balanceDue(p.id) > 0).length
 
   const tabFilters = [
     ['My cases', patients.length] as const,
@@ -1035,6 +1044,7 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
     ['With other doctors', withOthersCount] as const,
     ['Unassigned', unassignedCount] as const,
     ['Overdue follow-ups', followUpDue] as const,
+    ['Payment due', paymentDueCount] as const,
     ['Archived', archivedPatients.length] as const,
   ]
 
@@ -1044,6 +1054,7 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
       case 'With other doctors': return isAssignedToOthers(p, ME)
       case 'Unassigned': return isUnassigned(p)
       case 'Overdue follow-ups': return isMine(p, ME) && p.currentRemedy !== null
+      case 'Payment due': return balanceDue(p.id) > 0
       default: return true
     }
   }
@@ -1901,6 +1912,8 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
   const [handoffOpen, setHandoffOpen] = useState(false)
   const [retakeModalOpen, setRetakeModalOpen] = useState(false)
   const [draftRetakeReason, setDraftRetakeReason] = useState('')
+  const [timelineFilter, setTimelineFilter] = useState<string[]>([])
+  const [timelineExpanded, setTimelineExpanded] = useState(false)
   const [apptModalRequest, setApptModalRequest] = useState<AppointmentModalRequest | null>(null)
   const archivePatient = useClinic((s) => s.archivePatient)
   const restorePatient = useClinic((s) => s.restorePatient)
@@ -1968,8 +1981,22 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
   const lastMessage = [...patientMessages].sort((a, b) => b.sentAt.localeCompare(a.sentAt))[0]
   const unreadMessageCount = patientMessages.filter((m) => m.sender === 'patient' && !m.read).length
 
-  type TimelineEvent = { id: string; date: string; kind: 'visit' | 'prescription' | 'check-in' | 'outcome' | 'handoff'; title: string; detail: string; tone: 'green' | 'amber' | 'neutral' }
+  type TimelineEvent = { id: string; date: string; kind: 'appointment' | 'case-taking' | 'investigation' | 'prescription' | 'check-in' | 'outcome' | 'handoff'; title: string; detail: string; tone: 'green' | 'amber' | 'purple' | 'neutral' }
   const timeline: TimelineEvent[] = [
+    // The visits themselves — only ones that actually happened, not
+    // booked-but-not-yet-seen or cancelled ones. A "history" that skips
+    // the patient's own visits and only shows what came out of them
+    // (prescriptions, outcomes) is missing its own spine.
+    ...appointments.filter((a) => a.status === 'Seen').map((a) => ({ id: a.id, date: a.date, kind: 'appointment' as const, title: a.reason || a.type, detail: `${a.time} · ${a.type}`, tone: 'neutral' as const })),
+    ...patientCaseVisits.map((v) => ({
+      id: v.id,
+      date: v.date,
+      kind: 'case-taking' as const,
+      title: v.isRetake ? 'Case retake' : 'Case taken',
+      detail: [v.template, v.remedy].filter(Boolean).join(' · '),
+      tone: v.isRetake ? 'purple' as const : 'neutral' as const,
+    })),
+    ...investigationOrders.map((o) => ({ id: o.id, date: o.createdAt, kind: 'investigation' as const, title: 'Investigations ordered', detail: o.tests.join(', '), tone: 'neutral' as const })),
     // Drafts aren't a real clinical event yet — they're excluded here, not
     // just given a fallback date. A cancelled one stays (its publishedAt is
     // preserved, and a doctor's own audit timeline should still show a
@@ -1993,8 +2020,40 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
     }),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 
-  const kindIcon = (k: TimelineEvent['kind']) => k === 'prescription' ? RxIcon : k === 'outcome' ? ChartLineUp : k === 'check-in' ? CalendarCheck : k === 'handoff' ? Handshake : Clock
-  const kindLabel = (k: TimelineEvent['kind']) => k === 'prescription' ? 'Prescription' : k === 'outcome' ? 'Outcome' : k === 'check-in' ? 'Check-in' : k === 'handoff' ? 'Handoff' : 'Visit'
+  const TIMELINE_FILTERS: { key: TimelineEvent['kind']; label: string }[] = [
+    { key: 'appointment', label: 'Visits' },
+    { key: 'case-taking', label: 'Case-taking' },
+    { key: 'investigation', label: 'Investigations' },
+    { key: 'prescription', label: 'Prescriptions' },
+    { key: 'outcome', label: 'Outcomes' },
+    { key: 'check-in', label: 'Check-ins' },
+    { key: 'handoff', label: 'Handoffs' },
+  ]
+  // Same default as before visits/case-taking/investigations existed on the
+  // timeline at all — "Show full history" is the opt-in to the richer view,
+  // not the default everyone sees.
+  const DEFAULT_TIMELINE_KINDS: TimelineEvent['kind'][] = ['prescription', 'outcome', 'check-in', 'handoff']
+  const baseTimeline = timelineExpanded ? timeline : timeline.filter((ev) => DEFAULT_TIMELINE_KINDS.includes(ev.kind))
+  const visibleTimeline = timelineFilter.length === 0 ? baseTimeline : baseTimeline.filter((ev) => timelineFilter.includes(ev.kind))
+
+  const kindIcon = (k: TimelineEvent['kind']) =>
+    k === 'appointment' ? Stethoscope
+      : k === 'case-taking' ? Notebook
+      : k === 'investigation' ? TestTube
+      : k === 'prescription' ? RxIcon
+      : k === 'outcome' ? ChartLineUp
+      : k === 'check-in' ? CalendarCheck
+      : k === 'handoff' ? Handshake
+      : Clock
+  const kindLabel = (k: TimelineEvent['kind']) =>
+    k === 'appointment' ? 'Visit'
+      : k === 'case-taking' ? 'Case-taking'
+      : k === 'investigation' ? 'Investigation'
+      : k === 'prescription' ? 'Prescription'
+      : k === 'outcome' ? 'Outcome'
+      : k === 'check-in' ? 'Check-in'
+      : k === 'handoff' ? 'Handoff'
+      : 'Visit'
 
   return (
     <div className="space-y-4">
@@ -2023,14 +2082,17 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
               )}
             </div>
           </div>
-          <div className="text-[13px] text-muted">
-            {[
-              `${patient.age} · ${patient.sex}`,
-              patient.wsCode,
-              patient.location,
-              patient.phone,
-              `patient since ${patient.patientSince}`,
-            ].filter(Boolean).join(' · ')}
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted">
+            <span>{patient.age} · {patient.sex}</span>
+            {patient.phone && (
+              <span className="flex items-center gap-1"><Phone size={12} />{patient.phone}</span>
+            )}
+            {patient.location && (
+              <span className="flex items-center gap-1"><MapPin size={12} />{patient.location}</span>
+            )}
+          </div>
+          <div className="mt-1 text-[11px] text-faint">
+            Patient ID {patient.wsCode.replace('#WS-', '')} &middot; Patient since {patient.patientSince}
           </div>
         </div>
         <Button variant="ghost" size="sm" onClick={onFollowUp}><ArrowsClockwise size={15} /> Follow-up</Button>
@@ -2342,14 +2404,54 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
           {/* patient timeline */}
           {timeline.length > 0 && (
             <Card className="p-5">
-              <h2 className="mb-3 font-display text-[15px] font-bold text-ink">Timeline</h2>
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="font-display text-[15px] font-bold text-ink">Timeline</h2>
+                {timeline.length > baseTimeline.length || timelineExpanded ? (
+                  <button
+                    onClick={() => { setTimelineExpanded((v) => !v); setTimelineFilter([]) }}
+                    className="text-[12px] font-semibold text-brand"
+                  >
+                    {timelineExpanded ? 'Show less' : 'Show full history'}
+                  </button>
+                ) : null}
+              </div>
+              {timelineExpanded && (() => {
+                const presentFilters = TIMELINE_FILTERS.filter((f) => timeline.some((ev) => ev.kind === f.key))
+                // Filtering only has a real job once there's more than one
+                // kind of event on record — with just one, every chip would
+                // either show everything or nothing, pure clutter either way.
+                if (presentFilters.length < 2) return null
+                return (
+                  <div className="mb-4 flex flex-wrap gap-1.5">
+                    {presentFilters.map((f) => (
+                      <Chip
+                        key={f.key}
+                        selected={timelineFilter.includes(f.key)}
+                        onClick={() => setTimelineFilter((cur) => cur.includes(f.key) ? cur.filter((k) => k !== f.key) : [...cur, f.key])}
+                      >
+                        {f.label}
+                      </Chip>
+                    ))}
+                    {timelineFilter.length > 0 && (
+                      <button onClick={() => setTimelineFilter([])} className="text-[12px] font-semibold text-brand">Clear</button>
+                    )}
+                  </div>
+                )
+              })()}
               <div className="relative ml-4 border-l-2 border-border pl-5">
-                {timeline.map((ev, i) => {
+                {visibleTimeline.length === 0 && (
+                  <p className="py-3 text-[12.5px] text-faint">Nothing matches these filters.</p>
+                )}
+                {visibleTimeline.map((ev, i) => {
                   const Icon = kindIcon(ev.kind)
+                  // Matches the badge's own tone right next to it, rather
+                  // than every dot on the rail being the same brand green
+                  // regardless of what actually happened.
+                  const dotColor = ev.tone === 'purple' ? 'text-purple' : ev.tone === 'amber' ? 'text-amber-text' : ev.tone === 'green' ? 'text-brand' : 'text-muted'
                   return (
                     <div key={ev.id} className="relative mb-4 last:mb-0">
                       <div className="absolute -left-[29px] flex h-6 w-6 items-center justify-center rounded-full border-2 border-border bg-surface">
-                        <Icon size={12} weight="fill" className="text-brand" />
+                        <Icon size={12} weight="fill" className={dotColor} />
                       </div>
                       <div className="text-[10px] font-semibold text-faint">{new Date(ev.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })} · {kindLabel(ev.kind)}</div>
                       <div className="mt-0.5 flex items-center gap-2">

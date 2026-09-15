@@ -358,7 +358,6 @@ export function PatientDetailScreen({
             <CaretLeft size={18} className="text-body" />
           </Pressable>
           <div className="flex-1" />
-          <Badge tone="neutral">{patient.wsCode}</Badge>
           <Pressable ariaLabel="more actions" hap="tick" onClick={() => setActionsOpen(true)} className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
             <DotsThreeVertical size={18} weight="bold" className="text-body" />
           </Pressable>
@@ -370,6 +369,7 @@ export function PatientDetailScreen({
             <div className="truncate text-[13px] text-muted">
               {[`${patient.age}y`, patient.sex, patient.location].filter(Boolean).join(' · ')}
             </div>
+            <div className="truncate text-[11px] text-faint">Patient ID {patient.wsCode.replace('#WS-', '')}</div>
           </div>
           {patient.phone && (
             <div className="flex shrink-0 items-center gap-1.5">

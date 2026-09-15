@@ -31,6 +31,28 @@ async function savePdf(doc: jsPDF, fileName: string) {
   }
 }
 
+/** Same native share behavior as savePdf, but on web opens the PDF inline
+ *  in a new tab instead of silently downloading it — matching how an
+ *  uploaded document already opens (db.ts's getDocumentUrl + window.open).
+ *  Used for invoices specifically, since "click to preview" is the whole
+ *  point of a bill; other exports still download via savePdf. */
+async function previewPdf(doc: jsPDF, fileName: string) {
+  if (Capacitor.isNativePlatform()) {
+    const { Filesystem, Directory } = await import('@capacitor/filesystem')
+    const { Share } = await import('@capacitor/share')
+    const base64 = doc.output('datauristring').split(',')[1]
+    const written = await Filesystem.writeFile({
+      path: fileName,
+      data: base64,
+      directory: Directory.Cache,
+    })
+    await Share.share({ title: fileName, url: written.uri })
+  } else {
+    const url = doc.output('bloburl') as unknown as string
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+}
+
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = ''
   for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
@@ -474,7 +496,7 @@ export async function exportInvoicePdf(invoice: Invoice, patient: Patient) {
   drawSignatureFooter(doc, pw, margin, y + qrSize + 6)
 
   const fileName = `Invoice_${invoice.invoiceNo}_${patient.name.replace(/\s/g, '_')}.pdf`
-  await savePdf(doc, fileName)
+  await previewPdf(doc, fileName)
 }
 // ── PATIENT HISTORY SUMMARY (for a second-opinion / referral export) ──
 // One consolidated document a practitioner can hand to another doctor —

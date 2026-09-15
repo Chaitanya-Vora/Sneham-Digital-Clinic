@@ -78,7 +78,10 @@ export function AppointmentModal({ request, onClose }: { request: AppointmentMod
       updateAppointment(request.appointment.id, { date, time, type: apptType, reason: reason.trim() || request.appointment.reason || 'Consultation' })
       toast({ title: 'Appointment updated', message: `${formatDayLabel(date)} · ${time}` })
     } else {
-      scheduleFollowUp({ patientId, practitionerId: currentPractitionerId ?? '', time, date, type: apptType, reason: reason.trim() || 'Consultation' })
+      // Book onto the patient's own doctor, not whoever happens to be
+      // logged in creating the booking — same rule mobile's follow-up
+      // booking already follows (PatientSearch.tsx's bookFollowUp).
+      scheduleFollowUp({ patientId, practitionerId: patient?.owningPractitionerId ?? currentPractitionerId ?? '', time, date, type: apptType, reason: reason.trim() || 'Consultation' })
       toast({ title: 'Appointment booked', message: `${patient?.name ?? 'Patient'} · ${formatDayLabel(date)} · ${time}` })
     }
     onClose()

@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { CheckCircle, Circle, CircleNotch, Prescription as RxIcon, FloppyDisk, CloudCheck, DeviceMobile, PencilSimpleLine, ClockCounterClockwise, NotePencil, Eye, WarningCircle, Plus } from '@phosphor-icons/react'
+import { CheckCircle, Circle, CircleNotch, Prescription as RxIcon, FloppyDisk, CloudCheck, DeviceMobile, PencilSimpleLine, ClockCounterClockwise, NotePencil, Eye, WarningCircle, Plus, ArrowsCounterClockwise } from '@phosphor-icons/react'
 import { useClinic } from '../core/store'
 import { allTemplates, type CaseTemplateName, type SectionState, getSections } from '../core/caseTemplate'
 import { Badge, Button, Card, Chip, Label, PatientNotFound } from '../design-system/ui'
@@ -129,16 +129,21 @@ export function CaseSheet({
   patientId,
   onPrescribe,
   onBack,
+  initialTab,
 }: {
   patientId: string
   onPrescribe: () => void
   onBack: () => void
+  initialTab?: 'edit' | 'history'
 }) {
   const patient = useClinic((s) => s.patients.find((p) => p.id === patientId))
   const offline = useClinic((s) => s.offline)
   const ensureCase = useClinic((s) => s.ensureCase)
   const markDone = useClinic((s) => s.markSectionDone)
   const snapshotCaseVisit = useClinic((s) => s.snapshotCaseVisit)
+  const startCaseRetake = useClinic((s) => s.startCaseRetake)
+  const retakeReason = useClinic((s) => s.caseRetakeIntent[patientId] ?? '')
+  const retakeActive = !!retakeReason
   const caseState = useClinic((s) => s.caseData[patientId])
   const caseVisits = useClinic((s) => s.caseVisits.filter((v) => v.patientId === patientId))
   const practitioners = useClinic((s) => s.practitioners)
@@ -159,7 +164,9 @@ export function CaseSheet({
   const [activeId, setActiveId] = useState('chief')
   const [savedAt, setSavedAt] = useState<string | null>(null)
   const [showTemplatePicker, setShowTemplatePicker] = useState(false)
-  const [tab, setTab] = useState<'edit' | 'history'>('edit')
+  const [retakeOpen, setRetakeOpen] = useState(false)
+  const [draftRetakeReason, setDraftRetakeReason] = useState('')
+  const [tab, setTab] = useState<'edit' | 'history'>(initialTab ?? 'edit')
   const [viewingVisitId, setViewingVisitId] = useState<string | null>(null)
   const [editingVisit, setEditingVisit] = useState(false)
   const [editingTemplate, setEditingTemplate] = useState<'new' | string | null>(null)
@@ -179,6 +186,7 @@ export function CaseSheet({
 
   const viewingVisit = viewingVisitId ? sortedVisits.find((v) => v.id === viewingVisitId) : null
   const viewingSections = viewingVisit ? getSections((viewingVisit.template as CaseTemplateName) ?? 'chronic', customTemplates) : sections
+  const lastVisit = sortedVisits[0]
 
   if (!patient) return <PatientNotFound onBack={onBack} />
 
@@ -240,6 +248,69 @@ export function CaseSheet({
           )}
         </button>
       </div>
+
+      {/* case retake — a full re-interview after a remedy didn't work; its
+          own identity color (purple, same family as handoff) since it's a
+          deliberate special workflow, not a warning */}
+      {retakeActive ? (
+        <Card className="flex items-center gap-3 border-purple-border bg-purple-tint p-4">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-surface text-purple">
+            <ArrowsCounterClockwise size={18} weight="fill" />
+          </div>
+          <div className="flex-1">
+            <div className="text-[13.5px] font-semibold text-purple">Case retake in progress</div>
+            <p className="mt-0.5 text-[12.5px] text-purple/80">{retakeReason}</p>
+          </div>
+        </Card>
+      ) : (
+        <Card className="p-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-purple-tint text-purple">
+              <ArrowsCounterClockwise size={18} weight="fill" />
+            </div>
+            <div className="flex-1">
+              <div className="font-display text-[14px] font-semibold text-ink">Case retake</div>
+              <div className="text-[12px] text-muted">When the remedy hasn't worked, start a fresh case-taking — the current notes stay on record as their own visit.</div>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => setRetakeOpen((v) => !v)}>
+              {retakeOpen ? 'Cancel' : 'Start retake'}
+            </Button>
+          </div>
+          {retakeOpen && (
+            <div className="mt-3 border-t border-border pt-3">
+              {lastVisit && (
+                <div className="mb-2 text-[12px] text-muted">
+                  Last visit: {new Date(lastVisit.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })} &middot; {lastVisit.remedy ?? 'no remedy recorded'}
+                </div>
+              )}
+              <Label>Reason for retake</Label>
+              <textarea
+                autoFocus
+                value={draftRetakeReason}
+                onChange={(e) => setDraftRetakeReason(e.target.value)}
+                placeholder="e.g. No improvement after 4 weeks on Nux Vomica 200C"
+                rows={2}
+                className="mt-1.5 w-full resize-y rounded-[10px] border border-border bg-surface px-3 py-2 text-[13px] leading-relaxed text-body outline-none focus:border-purple-border"
+              />
+              <div className="mt-2.5 flex justify-end">
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={!draftRetakeReason.trim()}
+                  onClick={() => {
+                    startCaseRetake(patientId, draftRetakeReason.trim())
+                    setRetakeOpen(false)
+                    setDraftRetakeReason('')
+                    setActiveId(sections[0]?.id ?? 'chief')
+                  }}
+                >
+                  Begin fresh case-taking
+                </Button>
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
 
       {tab === 'edit' && (
         <div className="grid grid-cols-[240px_1fr] gap-4">
@@ -320,6 +391,7 @@ export function CaseSheet({
                 </Card>
               )}
             </div>
+
           </div>
 
           {/* section editor */}
@@ -399,9 +471,12 @@ export function CaseSheet({
                       </span>
                     </div>
                     {dr && <span className="mt-0.5 text-[12px] text-muted">{dr.name}</span>}
-                    {v.remedy && (
-                      <span className="mt-1.5 inline-flex self-start rounded-pill bg-accent/10 px-2 py-0.5 text-[11px] font-semibold text-accent">{v.remedy}</span>
-                    )}
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                      {v.remedy && (
+                        <span className="inline-flex rounded-pill bg-accent/10 px-2 py-0.5 text-[11px] font-semibold text-accent">{v.remedy}</span>
+                      )}
+                      {v.isRetake && <Badge tone="purple">Retake</Badge>}
+                    </div>
                     <span className="mt-1 text-[11px] text-faint capitalize">{v.template} template</span>
                   </button>
                 )
@@ -421,9 +496,12 @@ export function CaseSheet({
               <>
                 <div className="mb-4 flex items-center justify-between">
                   <div>
-                    <h2 className="font-display text-[17px] font-bold text-ink">
-                      {new Date(viewingVisit.date).toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })}
-                    </h2>
+                    <div className="flex items-center gap-2">
+                      <h2 className="font-display text-[17px] font-bold text-ink">
+                        {new Date(viewingVisit.date).toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })}
+                      </h2>
+                      {viewingVisit.isRetake && <Badge tone="purple">Retake</Badge>}
+                    </div>
                     <p className="text-[12.5px] text-muted">
                       {practitioners.find((p) => p.id === viewingVisit.practitionerId)?.name ?? 'Unknown'}
                       {viewingVisit.remedy && <> &middot; {viewingVisit.remedy}</>}
@@ -431,6 +509,11 @@ export function CaseSheet({
                         <> &middot; amended {new Date(viewingVisit.editedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</>
                       )}
                     </p>
+                    {viewingVisit.isRetake && viewingVisit.retakeReason && (
+                      <p className="mt-1.5 rounded-[10px] border border-amber-border bg-amber-tint px-3 py-2 text-[12.5px] text-amber-text">
+                        {viewingVisit.retakeReason}
+                      </p>
+                    )}
                   </div>
                   <Button
                     variant={editingVisit ? 'primary' : 'ghost'}

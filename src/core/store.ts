@@ -93,6 +93,12 @@ import {
 const caseTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const caseVisitTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
+// A scheduled appointment booked as a case retake carries this prefix in
+// its own `reason` field — no new schema needed, and it rides along with
+// the appointment through reassignment/rescheduling automatically. Read by
+// snapshotCaseVisit when that appointment's consult eventually ends.
+export const CASE_RETAKE_APPT_MARKER = 'Case retake — '
+
 // A write that couldn't reach the database while offline, kept around to
 // retry on reconnect. Deliberately just these kinds — case notes and
 // prescriptions were the two the offline guarantee was originally about;
@@ -171,6 +177,11 @@ interface ClinicState {
   notifications: AppNotification[]
   caseData: Record<string, CaseState>
   caseSaveStatus: Record<string, 'saving' | 'saved' | 'error' | 'queued'>
+  // A reason set here means "the next case-sheet snapshot for this patient
+  // is a retake" — read (and cleared) by snapshotCaseVisit, whether that
+  // snapshot happens by tapping "Save snapshot" (web) or by ending a
+  // consult (mobile/video), so the toggle works the same way either route.
+  caseRetakeIntent: Record<string, string>
   outcomes: Outcome[]
   timeBlocks: TimeBlock[]
   caseVisits: CaseVisit[]
@@ -244,6 +255,8 @@ interface ClinicState {
   assignPatient: (patientId: string, practitionerId: string) => void
   addDocument: (doc: ClinicDocument) => void
   snapshotCaseVisit: (patientId: string, appointmentId?: string, template?: string) => void
+  setCaseRetakeIntent: (patientId: string, reason: string | null) => void
+  startCaseRetake: (patientId: string, reason: string) => void
   updateCaseVisit: (id: string, patch: { sections?: Record<string, unknown>; remedy?: string; outcome?: string }) => void
   sendMessage: (patientId: string, text: string, sender: MessageSender) => void
   markConvoRead: (patientId: string, sender: MessageSender) => void
@@ -312,6 +325,7 @@ const emptyState = () => ({
   remedyStock: [] as RemedyStock[],
   notifications: [] as AppNotification[],
   caseData: {} as Record<string, CaseState>,
+  caseRetakeIntent: {} as Record<string, string>,
   caseSaveStatus: {} as Record<string, 'saving' | 'saved' | 'error'>,
   outcomes: [] as Outcome[],
   timeBlocks: [] as TimeBlock[],
@@ -1387,6 +1401,16 @@ export const useClinic = create<ClinicState>()(
         )
         if (!hasContent) return
         const patient = get().patients.find((p) => p.id === patientId)
+        // A retake can also arrive already scheduled — booked ahead through
+        // the normal appointment/calendar system (see CASE_RETAKE_APPT_MARKER),
+        // possibly for a different doctor than whoever decided the retake was
+        // needed. Whichever of the two set it wins; the manual in-sheet
+        // toggle is the fallback for a retake done in the same sitting.
+        const scheduledAppt = appointmentId ? get().appointments.find((a) => a.id === appointmentId) : undefined
+        const retakeReasonFromAppt = scheduledAppt?.reason?.startsWith(CASE_RETAKE_APPT_MARKER)
+          ? scheduledAppt.reason.slice(CASE_RETAKE_APPT_MARKER.length)
+          : undefined
+        const retakeReason = get().caseRetakeIntent[patientId] ?? retakeReasonFromAppt
         const visit: CaseVisit = {
           id: newId(),
           patientId,
@@ -1396,9 +1420,38 @@ export const useClinic = create<ClinicState>()(
           template: template ?? 'chronic',
           sections: JSON.parse(JSON.stringify(cs)),
           remedy: patient?.currentRemedy ?? undefined,
+          ...(retakeReason ? { isRetake: true, retakeReason } : {}),
         }
-        set((s) => ({ caseVisits: [visit, ...s.caseVisits] }))
+        set((s) => {
+          const nextIntent = { ...s.caseRetakeIntent }
+          delete nextIntent[patientId]
+          return { caseVisits: [visit, ...s.caseVisits], caseRetakeIntent: nextIntent }
+        })
         writeThrough(insertCaseVisit(visit), 'Visit snapshot may not have saved.')
+      },
+
+      setCaseRetakeIntent: (patientId, reason) => {
+        set((s) => {
+          const next = { ...s.caseRetakeIntent }
+          if (reason && reason.trim()) next[patientId] = reason
+          else delete next[patientId]
+          return { caseRetakeIntent: next }
+        })
+      },
+
+      // A retake is a fresh case-taking, not an edit of the last one.
+      // Whatever's currently on the sheet gets preserved as its own visit
+      // FIRST — before the fields are cleared — so nothing typed before
+      // this point is ever silently overwritten by the new answers.
+      startCaseRetake: (patientId, reason) => {
+        const mostRecentTemplate = [...get().caseVisits]
+          .filter((v) => v.patientId === patientId)
+          .sort((a, b) => b.date.localeCompare(a.date))[0]?.template
+        get().snapshotCaseVisit(patientId, undefined, mostRecentTemplate)
+        set((s) => ({
+          caseData: { ...s.caseData, [patientId]: emptyCase() },
+          caseRetakeIntent: { ...s.caseRetakeIntent, [patientId]: reason },
+        }))
       },
 
       updateCaseVisit: (id, patch) => {

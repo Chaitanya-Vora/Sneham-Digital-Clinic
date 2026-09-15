@@ -20,6 +20,7 @@ import {
   DeviceMobile,
   X,
   Handshake,
+  ArrowsCounterClockwise,
   CalendarCheck,
   CalendarBlank,
   Warning,
@@ -56,9 +57,9 @@ import {
 import { todayISO, formatDayLabel, addDaysISO } from '../core/day'
 import { ownerLabel, ownerTone, isMine, isUnassigned, isAssignedToOthers } from '../core/assignment'
 import { getSections, CASE_TEMPLATES } from '../core/caseTemplate'
-import { useClinic, type PublishRxInput } from '../core/store'
+import { useClinic, CASE_RETAKE_APPT_MARKER, type PublishRxInput } from '../core/store'
 import { useAuth } from '../auth/AuthProvider'
-import type { Appointment, Patient, Potency, Repetition, RxTemplate, Invoice, InvoiceLineItem, PaymentMode, ChatMessage, ReferralSource, Role, EditableRole, RolePermissionSet, AssignmentRules, PractitionerSettings } from '../core/types'
+import type { Appointment, Patient, Potency, Repetition, RxTemplate, Invoice, InvoiceLineItem, PaymentMode, ChatMessage, ReferralSource, Role, EditableRole, RolePermissionSet, AssignmentRules, PractitionerSettings, CaseVisit } from '../core/types'
 import { isOneOffRepetition } from '../core/types'
 import { MASTER_REMEDIES } from '../core/remedies'
 import { INVESTIGATION_CATALOG, ALL_INVESTIGATIONS, wordsOf, matchesAllWords } from '../core/investigations'
@@ -120,6 +121,7 @@ export function WebApp() {
   const { signOut } = useAuth()
   const [screen, setScreen] = useState<Screen>('today')
   const [patientId, setPatientId] = useState('pt-ananya')
+  const [caseSheetTab, setCaseSheetTab] = useState<'edit' | 'history'>('edit')
   const [notifOpen, setNotifOpen] = useState(false)
   const [cmdOpen, setCmdOpen] = useState(false)
   const [clinicOpen, setClinicOpen] = useState(false)
@@ -372,7 +374,7 @@ export function WebApp() {
                   patientId={patientId}
                   onPrescribe={(draftId) => { setRxDraftId(draftId ?? null); setScreen('prescription') }}
                   onOrderInvestigations={() => setScreen('investigations')}
-                  onCaseSheet={() => setScreen('casesheet')}
+                  onCaseSheet={(tab) => { setCaseSheetTab(tab ?? 'edit'); setScreen('casesheet') }}
                   onFollowUp={() => setScreen('followup')}
                   onOpenMessages={() => openMessages(patientId)}
                   onBack={() => setScreen('patients')}
@@ -381,7 +383,7 @@ export function WebApp() {
               {screen === 'prescription' && <PrescriptionWriter patientId={patientId} draftId={rxDraftId} onDone={() => { setRxDraftId(null); setScreen('patient') }} />}
               {screen === 'investigations' && <InvestigationWriter patientId={patientId} onDone={() => setScreen('patient')} />}
               {screen === 'casesheet' && (
-                <CaseSheet patientId={patientId} onPrescribe={() => { setRxDraftId(null); setScreen('prescription') }} onBack={() => setScreen('patient')} />
+                <CaseSheet patientId={patientId} initialTab={caseSheetTab} onPrescribe={() => { setRxDraftId(null); setScreen('prescription') }} onBack={() => setScreen('patient')} />
               )}
               {screen === 'followup' && <FollowUp patientId={patientId} onBack={() => setScreen('patient')} />}
               {screen === 'prescriptions-all' && <PrescriptionsOverview onOpenPatient={openPatient} onWriteFor={openPrescription} />}
@@ -1854,9 +1856,12 @@ function DonutChart({ segments, size = 120, strokeWidth = 18 }: { segments: { la
 }
 
 // ── PATIENT DETAIL ──
-function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSheet, onFollowUp, onOpenMessages, onBack }: { patientId: string; onPrescribe: (draftId?: string) => void; onOrderInvestigations: () => void; onCaseSheet: () => void; onFollowUp: () => void; onOpenMessages: () => void; onBack: () => void }) {
+function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSheet, onFollowUp, onOpenMessages, onBack }: { patientId: string; onPrescribe: (draftId?: string) => void; onOrderInvestigations: () => void; onCaseSheet: (tab?: 'edit' | 'history') => void; onFollowUp: () => void; onOpenMessages: () => void; onBack: () => void }) {
   const patient = useClinic((s) => s.patients.find((p) => p.id === patientId))
   const rx = useClinic((s) => s.prescriptions.filter((r) => r.patientId === patientId))
+  const patientCaseVisits = useClinic((s) => s.caseVisits.filter((v) => v.patientId === patientId))
+  const startCaseRetake = useClinic((s) => s.startCaseRetake)
+  const caseRetakeActive = useClinic((s) => !!s.caseRetakeIntent[patientId])
   const docs = useClinic((s) => s.documents.filter((d) => d.patientId === patientId))
   const outcomes = useClinic((s) => s.outcomes.filter((o) => o.patientId === patientId))
   const investigationOrders = useClinic((s) => s.investigationOrders.filter((o) => o.patientId === patientId))
@@ -1894,6 +1899,9 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
   const [editPatientOpen, setEditPatientOpen] = useState(false)
   const [deletePatientOpen, setDeletePatientOpen] = useState(false)
   const [handoffOpen, setHandoffOpen] = useState(false)
+  const [retakeModalOpen, setRetakeModalOpen] = useState(false)
+  const [draftRetakeReason, setDraftRetakeReason] = useState('')
+  const [apptModalRequest, setApptModalRequest] = useState<AppointmentModalRequest | null>(null)
   const archivePatient = useClinic((s) => s.archivePatient)
   const restorePatient = useClinic((s) => s.restorePatient)
   const patientMenuRef = useRef<HTMLDivElement>(null)
@@ -1945,6 +1953,8 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
   // Cancelled invoices stay in this list (never deleted) so history and
   // analytics stay auditable, just excluded from revenue sums elsewhere.
   const sortedInvoices = [...invoices].sort((a, b) => b.date.localeCompare(a.date) || b.invoiceNo - a.invoiceNo)
+  const sortedCaseVisits = [...patientCaseVisits].sort((a, b) => b.date.localeCompare(a.date))
+  const caseRetakeCount = patientCaseVisits.filter((v) => v.isRetake).length
 
   const printInvoice = (inv: Invoice) => {
     if (!patient) return
@@ -2024,7 +2034,7 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
           </div>
         </div>
         <Button variant="ghost" size="sm" onClick={onFollowUp}><ArrowsClockwise size={15} /> Follow-up</Button>
-        <Button variant="ghost" size="sm" onClick={onCaseSheet}><Notebook size={15} /> Open case sheet</Button>
+        <Button variant="ghost" size="sm" onClick={() => onCaseSheet()}><Notebook size={15} /> Open case sheet</Button>
         <Button variant="ghost" size="sm" onClick={onOrderInvestigations}><TestTube size={15} /> Order investigations</Button>
         <Button variant="primary" size="sm" onClick={() => onPrescribe()}><RxIcon size={15} weight="fill" /> Write prescription</Button>
         <div ref={patientMenuRef} className="relative">
@@ -2174,6 +2184,79 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
               </Card>
             ))}
           </div>
+
+          <Card className="p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-purple-tint text-purple">
+                  <ArrowsCounterClockwise size={18} weight="fill" />
+                </div>
+                <div>
+                  <h2 className="font-display text-[15px] font-bold text-ink">Case history</h2>
+                  <div className="text-[12px] text-faint">
+                    {sortedCaseVisits.length} visit{sortedCaseVisits.length !== 1 ? 's' : ''}
+                    {caseRetakeCount > 0 && ` · ${caseRetakeCount} retake${caseRetakeCount !== 1 ? 's' : ''}`}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {caseRetakeActive ? (
+                  <Badge tone="purple">Retake in progress</Badge>
+                ) : (
+                  <Button variant="ghost" size="sm" onClick={() => setRetakeModalOpen(true)}>
+                    <ArrowsCounterClockwise size={14} /> Case retake
+                  </Button>
+                )}
+                {sortedCaseVisits.length > 0 && (
+                  <Button variant="ghost" size="sm" onClick={() => onCaseSheet('history')}>View all</Button>
+                )}
+              </div>
+            </div>
+            {sortedCaseVisits.length === 0 ? (
+              <p className="py-4 text-center text-[12.5px] text-faint">No case-taking recorded yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {sortedCaseVisits.slice(0, 3).map((v) => (
+                  <button
+                    key={v.id}
+                    onClick={() => onCaseSheet('history')}
+                    className="flex w-full items-center gap-3 rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-left transition hover:bg-surface-hover"
+                  >
+                    <div className="flex-1">
+                      <div className="text-[13px] font-semibold text-ink">
+                        {new Date(v.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                      </div>
+                      <div className="text-[11.5px] text-muted capitalize">{v.template} template{v.remedy ? ` · ${v.remedy}` : ''}</div>
+                    </div>
+                    {v.isRetake && <Badge tone="purple">Retake</Badge>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </Card>
+
+          {retakeModalOpen && (
+            <CaseRetakeModal
+              patientName={patient.name}
+              lastVisit={sortedCaseVisits[0]}
+              onClose={() => setRetakeModalOpen(false)}
+              onStartNow={(reasonText) => {
+                startCaseRetake(patientId, reasonText)
+                setRetakeModalOpen(false)
+                onCaseSheet('edit')
+              }}
+              onSchedule={(reasonText) => {
+                setRetakeModalOpen(false)
+                setApptModalRequest({
+                  mode: 'add',
+                  date: addDaysISO(todayISO(), 7),
+                  patientId,
+                  reason: CASE_RETAKE_APPT_MARKER + reasonText,
+                })
+              }}
+            />
+          )}
+          {apptModalRequest && <AppointmentModal request={apptModalRequest} onClose={() => setApptModalRequest(null)} />}
 
           <Card className="p-5">
             <h2 className="mb-3 font-display text-[15px] font-bold text-ink">Prescription history</h2>
@@ -4422,6 +4505,84 @@ function NewPatientModal({ onClose }: { onClose: () => void }) {
           <Button variant="primary" size="sm" onClick={onSubmit} className={!form.name.trim() || !form.chiefComplaint.trim() ? 'opacity-50' : ''}>
             <Plus size={15} weight="bold" /> Add patient
           </Button>
+        </div>
+      </motion.div>
+    </motion.div>
+  )
+}
+
+// ── CASE RETAKE MODAL ──
+function CaseRetakeModal({
+  patientName,
+  lastVisit,
+  onClose,
+  onStartNow,
+  onSchedule,
+}: {
+  patientName: string
+  lastVisit?: CaseVisit
+  onClose: () => void
+  onStartNow: (reason: string) => void
+  onSchedule: (reason: string) => void
+}) {
+  const [reason, setReason] = useState('')
+  const canSubmit = !!reason.trim()
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.96, y: 12 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.97, y: 8 }}
+        transition={{ type: 'spring', stiffness: 400, damping: 32 }}
+        onClick={(e) => e.stopPropagation()}
+        className="w-[440px] rounded-[20px] border border-border bg-surface p-6 shadow-modal"
+      >
+        <div className="mb-1 flex items-center gap-2.5">
+          <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-purple-tint text-purple">
+            <ArrowsCounterClockwise size={18} weight="fill" />
+          </div>
+          <h2 className="font-display text-[17px] font-bold text-ink">Case retake &middot; {patientName}</h2>
+        </div>
+        <p className="mb-4 text-[12.5px] text-muted">A fresh case-taking after the remedy hasn't worked. The current notes stay on record as their own visit — nothing is lost.</p>
+        {lastVisit && (
+          <div className="mb-3 rounded-[10px] bg-tint-pale px-3 py-2 text-[12px] text-muted">
+            Last visit: {new Date(lastVisit.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })} &middot; {lastVisit.remedy ?? 'no remedy recorded'}
+          </div>
+        )}
+        <Label>Reason for retake</Label>
+        <textarea
+          autoFocus
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          rows={2}
+          placeholder="e.g. No improvement after 4 weeks on Nux Vomica 200C"
+          className="mt-1.5 w-full resize-y rounded-[12px] border border-border bg-screen px-3 py-2.5 text-[13px] leading-relaxed text-body outline-none focus:border-purple-border"
+        />
+        <div className="mt-4 space-y-2">
+          <button
+            disabled={!canSubmit}
+            onClick={() => onStartNow(reason.trim())}
+            className={`w-full rounded-pill px-4 py-2.5 text-[13px] font-semibold text-white transition ${canSubmit ? 'bg-purple hover:opacity-90' : 'bg-purple/40'}`}
+          >
+            Retake now — patient's with me
+          </button>
+          <button
+            disabled={!canSubmit}
+            onClick={() => onSchedule(reason.trim())}
+            className={`w-full rounded-pill border px-4 py-2.5 text-[13px] font-semibold transition ${canSubmit ? 'border-purple-border text-purple hover:bg-purple-tint' : 'border-border text-faint'}`}
+          >
+            Schedule for later
+          </button>
+          <button onClick={onClose} className="w-full rounded-pill px-4 py-2.5 text-[13px] font-semibold text-muted hover:text-body">
+            Cancel
+          </button>
         </div>
       </motion.div>
     </motion.div>

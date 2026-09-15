@@ -1195,6 +1195,8 @@ function toAppCaseVisit(r: any): CaseVisit {
     remedy: r.remedy ?? undefined,
     outcome: r.outcome ?? undefined,
     editedAt: r.edited_at ?? undefined,
+    isRetake: r.is_retake ?? false,
+    retakeReason: r.retake_reason ?? undefined,
   }
 }
 
@@ -1209,6 +1211,8 @@ function toDbCaseVisit(v: CaseVisit) {
     sections: v.sections,
     remedy: v.remedy ?? null,
     outcome: v.outcome ?? null,
+    is_retake: v.isRetake ?? false,
+    retake_reason: v.retakeReason ?? null,
   }
 }
 

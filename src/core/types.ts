@@ -349,6 +349,11 @@ export interface CaseVisit {
   remedy?: string
   outcome?: string
   editedAt?: string // ISO — set when a past visit's notes are amended after the fact
+  // A full re-interview after the prescribed remedy didn't work — distinct
+  // from which case template was used (a retake can still use the Chronic
+  // structure, say). See core/store.ts's caseRetakeIntent for how this gets set.
+  isRetake?: boolean
+  retakeReason?: string
 }
 
 export type MessageSender = 'practitioner' | 'patient'

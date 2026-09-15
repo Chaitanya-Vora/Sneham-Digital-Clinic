@@ -29,11 +29,12 @@ function parseHourFromTime(time: string): number {
 }
 
 export type AppointmentModalRequest =
-  | { mode: 'add'; date: string; hour?: number }
+  | { mode: 'add'; date: string; hour?: number; patientId?: string; reason?: string }
   | { mode: 'edit'; appointment: Appointment }
 
 export function AppointmentModal({ request, onClose }: { request: AppointmentModalRequest | null; onClose: () => void }) {
   const patients = useClinic((s) => s.patients)
+  const practitioners = useClinic((s) => s.practitioners.filter((p) => p.status === 'active'))
   const currentPractitionerId = useClinic((s) => s.currentPractitionerId)
   const scheduleFollowUp = useClinic((s) => s.scheduleFollowUp)
   const updateAppointment = useClinic((s) => s.updateAppointment)
@@ -45,6 +46,7 @@ export function AppointmentModal({ request, onClose }: { request: AppointmentMod
   const [hour, setHour] = useState(9)
   const [apptType, setApptType] = useState<ConsultType>('In person')
   const [reason, setReason] = useState('')
+  const [practitionerId, setPractitionerId] = useState('')
 
   useEffect(() => {
     if (!request) return
@@ -54,14 +56,20 @@ export function AppointmentModal({ request, onClose }: { request: AppointmentMod
       setHour(parseHourFromTime(request.appointment.time))
       setApptType(request.appointment.type)
       setReason(request.appointment.reason ?? '')
+      setPractitionerId(request.appointment.practitionerId)
     } else {
-      setPatientId(null)
+      const prefilled = request.patientId ? patients.find((p) => p.id === request.patientId) : null
+      setPatientId(request.patientId ?? null)
       setPatientQuery('')
       setDate(request.date)
       setHour(request.hour ?? 9)
       setApptType('In person')
-      setReason('')
+      setReason(request.reason ?? '')
+      // Same default as the rest of the app — the patient's own doctor,
+      // falling back to whoever's booking when there isn't one yet.
+      setPractitionerId(prefilled?.owningPractitionerId ?? currentPractitionerId ?? '')
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request])
 
   if (!request) return null
@@ -78,10 +86,10 @@ export function AppointmentModal({ request, onClose }: { request: AppointmentMod
       updateAppointment(request.appointment.id, { date, time, type: apptType, reason: reason.trim() || request.appointment.reason || 'Consultation' })
       toast({ title: 'Appointment updated', message: `${formatDayLabel(date)} · ${time}` })
     } else {
-      // Book onto the patient's own doctor, not whoever happens to be
-      // logged in creating the booking — same rule mobile's follow-up
-      // booking already follows (PatientSearch.tsx's bookFollowUp).
-      scheduleFollowUp({ patientId, practitionerId: patient?.owningPractitionerId ?? currentPractitionerId ?? '', time, date, type: apptType, reason: reason.trim() || 'Consultation' })
+      // Defaults to the patient's own doctor (set above), but stays
+      // editable — booking this for a colleague, e.g. handing a retake to
+      // whoever's actually doing it, is a real, intentional choice.
+      scheduleFollowUp({ patientId, practitionerId: practitionerId || currentPractitionerId || '', time, date, type: apptType, reason: reason.trim() || 'Consultation' })
       toast({ title: 'Appointment booked', message: `${patient?.name ?? 'Patient'} · ${formatDayLabel(date)} · ${time}` })
     }
     onClose()
@@ -128,7 +136,7 @@ export function AppointmentModal({ request, onClose }: { request: AppointmentMod
                 {results.map((p) => (
                   <button
                     key={p.id}
-                    onClick={() => setPatientId(p.id)}
+                    onClick={() => { setPatientId(p.id); setPractitionerId(p.owningPractitionerId ?? currentPractitionerId ?? '') }}
                     className="flex w-full items-center gap-3 rounded-[12px] px-2.5 py-2 text-left transition hover:bg-surface-hover"
                   >
                     <Avatar initials={p.initials} size={32} />
@@ -156,6 +164,17 @@ export function AppointmentModal({ request, onClose }: { request: AppointmentMod
                 <button onClick={() => setPatientId(null)} className="text-[12px] font-semibold text-brand">Change</button>
               )}
             </div>
+
+            {request.mode === 'add' && (
+              <div>
+                <Label>Doctor</Label>
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {practitioners.map((pr) => (
+                    <Chip key={pr.id} selected={practitionerId === pr.id} onClick={() => setPractitionerId(pr.id)}>{pr.name}</Chip>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div>
               <Label>Date</Label>

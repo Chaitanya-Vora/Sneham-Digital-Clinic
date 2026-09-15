@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
-import { CaretLeft, CheckCircle, CircleNotch, DeviceMobile, Microphone, PencilSimpleLine, Prescription as RxIcon, WarningCircle } from '@phosphor-icons/react'
+import { CaretLeft, CheckCircle, CircleNotch, DeviceMobile, Microphone, PencilSimpleLine, Prescription as RxIcon, WarningCircle, ArrowsCounterClockwise } from '@phosphor-icons/react'
 import { useClinic } from '../core/store'
 import { uploadDocument } from '../core/db'
 import { allTemplates, type CaseTemplateName, getSections } from '../core/caseTemplate'
-import { Button, Label } from '../design-system/ui'
+import { Button, Card, Label } from '../design-system/ui'
 import { Pressable } from '../design-system/Pressable'
 import { VoiceRecorder } from '../design-system/VoiceRecorder'
 import { useToast } from '../design-system/toast'
@@ -28,6 +28,9 @@ export function MobileCaseSheet({
   const caseVisits = useClinic((s) => s.caseVisits.filter((v) => v.patientId === patientId))
   const customTemplates = useClinic((s) => s.caseTemplates)
   const templates = allTemplates(customTemplates)
+  const startCaseRetake = useClinic((s) => s.startCaseRetake)
+  const retakeReason = useClinic((s) => s.caseRetakeIntent[patientId] ?? '')
+  const retakeActive = !!retakeReason
   // Same reasoning as the web case sheet: no prior visits means this is a
   // first visit, so open on that template instead of always Chronic.
   const [template, setTemplate] = useState<CaseTemplateName>(() => {
@@ -40,6 +43,8 @@ export function MobileCaseSheet({
   const sections = getSections(template, customTemplates)
   const [activeId, setActiveId] = useState('chief')
   const [editingTemplate, setEditingTemplate] = useState(false)
+  const [retakeOpen, setRetakeOpen] = useState(false)
+  const [draftRetakeReason, setDraftRetakeReason] = useState('')
 
   useEffect(() => { if (!caseState) ensureCase(patientId) }, [patientId, caseState, ensureCase])
   if (!patient) return (
@@ -52,6 +57,7 @@ export function MobileCaseSheet({
   )
   const active = sections.find((s) => s.id === activeId) ?? sections[0]
   const pct = Math.round((done / total) * 100)
+  const lastVisit = [...caseVisits].sort((a, b) => b.date.localeCompare(a.date))[0]
 
   return (
     <div className="flex h-full flex-col bg-screen">
@@ -101,7 +107,69 @@ export function MobileCaseSheet({
             <PencilSimpleLine size={12} /> {customTemplates.some((c) => c.id === template) ? 'Edit' : 'New'}
           </button>
         </div>
-        <div className="mt-0.5 text-[12px] text-faint">{done} of {total} sections</div>
+
+        <div className="mt-3">
+          {retakeActive ? (
+            <Card className="flex items-center gap-2.5 border-purple-border bg-purple-tint px-3.5 py-3">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-surface text-purple">
+                <ArrowsCounterClockwise size={16} weight="fill" />
+              </div>
+              <div className="flex-1">
+                <div className="text-[12.5px] font-semibold text-purple">Case retake in progress</div>
+                <p className="mt-0.5 text-[11.5px] text-purple/80">{retakeReason}</p>
+              </div>
+            </Card>
+          ) : (
+            <Card className="p-3.5">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-purple-tint text-purple">
+                  <ArrowsCounterClockwise size={16} weight="fill" />
+                </div>
+                <div className="flex-1">
+                  <div className="font-display text-[13.5px] font-semibold text-ink">Case retake</div>
+                  <div className="text-[11.5px] text-muted">Remedy didn't work? Start fresh.</div>
+                </div>
+                <Pressable hap="tick" onClick={() => setRetakeOpen((v) => !v)} className="text-[12.5px] font-semibold text-purple">
+                  {retakeOpen ? 'Cancel' : 'Start'}
+                </Pressable>
+              </div>
+              {retakeOpen && (
+                <div className="mt-3 border-t border-border pt-3">
+                  {lastVisit && (
+                    <div className="mb-2 text-[11.5px] text-muted">
+                      Last visit: {new Date(lastVisit.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })} &middot; {lastVisit.remedy ?? 'no remedy recorded'}
+                    </div>
+                  )}
+                  <Label>Reason for retake</Label>
+                  <textarea
+                    autoFocus
+                    value={draftRetakeReason}
+                    onChange={(e) => setDraftRetakeReason(e.target.value)}
+                    placeholder="e.g. No improvement after 4 weeks"
+                    rows={2}
+                    className="mt-1.5 w-full resize-y rounded-[10px] border border-border bg-surface px-2.5 py-2 text-[12.5px] leading-relaxed text-body outline-none focus:border-purple-border"
+                  />
+                  <p className="mt-1.5 text-[11px] text-faint">Saves the current notes as their own visit, then clears the sheet for a fresh case-taking. Applies when this consult ends.</p>
+                  <Pressable
+                    hap="tick"
+                    onClick={() => {
+                      if (!draftRetakeReason.trim()) return
+                      startCaseRetake(patientId, draftRetakeReason.trim())
+                      setRetakeOpen(false)
+                      setDraftRetakeReason('')
+                      setActiveId(sections[0]?.id ?? 'chief')
+                    }}
+                    className={`mt-2.5 flex w-full items-center justify-center rounded-pill py-2.5 text-[13px] font-semibold text-screen ${draftRetakeReason.trim() ? 'bg-purple' : 'bg-purple/40'}`}
+                  >
+                    Begin fresh case-taking
+                  </Pressable>
+                </div>
+              )}
+            </Card>
+          )}
+        </div>
+
+        <div className="mt-2 text-[12px] text-faint">{done} of {total} sections</div>
         <div className="mt-2 h-1.5 overflow-hidden rounded-pill bg-tint-pale">
           <div className="h-full rounded-pill bg-accent transition-all" style={{ width: `${pct}%` }} />
         </div>

@@ -25,8 +25,8 @@ import {
   Handshake,
   Check,
 } from '@phosphor-icons/react'
-import { useClinic, selPrescriptionsFor, selDosesFor } from '../core/store'
-import type { Appointment, Patient, Invoice, InvoiceLineItem, PaymentMode, ReferralSource } from '../core/types'
+import { useClinic, selPrescriptionsFor, selDosesFor, CASE_RETAKE_APPT_MARKER } from '../core/store'
+import type { Appointment, Patient, Invoice, InvoiceLineItem, PaymentMode, ReferralSource, CaseVisit } from '../core/types'
 import { Avatar, Badge, BottomSheet, Button, Card, Chip, Label } from '../design-system/ui'
 import { Pressable } from '../design-system/Pressable'
 import { haptic } from '../design-system/haptics'
@@ -36,8 +36,9 @@ import { PullToRefresh } from '../design-system/gestures'
 import { useToast } from '../design-system/toast'
 import { exportInvoicePdf, exportPatientHistoryPdf } from '../core/pdfExport'
 import { DEFAULT_CONSULT_FEE, invoiceTotal } from '../core/billing'
-import { Archive, ArrowCounterClockwise, DownloadSimple, DotsThreeVertical, Phone, WhatsappLogo } from '@phosphor-icons/react'
+import { Archive, ArrowCounterClockwise, ArrowsCounterClockwise, DownloadSimple, DotsThreeVertical, Phone, WhatsappLogo } from '@phosphor-icons/react'
 import { shareViaWhatsApp } from '../core/share'
+import { getSections, type CaseTemplateName } from '../core/caseTemplate'
 import { PatientQuickView } from './PatientQuickView'
 
 const REFERRAL_SOURCES: ReferralSource[] = ['Offline', 'Instagram', 'References', 'Referral']
@@ -248,6 +249,10 @@ export function PatientDetailScreen({
   const assignPatient = useClinic((s) => s.assignPatient)
   const createHandoff = useClinic((s) => s.createHandoff)
   const handoffs = useClinic((s) => s.handoffs.filter((h) => h.patientId === patientId))
+  const caseVisits = useClinic((s) => s.caseVisits.filter((v) => v.patientId === patientId))
+  const startCaseRetake = useClinic((s) => s.startCaseRetake)
+  const caseRetakeActive = useClinic((s) => !!s.caseRetakeIntent[patientId])
+  const customCaseTemplates = useClinic((s) => s.caseTemplates)
 
   const scheduleFollowUpAction = useClinic((s) => s.scheduleFollowUp)
   const [tab, setTab] = useState<DetailTab>('overview')
@@ -265,6 +270,13 @@ export function PatientDetailScreen({
   const [handoffCaseStatus, setHandoffCaseStatus] = useState('')
   const [handoffReason, setHandoffReason] = useState('')
   const [handoffWatchFor, setHandoffWatchFor] = useState('')
+  const [retakeOpen, setRetakeOpen] = useState(false)
+  const [retakeReasonDraft, setRetakeReasonDraft] = useState('')
+  const [retakeScheduling, setRetakeScheduling] = useState(false)
+  const [retakeDoctorId, setRetakeDoctorId] = useState('')
+  const [retakeDate, setRetakeDate] = useState(addDaysISO(todayISO(), 7))
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyVisitId, setHistoryVisitId] = useState<string | null>(null)
 
   if (!patient) {
     return (
@@ -304,6 +316,9 @@ export function PatientDetailScreen({
   const activeCoverage = handoffs.find((h) => h.status === 'accepted')
   const reassignCandidates = practitioners.filter((p) => p.status === 'active' && p.id !== patient.owningPractitionerId)
   const handoffCandidates = practitioners.filter((p) => p.status === 'active' && p.id !== ME)
+  const activePractitioners = practitioners.filter((p) => p.status === 'active')
+  const sortedCaseVisits = [...caseVisits].sort((a, b) => b.date.localeCompare(a.date))
+  const caseRetakeCount = caseVisits.filter((v) => v.isRetake).length
 
   const bookFollowUp = (isoDate: string) => {
     const time = firstAvailableMorningSlot(allAppointments, isoDate)
@@ -482,6 +497,52 @@ export function PatientDetailScreen({
                   className="flex items-center justify-center gap-1.5 rounded-pill border border-border bg-surface py-2 text-[12.5px] font-semibold text-body"
                 >
                   <Handshake size={15} /> Hand off
+                </Pressable>
+              </div>
+            </Card>
+
+            <Card className="space-y-2.5 px-4 py-3">
+              <div className="flex items-center gap-2">
+                <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-purple-tint text-purple">
+                  <ArrowsCounterClockwise size={18} weight="fill" />
+                </div>
+                <div className="flex-1">
+                  <div className="font-display text-[14px] font-semibold text-ink">Case history</div>
+                  <div className="text-[12px] text-muted">
+                    {sortedCaseVisits.length} visit{sortedCaseVisits.length !== 1 ? 's' : ''}
+                    {caseRetakeCount > 0 && ` · ${caseRetakeCount} retake${caseRetakeCount !== 1 ? 's' : ''}`}
+                  </div>
+                </div>
+                {caseRetakeActive && <Badge tone="purple">Retake pending</Badge>}
+              </div>
+              {sortedCaseVisits.length > 0 && (
+                <button
+                  onClick={() => { setHistoryVisitId(sortedCaseVisits[0].id); setHistoryOpen(true) }}
+                  className="flex w-full items-center justify-between rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-left"
+                >
+                  <div>
+                    <div className="text-[13px] font-semibold text-ink">
+                      {new Date(sortedCaseVisits[0].date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    </div>
+                    <div className="text-[11.5px] text-muted capitalize">{sortedCaseVisits[0].template} template{sortedCaseVisits[0].remedy ? ` · ${sortedCaseVisits[0].remedy}` : ''}</div>
+                  </div>
+                  {sortedCaseVisits[0].isRetake && <Badge tone="purple">Retake</Badge>}
+                </button>
+              )}
+              <div className="grid grid-cols-2 gap-2 border-t border-border pt-2.5">
+                <Pressable
+                  hap="tick"
+                  onClick={() => { if (!caseRetakeActive) { setRetakeReasonDraft(''); setRetakeScheduling(false); setRetakeOpen(true) } }}
+                  className={`flex items-center justify-center gap-1.5 rounded-pill border py-2 text-[12.5px] font-semibold ${caseRetakeActive ? 'border-border bg-tint text-faint' : 'border-purple-border bg-purple-tint text-purple'}`}
+                >
+                  <ArrowsCounterClockwise size={15} /> {caseRetakeActive ? 'Retake pending' : 'Case retake'}
+                </Pressable>
+                <Pressable
+                  hap="tick"
+                  onClick={() => { setHistoryVisitId(sortedCaseVisits[0]?.id ?? null); setHistoryOpen(true) }}
+                  className="flex items-center justify-center gap-1.5 rounded-pill border border-border bg-surface py-2 text-[12.5px] font-semibold text-body"
+                >
+                  View history
                 </Pressable>
               </div>
             </Card>
@@ -910,6 +971,168 @@ export function PatientDetailScreen({
         >
           Send handoff
         </Button>
+      </BottomSheet>
+
+      {/* case retake — reason first, then either start now or schedule it
+          as a real appointment (possibly for a different doctor) */}
+      <BottomSheet open={retakeOpen} onClose={() => setRetakeOpen(false)}>
+        {!retakeScheduling ? (
+          <>
+            <div className="flex items-center gap-2">
+              <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-purple-tint text-purple">
+                <ArrowsCounterClockwise size={18} weight="fill" />
+              </div>
+              <div className="font-display text-[17px] font-bold text-ink">Case retake</div>
+            </div>
+            <p className="mt-1.5 text-[12.5px] text-muted">A fresh case-taking after the remedy hasn't worked. The current notes stay on record as their own visit.</p>
+            {sortedCaseVisits[0] && (
+              <div className="mt-3 rounded-[10px] bg-tint-pale px-3 py-2 text-[12px] text-muted">
+                Last visit: {new Date(sortedCaseVisits[0].date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })} &middot; {sortedCaseVisits[0].remedy ?? 'no remedy recorded'}
+              </div>
+            )}
+            <div className="mt-3">
+              <Label>Reason for retake</Label>
+              <textarea
+                autoFocus
+                value={retakeReasonDraft}
+                onChange={(e) => setRetakeReasonDraft(e.target.value)}
+                placeholder="e.g. No improvement after 4 weeks"
+                rows={2}
+                className="mt-1.5 w-full resize-y rounded-[12px] border border-border bg-surface px-3 py-2 text-[13px] leading-relaxed text-body outline-none focus:border-purple-border"
+              />
+            </div>
+            <Pressable
+              hap="tick"
+              onClick={() => {
+                if (!retakeReasonDraft.trim()) return
+                startCaseRetake(patientId, retakeReasonDraft.trim())
+                setRetakeOpen(false)
+                onOpenCase(patientId)
+              }}
+              className={`mt-4 flex w-full items-center justify-center rounded-pill py-2.5 text-[13px] font-semibold text-screen ${retakeReasonDraft.trim() ? 'bg-purple' : 'bg-purple/40'}`}
+            >
+              Retake now — patient's with me
+            </Pressable>
+            <Pressable
+              hap="tick"
+              onClick={() => {
+                if (!retakeReasonDraft.trim()) return
+                setRetakeDoctorId(owningDoctor?.id ?? ME)
+                setRetakeScheduling(true)
+              }}
+              className={`mt-2 flex w-full items-center justify-center rounded-pill border py-2.5 text-[13px] font-semibold ${retakeReasonDraft.trim() ? 'border-purple-border text-purple' : 'border-border text-faint'}`}
+            >
+              Schedule for later
+            </Pressable>
+          </>
+        ) : (
+          <>
+            <Pressable hap="tick" onClick={() => setRetakeScheduling(false)} className="text-[13px] font-semibold text-brand">&larr; Back</Pressable>
+            <div className="mt-1 font-display text-[17px] font-bold text-ink">Schedule retake</div>
+            <div className="mt-3">
+              <Label>Doctor</Label>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {activePractitioners.map((p) => (
+                  <Chip key={p.id} selected={retakeDoctorId === p.id} onClick={() => setRetakeDoctorId(p.id)}>{p.name}</Chip>
+                ))}
+              </div>
+            </div>
+            <div className="mt-3">
+              <Label>Date</Label>
+              <input
+                type="date"
+                value={retakeDate}
+                min={addDaysISO(todayISO(), 1)}
+                onChange={(e) => setRetakeDate(e.target.value)}
+                className="mt-1.5 w-full rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-[13px] text-body outline-none focus:border-purple-border"
+                data-selectable="true"
+              />
+            </div>
+            <Button
+              variant="primary"
+              className="mt-4 w-full !bg-purple"
+              onClick={() => {
+                const time = firstAvailableMorningSlot(allAppointments, retakeDate)
+                scheduleFollowUpAction({
+                  patientId,
+                  practitionerId: retakeDoctorId,
+                  time,
+                  date: retakeDate,
+                  type: 'In person',
+                  reason: CASE_RETAKE_APPT_MARKER + retakeReasonDraft.trim(),
+                })
+                setRetakeOpen(false)
+                setRetakeScheduling(false)
+                haptic('success')
+                toast({ title: 'Retake scheduled', message: `${formatDayLabel(retakeDate)} · ${time}` })
+              }}
+            >
+              Book retake
+            </Button>
+          </>
+        )}
+      </BottomSheet>
+
+      {/* case history — version history across the original case-taking
+          and every retake since */}
+      <BottomSheet open={historyOpen} onClose={() => setHistoryOpen(false)}>
+        <div className="font-display text-[17px] font-bold text-ink">Case history &middot; {patient.name}</div>
+        {sortedCaseVisits.length === 0 ? (
+          <div className="py-8 text-center text-[13px] text-muted">No visits recorded yet.</div>
+        ) : (
+          <>
+            <div className="no-scrollbar mt-3 flex gap-2 overflow-x-auto pb-1">
+              {sortedCaseVisits.map((v) => (
+                <button
+                  key={v.id}
+                  onClick={() => setHistoryVisitId(v.id)}
+                  className={`shrink-0 rounded-[12px] border px-3 py-2 text-left ${historyVisitId === v.id ? 'border-green-border bg-tint' : 'border-border bg-surface'}`}
+                >
+                  <div className="text-[12px] font-semibold text-ink">{new Date(v.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</div>
+                  {v.isRetake && <Badge tone="purple">Retake</Badge>}
+                </button>
+              ))}
+            </div>
+            {(() => {
+              const visit = sortedCaseVisits.find((v) => v.id === historyVisitId)
+              if (!visit) return null
+              const viewSections = getSections((visit.template as CaseTemplateName) ?? 'chronic', customCaseTemplates)
+              const sections = visit.sections as Record<string, { fields?: Record<string, string>; chips?: Record<string, string[]> } | undefined>
+              return (
+                <div className="mt-3 max-h-[50vh] space-y-3 overflow-y-auto">
+                  {visit.isRetake && visit.retakeReason && (
+                    <div className="rounded-[10px] border border-purple-border bg-purple-tint px-3 py-2 text-[12.5px] text-purple">{visit.retakeReason}</div>
+                  )}
+                  {viewSections.map((s) => {
+                    const state = sections?.[s.id]
+                    const hasFields = Object.values(state?.fields ?? {}).some((v) => v?.trim())
+                    const hasChips = Object.values(state?.chips ?? {}).some((arr) => arr?.length)
+                    if (!hasFields && !hasChips) return null
+                    return (
+                      <div key={s.id}>
+                        <Label>{s.title}</Label>
+                        {s.fields.map((f) => {
+                          if (f.type === 'chips') {
+                            const selected = state?.chips?.[f.key] ?? []
+                            if (!selected.length) return null
+                            return (
+                              <div key={f.key} className="mt-1 flex flex-wrap gap-1.5">
+                                {selected.map((v) => <span key={v} className="rounded-pill bg-tint px-2 py-0.5 text-[11.5px] text-body">{v}</span>)}
+                              </div>
+                            )
+                          }
+                          const val = state?.fields?.[f.key] ?? ''
+                          if (!val.trim()) return null
+                          return <p key={f.key} className="mt-1 text-[12.5px] leading-relaxed text-body">{val}</p>
+                        })}
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })()}
+          </>
+        )}
       </BottomSheet>
     </div>
   )

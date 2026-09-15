@@ -3,6 +3,7 @@ import { todayISO, formatDayLabel } from './day'
 import { persist } from 'zustand/middleware'
 import type {
   Appointment,
+  AssignmentState,
   CaseVisit,
   ChatMessage,
   CheckIn,
@@ -1347,12 +1348,31 @@ export const useClinic = create<ClinicState>()(
       redeemInviteCode: async (code) => redeemInviteCodeDb(code),
 
       assignPatient: (patientId, practitionerId) => {
+        // Move the patient's still-open appointments (not yet seen or
+        // cancelled) onto the new doctor's calendar too — otherwise the
+        // whole point of reassigning is defeated: their upcoming visits
+        // stay stuck on the old doctor's schedule. Already-completed
+        // visits stay as-is; that's real history of who actually saw them.
+        const openStatuses: Appointment['status'][] = ['Upcoming', 'Waiting', 'New', 'Unassigned']
+        const movedApptIds = get().appointments
+          .filter((a) => a.patientId === patientId && openStatuses.includes(a.status))
+          .map((a) => a.id)
+        // Self-consistent relative to whoever is doing the assigning right
+        // now — informational only (nothing in the UI displays this
+        // anymore, see core/assignment.ts), kept for DB hygiene.
+        const newAssignment: AssignmentState = practitionerId === get().currentPractitionerId ? 'Mine' : 'Assigned out'
         set((s) => ({
           patients: s.patients.map((p) =>
-            p.id === patientId ? { ...p, owningPractitionerId: practitionerId, assignment: 'Assigned to me' as const } : p,
+            p.id === patientId ? { ...p, owningPractitionerId: practitionerId, assignment: newAssignment } : p,
+          ),
+          appointments: s.appointments.map((a) =>
+            movedApptIds.includes(a.id) ? { ...a, practitionerId } : a,
           ),
         }))
-        writeThrough(updatePatient(patientId, { owningPractitionerId: practitionerId, assignment: 'Assigned to me' }), 'Assignment may not have saved.')
+        writeThrough(updatePatient(patientId, { owningPractitionerId: practitionerId, assignment: newAssignment }), 'Assignment may not have saved.')
+        movedApptIds.forEach((id) =>
+          writeThrough(updateAppointmentDb(id, { practitioner_id: practitionerId }), "An appointment may not have moved to the new doctor's calendar."),
+        )
       },
 
       addDocument: (doc) => {

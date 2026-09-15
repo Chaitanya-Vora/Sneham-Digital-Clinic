@@ -380,10 +380,10 @@ export function PatientDetailScreen({
           )}
         </div>
 
-        {/* status row */}
+        {/* status row — who owns this patient's care lives in the Care
+            team card below now, not duplicated here */}
         <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
           {patient.currentRemedy && <Badge tone="green">{patient.currentRemedy}</Badge>}
-          <Badge tone={patient.assignment === 'Mine' ? 'neutral' : 'amber'}>{patient.assignment}</Badge>
           <span className="text-[11px] text-faint">Last seen: {patient.lastSeen}</span>
         </div>
 
@@ -454,7 +454,9 @@ export function PatientDetailScreen({
                 <div className="flex-1">
                   <div className="font-display text-[14px] font-semibold text-ink">Care team</div>
                   <div className="text-[12px] text-muted">
-                    {owningDoctor ? `Primary doctor: ${owningDoctor.name}` : 'Unassigned — open to the active team'}
+                    {owningDoctor
+                      ? `Primary doctor: ${owningDoctor.id === ME ? 'You' : owningDoctor.name}`
+                      : 'Unassigned — open to the active team'}
                   </div>
                 </div>
               </div>

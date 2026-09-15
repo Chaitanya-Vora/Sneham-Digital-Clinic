@@ -54,6 +54,7 @@ import {
   Copy,
 } from '@phosphor-icons/react'
 import { todayISO, formatDayLabel, addDaysISO } from '../core/day'
+import { ownerLabel, ownerTone, isMine, isUnassigned, isAssignedToOthers } from '../core/assignment'
 import { getSections, CASE_TEMPLATES } from '../core/caseTemplate'
 import { useClinic, type PublishRxInput } from '../core/store'
 import { useAuth } from '../auth/AuthProvider'
@@ -989,11 +990,13 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
   const archivedPatients = useMemo(() => allPatients.filter((p) => p.archivedAt), [allPatients])
   const practitioners = useClinic((s) => s.practitioners.filter((p) => p.status === 'active'))
   const assignPatient = useClinic((s) => s.assignPatient)
+  const ME = useClinic((s) => s.currentPractitionerId)
   const role = useClinic((s) => s.role)
   const rolePermissions = useClinic((s) => s.rolePermissions)
   const canAssign = hasRolePermission(role, rolePermissions, 'assignCases')
   const toast = useToast()
   const [active, setActive] = useState('My cases')
+  const [search, setSearch] = useState('')
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [activeFilters, setActiveFilters] = useState<string[]>([])
   const [selecting, setSelecting] = useState(false)
@@ -1010,21 +1013,24 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
   }, [menuFor])
 
   const filterChips = [
-    { label: 'Active cases', predicate: (p: Patient) => p.assignment === 'Mine' || p.assignment === 'Assigned to me' },
+    { label: 'Active cases', predicate: (p: Patient) => isMine(p, ME) },
     { label: 'Closed', predicate: (p: Patient) => p.lastOutcome === 'Clear improvement' },
     { label: 'New this month', predicate: (p: Patient) => p.lastSeen === 'Today' || p.lastSeen === 'Yesterday' || p.lastSeen === '2 days ago' },
-    { label: 'Has follow-up due', predicate: (p: Patient) => p.assignment === 'Mine' && p.currentRemedy !== null },
+    { label: 'Has follow-up due', predicate: (p: Patient) => isMine(p, ME) && p.currentRemedy !== null },
   ] as const
 
-  const unassignedCount = patients.filter((p) => p.assignment === 'Unassigned').length
-  const assignedToMe = patients.filter((p) => p.assignment === 'Assigned to me').length
-  const assignedOut = patients.filter((p) => p.assignment === 'Assigned out').length
-  const followUpDue = patients.filter((p) => p.assignment === 'Mine' && p.currentRemedy !== null).length
+  // Always derived live from owningPractitionerId relative to ME (see
+  // core/assignment.ts) — never from the stored Patient.assignment field,
+  // which can't mean the same thing to two different logged-in doctors.
+  const unassignedCount = patients.filter((p) => isUnassigned(p)).length
+  const mineCount = patients.filter((p) => isMine(p, ME)).length
+  const withOthersCount = patients.filter((p) => isAssignedToOthers(p, ME)).length
+  const followUpDue = patients.filter((p) => isMine(p, ME) && p.currentRemedy !== null).length
 
   const tabFilters = [
     ['My cases', patients.length] as const,
-    ['Assigned to me', assignedToMe] as const,
-    ['Assigned by me', assignedOut] as const,
+    ['Assigned to me', mineCount] as const,
+    ['With other doctors', withOthersCount] as const,
     ['Unassigned', unassignedCount] as const,
     ['Overdue follow-ups', followUpDue] as const,
     ['Archived', archivedPatients.length] as const,
@@ -1032,10 +1038,10 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
 
   const tabPredicate = (p: Patient): boolean => {
     switch (active) {
-      case 'Assigned to me': return p.assignment === 'Assigned to me'
-      case 'Assigned by me': return p.assignment === 'Assigned out'
-      case 'Unassigned': return p.assignment === 'Unassigned'
-      case 'Overdue follow-ups': return p.assignment === 'Mine' && p.currentRemedy !== null
+      case 'Assigned to me': return isMine(p, ME)
+      case 'With other doctors': return isAssignedToOthers(p, ME)
+      case 'Unassigned': return isUnassigned(p)
+      case 'Overdue follow-ups': return isMine(p, ME) && p.currentRemedy !== null
       default: return true
     }
   }
@@ -1043,7 +1049,13 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
   const toggleFilter = (label: string) =>
     setActiveFilters((fs) => fs.includes(label) ? fs.filter((f) => f !== label) : [...fs, label])
 
+  const searchQuery = search.trim().toLowerCase()
   const filtered = (active === 'Archived' ? archivedPatients : patients).filter((p) => {
+    if (searchQuery && !(
+      p.name.toLowerCase().includes(searchQuery) ||
+      p.wsCode.toLowerCase().includes(searchQuery) ||
+      (p.phone ?? '').toLowerCase().includes(searchQuery)
+    )) return false
     if (active === 'Archived') return true
     if (!tabPredicate(p)) return false
     if (activeFilters.length === 0) return true
@@ -1069,9 +1081,6 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
     setSelecting(false)
     setBulkAssignOpen(false)
   }
-
-  const toneFor = (a: string) =>
-    a === 'Mine' ? 'green' : a === 'Unassigned' ? 'amber' : a === 'Covering' ? 'purple' : 'neutral'
 
   return (
     <div className="space-y-4">
@@ -1101,6 +1110,21 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
           ))}
           <Button variant="primary" size="sm" onClick={onNewPatient}><Plus size={15} weight="bold" /> New patient</Button>
         </div>
+      </div>
+
+      <div className="flex items-center gap-2 rounded-pill border border-border bg-surface px-3.5 py-2.5">
+        <MagnifyingGlass size={15} className="text-faint" />
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search patients by name, code, or phone…"
+          className="w-full bg-transparent text-[13px] outline-none placeholder:text-faint"
+        />
+        {search && (
+          <button onClick={() => setSearch('')} className="text-faint hover:text-body">
+            <X size={14} weight="bold" />
+          </button>
+        )}
       </div>
 
       <AnimatePresence>
@@ -1174,7 +1198,7 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
             <div className="text-[13px] text-body">{p.chiefComplaint}</div>
             <div className="text-[13px] text-body">{p.currentRemedy ?? '—'}</div>
             <div className="text-[13px] text-muted">{p.lastSeen}</div>
-            <div><Badge tone={toneFor(p.assignment) as any}>{p.assignment}</Badge></div>
+            <div><Badge tone={ownerTone(p, ME)}>{ownerLabel(p, ME, practitioners)}</Badge></div>
             {canAssign && (
               <button
                 onClick={(e) => {
@@ -1973,16 +1997,16 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
             <h1 className="font-display text-[20px] font-bold text-ink">{patient.name}</h1>
             <div ref={assignRef}>
               {!hasRolePermission(role, rolePermissions, 'assignCases') ? (
-                <Badge tone={patient.assignment === 'Unassigned' ? 'amber' : patient.assignment === 'Mine' ? 'green' : 'neutral'}>
-                  {patient.assignment}
+                <Badge tone={ownerTone(patient, doctor?.id ?? null)}>
+                  {ownerLabel(patient, doctor?.id ?? null, activePractitioners)}
                 </Badge>
               ) : (
                 <button
                   onClick={openAssignDropdown}
                   className="group flex items-center gap-1"
                 >
-                  <Badge tone={patient.assignment === 'Unassigned' ? 'amber' : patient.assignment === 'Mine' ? 'green' : 'neutral'}>
-                    {patient.assignment}
+                  <Badge tone={ownerTone(patient, doctor?.id ?? null)}>
+                    {ownerLabel(patient, doctor?.id ?? null, activePractitioners)}
                   </Badge>
                   <PencilSimple size={12} weight="bold" className="text-faint opacity-0 transition group-hover:opacity-100" />
                 </button>
@@ -3080,6 +3104,7 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
   const practitioners = useClinic((s) => s.practitioners)
   const activePractitioners = useMemo(() => practitioners.filter((p) => p.status === 'active'), [practitioners])
   const invoices = useClinic((s) => s.invoices)
+  const ME = useClinic((s) => s.currentPractitionerId)
   const [period, setPeriod] = useState<'month' | 'year'>('year')
   const [exportOpen, setExportOpen] = useState(false)
   const exportRef = useRef<HTMLDivElement>(null)
@@ -3186,7 +3211,7 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
     const rows = patients.map((p) => ({
       code: p.wsCode, name: p.name, age: p.age, sex: p.sex, phone: p.phone ?? '', location: p.location,
       chiefComplaint: p.chiefComplaint, currentRemedy: p.currentRemedy ?? '', patientSince: p.patientSince,
-      lastSeen: p.lastSeen, assignment: p.assignment, allergies: p.allergies, regularMedication: p.regularMedication,
+      lastSeen: p.lastSeen, assignment: ownerLabel(p, ME, activePractitioners), allergies: p.allergies, regularMedication: p.regularMedication,
     }))
     downloadCsv(`sneham-patients-${todayISO()}.csv`, toCsv(rows, [
       { key: 'code', label: 'Patient Code' }, { key: 'name', label: 'Name' }, { key: 'age', label: 'Age' },

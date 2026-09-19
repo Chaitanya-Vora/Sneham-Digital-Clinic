@@ -8,6 +8,7 @@ import {
   Prescription as RxIcon,
   ArrowsClockwise,
   ChartLineUp,
+  CheckCircle,
   GearSix,
   MagnifyingGlass,
   Bell,
@@ -572,7 +573,7 @@ function TodayView({ onOpenPatient, onStartVideo, onOpenCalendarForPractitioner,
                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenPatient(a.patientId) } }}
                 whileHover={{ y: -1 }}
                 whileTap={{ scale: 0.99 }}
-                className={`flex w-full cursor-pointer items-center gap-4 rounded-[14px] border border-l-[3px] bg-surface px-4 py-3 text-left transition hover:bg-surface-hover hover:shadow-card ${a.type === 'Video' ? 'border-border border-l-amber' : 'border-border border-l-green-border'}`}
+                className={`group flex w-full cursor-pointer items-center gap-4 rounded-[14px] border border-l-[3px] bg-surface px-4 py-3 text-left transition hover:bg-surface-hover hover:shadow-card ${a.type === 'Video' ? 'border-border border-l-amber' : 'border-border border-l-green-border'}`}
               >
                 <div className="w-16 font-display text-[13px] font-semibold text-body">{a.time}</div>
                 <Avatar initials={p?.initials ?? '?'} size={38} />
@@ -607,7 +608,7 @@ function TodayView({ onOpenPatient, onStartVideo, onOpenCalendarForPractitioner,
                       useClinic.getState().updateAppointmentStatus(a.id, 'Cancelled')
                       toast({ title: 'Appointment cancelled', message: `${p?.name ?? 'Patient'}'s ${a.time} slot is now free.` })
                     }}
-                    className="rounded-full p-1.5 text-faint transition hover:bg-danger/10 hover:text-danger"
+                    className="rounded-full p-1.5 text-faint opacity-40 transition hover:bg-danger/10 hover:text-danger hover:opacity-100 group-hover:opacity-100 focus-visible:opacity-100"
                     title="Cancel appointment"
                   >
                     <X size={15} />
@@ -2684,6 +2685,11 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
   const [potency, setPotency] = useState<Potency>('200C')
   const [dose, setDose] = useState(4)
   const [duration, setDuration] = useState(14)
+  // Brief "Published!" state on the button itself before navigating away —
+  // this is a deliberate, occasional action (a few times a day per doctor),
+  // not a high-frequency one, so a short earned moment of confirmation is
+  // appropriate here in a way it wouldn't be on something tapped constantly.
+  const [justPublished, setJustPublished] = useState(false)
   const [rep, setRep] = useState<Repetition>('Once daily · night')
   const [prep, setPrep] = useState("Dissolve under the tongue at night, 15 minutes away from food, drink or mint. Tip into the cap — don't touch the globules.")
   // Starts empty — a channel only ever gets marked "shared" (see the chip
@@ -2828,12 +2834,15 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
       followUpNote = ` Follow-up auto-booked for ${formatDayLabel(followUpDate)} — reschedule any time from Follow-ups.`
     }
 
-    toast({
-      title: 'Prescription published',
-      message: `${remedy} ${potency} sent to ${patient.name}'s app${channels.length ? ` and ${channels.join(', ')}` : ''}.${followUpNote}`,
-      action: { label: 'Back to patient', onClick: onDone },
-    })
-    onDone()
+    setJustPublished(true)
+    setTimeout(() => {
+      toast({
+        title: 'Prescription published',
+        message: `${remedy} ${potency} sent to ${patient.name}'s app${channels.length ? ` and ${channels.join(', ')}` : ''}.${followUpNote}`,
+        action: { label: 'Back to patient', onClick: onDone },
+      })
+      onDone()
+    }, 550)
   }
 
   function onSave() {
@@ -3059,9 +3068,23 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
               ))}
             </div>
             <div className="flex gap-2">
-              <Button variant="ghost" className="flex-1" onClick={onSave}>Save — don't send yet</Button>
-              <Button variant="accent" className="flex-1" onClick={onPublish}>
-                <RxIcon size={17} weight="fill" /> Publish to patient app
+              <Button variant="ghost" className="flex-1" onClick={onSave} disabled={justPublished}>Save — don't send yet</Button>
+              <Button variant="accent" className="flex-1" onClick={onPublish} disabled={justPublished}>
+                {justPublished ? (
+                  <motion.span
+                    key="published"
+                    initial={{ scale: 0.6, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ type: 'spring', stiffness: 420, damping: 22 }}
+                    className="flex items-center gap-2"
+                  >
+                    <CheckCircle size={17} weight="fill" /> Published!
+                  </motion.span>
+                ) : (
+                  <>
+                    <RxIcon size={17} weight="fill" /> Publish to patient app
+                  </>
+                )}
               </Button>
             </div>
             <div className="flex justify-center">

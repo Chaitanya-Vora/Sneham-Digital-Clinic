@@ -15,7 +15,10 @@ export default {
         body: '#3F4738',
         'body-mid': '#5F6957',
         muted: '#6C7362',
-        faint: '#8C9280',
+        // Darkened from #8C9280 — the old value read at ~2.9:1 contrast
+        // against the app's own backgrounds (fails WCAG AA's 4.5:1 minimum
+        // for normal text). This clears AA on every surface the app uses.
+        faint: '#6C7063',
         // greens
         brand: '#41603C',
         accent: '#7A9B66',

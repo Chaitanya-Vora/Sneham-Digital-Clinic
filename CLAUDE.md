@@ -157,128 +157,20 @@ All 40 major tasks completed across sessions:
 
 ---
 
-## CRITICAL BUGS TO FIX (audit findings, prioritized)
+## Bug Backlog (reconciled 2026-09-19)
 
-### Priority 1 — Demo Breakers (9 bugs)
+This section used to list 39 "critical bugs" from a one-time early audit and was never updated as fixes landed — it sat stale for long enough that most of it stopped being true. Every item was re-checked directly against the current code (not against its own old description) and this section now reflects reality. Keep it that way: update an item here the same day it's actually fixed, don't let it drift again.
 
-**Bug 1: No realtime sync — messages/prescriptions never reach other phone**
-- File: `src/core/store.ts`
-- Problem: `hydrate()` is the only read path. Called at login + manual pull-to-refresh. No Supabase realtime subscriptions, no polling.
-- Fix: Add Supabase realtime subscription on key tables (messages, prescriptions, appointments) OR add 5-second polling interval in store.ts.
+**Fixed — 37 of the original 39.** All 9 Priority-1 "Demo Breaker" bugs, all 12 Priority-2 "High Severity" bugs, and all 12 Priority-3 "Medium Severity" bugs are gone, confirmed by reading the current code, not by assumption. 4 of the original 6 Priority-4 "Low/Design" items are also fixed (dead `TodayScreen` code removed; generic "Welcome back" replaced with a real time-of-day + name greeting; the invisible-button stray-tap issue on the calendar grid resolved; contrast on the `faint` text token fixed this session — see below).
 
-**Bug 2: Patient app picks wrong patient as "me" — it's patients[0]**
-- File: `src/patient/PatientApp.tsx` lines 75, 619-620, 1134-1135
-- Problem: `useClinic(s => s.patients[0])` — the most recently created patient. Adding a new patient from practitioner app hijacks identity.
-- Fix: Match logged-in user's auth ID to patient row. Store a `patientId` mapping in db.ts.
+### Still genuinely open
 
-**Bug 3: Patient signup creates a fake practitioner**
-- File: `src/core/db.ts` — `ensurePractitioner()` called in `hydrateAll()` line 849
-- Problem: Every user (including patients) goes through `ensurePractitioner()` which creates a practitioner record.
-- Fix: Gate practitioner creation on surface or role. Only create when `VITE_DEFAULT_SURFACE === 'practitioner'` or `'web'`.
+**Small tap targets.** 69 occurrences of 36px-or-smaller controls (`h-9 w-9`, `h-8 w-8`, `h-7 w-7`, `h-6 w-6`) across 19 files — below the 44px minimum touch-target guidance (Apple HIG / Android Material). Real examples: `src/practitioner/PractitionerApp.tsx:253,256,878` (search/notifications/back buttons at 36px), `src/practitioner/PatientQuickView.tsx:48,60`. This is a real, product-wide pass, not a quick fix — touches 19 files.
 
-**Bug 4: Cross-surface notifications never delivered**
-- File: `src/core/db.ts` and `src/core/store.ts`
-- Problem: Notifications are stamped with sender's user_id. `fetchNotifications(userId)` filters by the logged-in user's ID, so patient never sees practitioner's notifications and vice versa.
-- Fix: Write notifications under the recipient's user_id, not the sender's.
+**Type scale defined but unused.** `tailwind.config.js` has a real named scale (`hero`/`h1`/`h2`/`h3`/`paragraph`/`small`/`label`/`micro`), but nothing in `src/` actually uses it — zero hits for `text-hero`, `text-h1`, etc. 26 distinct one-off `text-[Npx]` sizes are used throughout instead. The scale exists to migrate to; the migration itself hasn't happened. Also a real, product-wide pass, not a one-liner.
 
-**Bug 5: "Prescribe" always lands on wrong patient**
-- File: `src/practitioner/PractitionerApp.tsx` — QuickRxScreen has no patientId prop
-- Problem: Navigating from case sheet → Prescribe loses patient context. The Rx screen doesn't know which patient.
-- Fix: Thread `patientId` into QuickRxScreen. Store selected patient in the tab navigation.
-
-**Bug 6: QuickRxScreen pre-filled with invented prescription**
-- File: `src/practitioner/PractitionerApp.tsx` — QuickRxScreen component
-- Problem: Remedy, potency, dose pre-selected on arrival. Publish button enabled immediately. One tap sends an invented prescription.
-- Fix: Start with empty/null fields. Disable Publish until remedy + patient selected.
-
-**Bug 7: Today tab shows ALL appointments, not just today**
-- File: `src/practitioner/TodayGrid.tsx`
-- Problem: No date filter. Past and future appointments all render.
-- Fix: Filter `appointments.filter(a => a.date === todayISO())` before rendering.
-
-**Bug 8: Calendar shows wrong day (UTC date shift)**
-- File: `src/practitioner/Calendar.tsx`
-- Problem: Date construction uses UTC methods, causing off-by-one when tapping calendar days.
-- Fix: Use `toISO()` helper from `src/core/day.ts` consistently for local date construction.
-
-**Bug 9: Empty DB wipes demo data on first pull-to-refresh**
-- File: `src/core/seed.ts` and `src/core/store.ts` hydrate action
-- Problem: Supabase DB is empty. `hydrate()` pulls empty arrays and overwrites seed data. All demo content vanishes.
-- Fix: Either (a) seed Supabase DB with demo data, or (b) merge hydrated data with seed data instead of replacing, or (c) skip overwrite when DB returns empty.
-
-### Priority 2 — High Severity (12 bugs)
-
-**Bug 10: No way to register a patient — AddPatientSheet never opens**
-- File: `src/practitioner/PractitionerApp.tsx` — `addPatientOpen` state exists but nothing sets it true
-- Fix: Add a "+" button to patient search or today screen.
-
-**Bug 11: Signup dead-ends — email confirmation can't return to APK**
-- File: `src/auth/AuthProvider.tsx`
-- Fix: Use Capacitor deep links for email confirmation redirect.
-
-**Bug 12: Jitsi joins room TWICE — audio howl**
-- File: `src/video/VideoConsult.tsx`
-- Fix: Guard against double-mount with a ref or strict-mode-safe cleanup.
-
-**Bug 13: Web "Join call" doesn't set In consult — patient Join stays dead**
-- File: `src/web/WebApp.tsx`
-- Fix: Call `startConsult(appointmentId)` when joining from web.
-
-**Bug 14: "Switch experience" button visible on patient APK**
-- File: `src/patient/PatientApp.tsx`
-- Fix: Hide when `Capacitor.isNativePlatform()`.
-
-**Bug 15: All writes are fire-and-forget — failures show success**
-- File: `src/core/store.ts`
-- Fix: Add try/catch with error toasts on key write paths.
-
-**Bug 16: "Next appointment" on patient home is newest, not soonest**
-- File: `src/patient/PatientApp.tsx`
-- Fix: Sort by date ascending, filter to future dates.
-
-**Bug 17: Share button broken on Android (Web Share API)**
-- File: `src/patient/PatientApp.tsx`
-- Fix: Use `@capacitor/share` (already a dependency) instead of `navigator.share`.
-
-**Bug 18: Consult timer frozen after first consult**
-- File: `src/practitioner/TodayGrid.tsx`
-- Fix: Null the interval ref in stopTimer, add unmount cleanup.
-
-**Bug 19: Grid view tapping patient does nothing**
-- File: `src/practitioner/TodayGrid.tsx`
-- Fix: Wire `openCase` and `markNoShow` callbacks to grid card onClick.
-
-**Bug 20: Check-in badge hardcodes "better"**
-- File: `src/practitioner/MobileFollowUp.tsx` line 66
-- Fix: Use `checkIn.marked` instead of the string literal.
-
-**Bug 21: disabled:opacity-40 makes CTAs dead on arrival (3+ screens)**
-- File: `src/design-system/ui.tsx` — Button base, also `src/auth/SignupScreen.tsx`, `src/auth/ForgotPasswordScreen.tsx`
-- Fix: Remove default disabled state or use a less aggressive opacity.
-
-### Priority 3 — Medium Severity (12 bugs)
-
-**Bug 22:** PDF export shows "failed" on share cancel (`src/patient/PatientApp.tsx`)
-**Bug 23:** "Export my data" dead on Android (`src/patient/PatientApp.tsx`)
-**Bug 24:** Voice note "Attached" is a lie — recording thrown away (`src/practitioner/MobileCaseSheet.tsx`)
-**Bug 25:** Case autosave fails silently (`src/components/CaseFields.tsx`)
-**Bug 26:** Section progress hardcoded to 6 (`src/components/CaseFields.tsx`)
-**Bug 27:** Check-in CTA disabled + pointer-events-none on arrival (`src/patient/PatientApp.tsx`)
-**Bug 28:** Calendar fabricates appointments for non-today dates (`src/practitioner/Calendar.tsx`)
-**Bug 29:** Booking uses hardcoded today + fake slots (`src/patient/PatientApp.tsx`)
-**Bug 30:** Reschedule options are all no-ops (`src/patient/PatientApp.tsx`)
-**Bug 31:** Mood picker invents precise improvement % (`src/patient/PatientApp.tsx`)
-**Bug 32:** Register form: empty submit gives no feedback (`src/practitioner/PatientSearch.tsx`)
-**Bug 33:** "Custom" follow-up books 1 week without date picker (`src/practitioner/PatientSearch.tsx`)
-
-### Priority 4 — Low / Design (6 bugs)
-
-**Bug 34:** Tap targets under 44px minimum (30+ controls)
-**Bug 35:** Low contrast on faint text tokens (2.66:1 vs 4.5:1 AA)
-**Bug 36:** 271 lines dead TodayScreen code in PractitionerApp.tsx
-**Bug 37:** "Welcome back" generic text still in patient home
-**Bug 38:** Grid background is invisible button (stray taps open Block time)
-**Bug 39:** No type scale in tailwind.config.js (19 distinct sizes)
+### Fixed this session
+- `faint` text color contrast raised from ~2.9:1 to ~4.5:1 against the app's own backgrounds (was failing WCAG AA) — `tailwind.config.js`.
 
 ---
 

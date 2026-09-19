@@ -6,11 +6,12 @@ import { AnimatePresence, motion, type PanInfo } from 'framer-motion'
 import { useRef, type ReactNode } from 'react'
 import { Minus, Plus, UsersThree } from '@phosphor-icons/react'
 import { haptic } from './haptics'
+import { springSnappy } from './motion'
 
 // ── Button ──
 type BtnVariant = 'primary' | 'accent' | 'ghost' | 'quiet' | 'danger'
 const btnBase =
-  'inline-flex items-center justify-center gap-2 font-display font-semibold rounded-pill transition active:scale-[0.97] disabled:opacity-60 disabled:pointer-events-none whitespace-nowrap'
+  'inline-flex items-center justify-center gap-2 font-display font-semibold rounded-pill transition disabled:opacity-60 disabled:pointer-events-none whitespace-nowrap'
 const btnVariants: Record<BtnVariant, string> = {
   primary: 'bg-brand text-screen hover:bg-[#37522f] shadow-cta',
   accent: 'bg-accent text-white hover:bg-accent-deep shadow-float',
@@ -28,17 +29,30 @@ export function Button({
   size = 'md',
   className = '',
   children,
+  disabled,
   ...rest
 }: {
   variant?: BtnVariant
   size?: keyof typeof btnSizes
   className?: string
   children: ReactNode
-} & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  // Framer Motion's own event handler types (onAnimationStart, onDrag, ...)
+  // collide with the native DOM ones of the same name — omit them here
+  // since none of this app's Button usages ever pass them.
+} & Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'onAnimationStart' | 'onAnimationEnd' | 'onDrag' | 'onDragStart' | 'onDragEnd'>) {
   return (
-    <button className={`${btnBase} ${btnVariants[variant]} ${btnSizes[size]} ${className}`} {...rest}>
+    // Same spring-based press feedback as the mobile app's Pressable
+    // (whileTap, not a CSS :active transition) — the two surfaces used to
+    // feel subtly different under the thumb; now they're the same motion.
+    <motion.button
+      whileTap={disabled ? undefined : { scale: 0.97 }}
+      transition={springSnappy}
+      disabled={disabled}
+      className={`${btnBase} ${btnVariants[variant]} ${btnSizes[size]} ${className}`}
+      {...rest}
+    >
       {children}
-    </button>
+    </motion.button>
   )
 }
 
@@ -71,16 +85,18 @@ export function Chip({
   className?: string
 }) {
   return (
-    <button
+    <motion.button
       onClick={onClick}
-      className={`rounded-pill px-3.5 py-2 text-[13px] font-body font-medium border transition active:scale-95 ${
+      whileTap={{ scale: 0.95 }}
+      transition={springSnappy}
+      className={`rounded-pill px-3.5 py-2 text-[13px] font-body font-medium border transition ${
         selected
           ? 'bg-tint text-ink-deep border-green-border'
           : 'bg-surface text-muted border-border hover:bg-surface-hover'
       } ${className}`}
     >
       {children}
-    </button>
+    </motion.button>
   )
 }
 

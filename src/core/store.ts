@@ -1163,12 +1163,21 @@ export const useClinic = create<ClinicState>()(
 
       endConsult: (appointmentId) => {
         const appt = get().appointments.find((a) => a.id === appointmentId)
+        // lastSeen used to be set once, at patient creation, and never
+        // touched again — every real patient just said "Today" forever,
+        // regardless of when they actually last came in. Recompute it here,
+        // the one place a visit is actually completed.
+        const lastSeen = appt ? formatDayLabel(appt.date) : undefined
         set((s) => ({
           appointments: s.appointments.map((a) =>
             a.id === appointmentId ? { ...a, status: 'Seen' as const } : a,
           ),
+          patients: appt && lastSeen
+            ? s.patients.map((p) => (p.id === appt.patientId ? { ...p, lastSeen } : p))
+            : s.patients,
         }))
         writeThrough(updateAppointmentDb(appointmentId, { status: 'Seen' }), 'Consult status may not have saved.')
+        if (appt && lastSeen) writeThrough(updatePatient(appt.patientId, { lastSeen }), "Patient's last-seen date may not have saved.")
         if (appt) get().snapshotCaseVisit(appt.patientId, appointmentId)
       },
 

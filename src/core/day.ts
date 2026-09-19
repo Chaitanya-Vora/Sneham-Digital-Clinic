@@ -107,6 +107,24 @@ export function normaliseDayValue(raw: string | null | undefined): ISODate {
   return today
 }
 
+/** Minutes since midnight for a "9:30 AM"-style time string — for sorting
+ *  appointments within a single day. */
+export function minutesFromMidnight(time: string): number {
+  const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(time.trim())
+  if (!m) return 0
+  let h = Number(m[1]) % 12
+  if (m[3].toUpperCase() === 'PM') h += 12
+  return h * 60 + Number(m[2])
+}
+
+/** Chronological sort key combining an ISO date and a "9:30 AM" time string —
+ *  comparing `time` strings alone (e.g. "10:00 AM".localeCompare("9:30 AM"))
+ *  sorts lexicographically, not chronologically, and silently ignores the
+ *  date entirely, so a slot next week can read as "sooner" than one today. */
+export function dateTimeKey(date: ISODate, time: string): number {
+  return fromISO(date).getTime() + minutesFromMidnight(time) * 60000
+}
+
 /** Half-hour morning slots offered when auto-booking a follow-up, in order. */
 export const MORNING_SLOTS = ['9:00 AM', '9:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM', '12:00 PM']
 

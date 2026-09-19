@@ -55,7 +55,7 @@ import {
   VideoCamera,
   Copy,
 } from '@phosphor-icons/react'
-import { todayISO, formatDayLabel, addDaysISO } from '../core/day'
+import { todayISO, formatDayLabel, addDaysISO, dateTimeKey } from '../core/day'
 import { ownerLabel, ownerTone, isMine, isUnassigned, isAssignedToOthers } from '../core/assignment'
 import { getSections, CASE_TEMPLATES } from '../core/caseTemplate'
 import { useClinic, CASE_RETAKE_APPT_MARKER, type PublishRxInput } from '../core/store'
@@ -145,7 +145,11 @@ export function WebApp() {
   const patients = useClinic((s) => s.patients)
   const unread = useClinic((s) => s.notifications.filter((n) => n.surface === 'web' && !n.read).length)
   const unreadMessages = useClinic((s) => s.messages.filter((m) => m.sender === 'patient' && !m.read).length)
-  const todayAppts = useClinic((s) => s.appointments.filter((a) => a.date === todayISO()))
+  // Matches TodayView's own scope below (your schedule, not cancelled
+  // appointments) — this header used to count every appointment for today
+  // across the whole clinic, cancelled ones included, while the stat cards
+  // right under it showed a different, smaller number for the same day.
+  const todayAppts = useClinic((s) => s.appointments.filter((a) => a.date === todayISO() && a.status !== 'Cancelled' && a.practitionerId === s.currentPractitionerId))
   const toast = useToast()
 
   // Every hook in this component must run unconditionally, before any early
@@ -403,7 +407,7 @@ export function WebApp() {
       <ToastHost />
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} commands={commands} />
       <AnimatePresence>
-        {newPatientOpen && <NewPatientModal onClose={() => setNewPatientOpen(false)} />}
+        {newPatientOpen && <NewPatientModal onClose={() => setNewPatientOpen(false)} onOpenPatient={openPatient} />}
         {instantMeetingOpen && (
           <InstantMeetingModal
             onClose={() => setInstantMeetingOpen(false)}
@@ -1317,7 +1321,7 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
                   <Avatar initials={pr.initials} size={36} />
                   <div className="flex-1">
                     <div className="font-display text-[14px] font-semibold text-ink">{pr.name}</div>
-                    <div className="text-[12px] text-muted">{pr.specialty} · {pr.openCases} open cases</div>
+                    <div className="text-[12px] text-muted">{pr.specialty} · {patients.filter((p) => p.owningPractitionerId === pr.id).length} open cases</div>
                   </div>
                   <CaretRight size={14} className="text-faint" />
                 </button>
@@ -1889,6 +1893,7 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
   // assignment dropdown further down uses its own active-only list instead.
   const practitioners = useClinic((s) => s.practitioners)
   const activePractitioners = useMemo(() => practitioners.filter((p) => p.status === 'active'), [practitioners])
+  const allPatients = useClinic((s) => s.patients)
   const doctor = useClinic((s) => s.practitioners.find((p) => p.id === s.currentPractitionerId))
   const assignPatient = useClinic((s) => s.assignPatient)
   const createHandoff = useClinic((s) => s.createHandoff)
@@ -1959,7 +1964,17 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
     ['Chief complaint', patient.chiefComplaint],
     ['Current remedy', patient.currentRemedy ?? 'None yet'],
     ['Last outcome', patient.lastOutcome ?? '—'],
-    ['Next follow-up', (() => { const fa = appointments.filter(a => a.patientId === patient.id && a.status === 'Upcoming').sort((a, b) => a.time.localeCompare(b.time))[0]; return fa ? `${formatDayLabel(fa.date)} · ${fa.time}` : 'Not scheduled' })()],
+    ['Next follow-up', (() => {
+      // Only appointments actually booked as a follow-up, soonest first —
+      // this used to sort by the raw time-of-day text (so "10:00 AM" next
+      // week could outrank "9:30 AM" today, since "1" sorts before "9"),
+      // and didn't check `reason` at all, so any upcoming visit could show
+      // here mislabeled as the "next follow-up".
+      const fa = appointments
+        .filter((a) => a.patientId === patient.id && a.status === 'Upcoming' && a.reason?.toLowerCase().includes('follow'))
+        .sort((a, b) => dateTimeKey(a.date, a.time) - dateTimeKey(b.date, b.time))[0]
+      return fa ? `${formatDayLabel(fa.date)} · ${fa.time}` : 'Not scheduled'
+    })()],
   ]
 
   // Invoice history — real invoices for this patient, most recent first.
@@ -2184,7 +2199,9 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
           <HandoffDrawer
             patientId={patientId}
             fromId={doctor?.id ?? ''}
-            practitioners={activePractitioners.filter((p) => p.id !== doctor?.id)}
+            practitioners={activePractitioners
+              .filter((p) => p.id !== doctor?.id)
+              .map((p) => ({ ...p, openCases: allPatients.filter((pt) => pt.owningPractitionerId === p.id && !pt.archivedAt).length }))}
             onClose={() => setHandoffOpen(false)}
             onSend={(toId, watchFor) => {
               createHandoff({
@@ -3382,11 +3399,14 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
   })()
   const maxRemedy = Math.max(...remedyCount.map(([, c]) => c), 1)
 
-  const practitionerLoad = activePractitioners.map((p) => ({
-    name: p.name.replace('Dr. ', ''),
-    cases: p.openCases,
-    patients: patients.filter((pt) => pt.owningPractitionerId === p.id).length,
-  }))
+  // `openCases` on the practitioner record itself is never written anywhere
+  // in the app (it's stuck at whatever it was seeded/created with) — this
+  // counts live from patients instead, the same way the unused `patients`
+  // field below already did.
+  const practitionerLoad = activePractitioners.map((p) => {
+    const openCases = patients.filter((pt) => pt.owningPractitionerId === p.id && !pt.archivedAt).length
+    return { name: p.name.replace('Dr. ', ''), cases: openCases, patients: openCases }
+  })
   const maxCases = Math.max(...practitionerLoad.map((p) => p.cases), 1)
 
   // Real, back-of-the-clinic data — plain CSV, opens in Excel/Sheets/Numbers.
@@ -4105,7 +4125,7 @@ function SettingsView() {
                 </div>
               </div>
               <Badge tone={pr.role === 'Owner' ? 'green' : 'neutral'}>{pr.role}</Badge>
-              <div className="text-[12px] text-faint">{pr.openCases} open cases</div>
+              <div className="text-[12px] text-faint">{patients.filter((p) => p.owningPractitionerId === pr.id && !p.archivedAt).length} open cases</div>
               {role === 'Owner' && pr.role !== 'Owner' && (
                 <button
                   onClick={() => {
@@ -4517,14 +4537,34 @@ function InstantMeetingModal({ onClose, onStart }: { onClose: () => void; onStar
 }
 
 // ── NEW PATIENT MODAL ──
-function NewPatientModal({ onClose }: { onClose: () => void }) {
+// Same name, ignoring case/spacing and a leading title — "Dr Ritu Shah" and
+// "dr.  ritu   shah" should be caught as the same possible match, since
+// those are exactly the kind of near-identical spellings a practitioner
+// re-typing a name from memory would produce.
+function normalisePatientName(name: string): string {
+  return name.trim().toLowerCase().replace(/^(dr|mr|mrs|ms|miss)\.?\s+/, '').replace(/\s+/g, ' ')
+}
+
+function NewPatientModal({ onClose, onOpenPatient }: { onClose: () => void; onOpenPatient: (id: string) => void }) {
   const addPatient = useClinic((s) => s.addPatient)
+  const allPatients = useClinic((s) => s.patients)
   const toast = useToast()
   const [form, setForm] = useState({ name: '', age: '', sex: 'Female' as Patient['sex'], phone: '', chiefComplaint: '', location: '', referralSource: undefined as Patient['referralSource'] })
-  const set = (key: string, value: string) => setForm((f) => ({ ...f, [key]: value }))
+  const [nameConfirmed, setNameConfirmed] = useState(false)
+  const set = (key: string, value: string) => {
+    setForm((f) => ({ ...f, [key]: value }))
+    if (key === 'name') setNameConfirmed(false)
+  }
+
+  const possibleDuplicates = useMemo(() => {
+    const needle = normalisePatientName(form.name)
+    if (!needle) return []
+    return allPatients.filter((p) => !p.archivedAt && normalisePatientName(p.name) === needle)
+  }, [allPatients, form.name])
 
   const onSubmit = () => {
     if (!form.name.trim() || !form.chiefComplaint.trim()) return
+    if (possibleDuplicates.length > 0 && !nameConfirmed) return
     const p = addPatient({
       name: form.name.trim(),
       age: parseInt(form.age) || 0,
@@ -4539,7 +4579,6 @@ function NewPatientModal({ onClose }: { onClose: () => void }) {
   }
 
   const fields = [
-    { key: 'name', label: 'Full name', placeholder: 'e.g. Priya Sharma', required: true },
     { key: 'age', label: 'Age', placeholder: 'e.g. 34', type: 'number' },
     { key: 'phone', label: 'Phone', placeholder: '+91 98765 43210' },
     { key: 'chiefComplaint', label: 'Chief complaint', placeholder: 'e.g. Chronic migraine', required: true },
@@ -4567,6 +4606,37 @@ function NewPatientModal({ onClose }: { onClose: () => void }) {
           <button onClick={onClose} className="text-faint hover:text-body"><X size={18} weight="bold" /></button>
         </div>
         <div className="space-y-4">
+          <div>
+            <Label>Full name *</Label>
+            <input
+              value={form.name}
+              onChange={(e) => set('name', e.target.value)}
+              placeholder="e.g. Priya Sharma"
+              className="mt-1.5 w-full rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-[13px] text-body outline-none placeholder:text-faint focus:border-green-border"
+            />
+            {possibleDuplicates.length > 0 && (
+              <div className="mt-2 rounded-[12px] border border-amber-border bg-amber-tint px-3.5 py-3">
+                <div className="text-[12.5px] font-semibold text-amber-text">
+                  {possibleDuplicates.length === 1 ? 'A patient with this name already exists' : `${possibleDuplicates.length} patients with this name already exist`}
+                </div>
+                <div className="mt-1.5 space-y-1">
+                  {possibleDuplicates.slice(0, 3).map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => { onClose(); onOpenPatient(p.id) }}
+                      className="block w-full truncate text-left text-[12px] text-amber-text underline decoration-amber-text/40 decoration-1 underline-offset-2 hover:decoration-amber-text"
+                    >
+                      {p.name} · {p.age} {p.sex} · {p.wsCode}
+                    </button>
+                  ))}
+                </div>
+                <label className="mt-2.5 flex items-center gap-2 text-[12px] font-medium text-amber-text">
+                  <input type="checkbox" checked={nameConfirmed} onChange={(e) => setNameConfirmed(e.target.checked)} className="h-3.5 w-3.5 accent-amber-text" />
+                  This is a different person — add as a new patient
+                </label>
+              </div>
+            )}
+          </div>
           {fields.map((f) => (
             <div key={f.key}>
               <Label>{f.label}{f.required ? ' *' : ''}</Label>
@@ -4604,8 +4674,13 @@ function NewPatientModal({ onClose }: { onClose: () => void }) {
         </div>
         <div className="mt-6 flex justify-end gap-2">
           <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" size="sm" onClick={onSubmit} className={!form.name.trim() || !form.chiefComplaint.trim() ? 'opacity-50' : ''}>
-            <Plus size={15} weight="bold" /> Add patient
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={onSubmit}
+            className={!form.name.trim() || !form.chiefComplaint.trim() || (possibleDuplicates.length > 0 && !nameConfirmed) ? 'opacity-50' : ''}
+          >
+            <Plus size={15} weight="bold" /> {possibleDuplicates.length > 0 ? 'Add anyway' : 'Add patient'}
           </Button>
         </div>
       </motion.div>

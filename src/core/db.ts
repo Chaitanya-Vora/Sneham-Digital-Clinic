@@ -174,10 +174,30 @@ export async function ensurePractitioner(userId: string, userName: string, userE
     rxTemplates: [],
   }
 
-  await supabase.from('practitioners').insert(toDbPractitioner(practitioner, userId))
-  await supabase.from('profiles').update({ practitioner_id: id }).eq('id', userId)
+  // The select above and this insert aren't atomic, so two calls racing for
+  // the same brand-new user (e.g. a background refresh firing alongside the
+  // real sign-in) can both reach this point. A DB-level unique constraint on
+  // auth_user_id plus upsert/ignoreDuplicates makes the loser's insert a
+  // no-op instead of a second row — the re-select below then always returns
+  // whichever row actually won, real name or not.
+  const { error: insertError } = await supabase
+    .from('practitioners')
+    .upsert(toDbPractitioner(practitioner, userId), { onConflict: 'auth_user_id', ignoreDuplicates: true })
+  if (insertError) console.error('ensurePractitioner insert:', insertError.message)
 
-  return practitioner
+  const { data: final, error: finalError } = await supabase
+    .from('practitioners')
+    .select('*')
+    .eq('auth_user_id', userId)
+    .order('created_at', { ascending: true })
+    .limit(1)
+  if (finalError || !final || final.length === 0) {
+    console.error('ensurePractitioner re-select:', finalError?.message ?? 'no row')
+    return practitioner
+  }
+
+  await supabase.from('profiles').update({ practitioner_id: final[0].id }).eq('id', userId)
+  return toAppPractitioner(final[0])
 }
 
 // Both go through security-definer RPCs, not a raw update — status/role on

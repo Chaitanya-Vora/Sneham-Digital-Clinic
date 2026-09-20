@@ -408,7 +408,9 @@ export function TodayGrid({
                                 >
                                   <span className="w-14 shrink-0 text-[12px] font-semibold text-body">{a.time}</span>
                                   <span className="min-w-0 flex-1 truncate text-[12px] text-ink">{pt?.name ?? 'Patient'}</span>
-                                  <Badge tone={a.status === 'In consult' ? 'green' : 'neutral'}>{a.status}</Badge>
+                                  {a.status !== 'Upcoming' && (
+                                    <Badge tone={a.status === 'In consult' ? 'green' : 'neutral'}>{a.status}</Badge>
+                                  )}
                                 </Pressable>
                               )
                             })}
@@ -763,7 +765,9 @@ function ListView({
                 </div>
               </div>
               <div className="flex flex-col items-end gap-1.5" onClick={(ev) => ev.stopPropagation()}>
-                <Badge tone={a.status === 'In consult' ? 'green' : a.status === 'New' ? 'amber' : a.status === 'Waiting' ? 'amber' : 'neutral'}>{a.status}</Badge>
+                {a.status !== 'Upcoming' && (
+                  <Badge tone={a.status === 'In consult' ? 'green' : a.status === 'New' ? 'amber' : a.status === 'Waiting' ? 'amber' : 'neutral'}>{a.status}</Badge>
+                )}
                 {canStart && (
                   <Pressable hap="impact" onClick={() => onStartConsult(a.id)} className="flex items-center gap-1 rounded-pill bg-brand px-2.5 py-1 text-[11px] font-semibold text-screen">
                     <Play size={10} weight="fill" /> Start

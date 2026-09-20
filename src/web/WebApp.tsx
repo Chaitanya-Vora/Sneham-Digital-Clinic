@@ -589,7 +589,7 @@ function TodayView({ onOpenPatient, onStartVideo, onOpenCalendarForPractitioner,
                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenPatient(a.patientId) } }}
                 whileHover={{ y: -1 }}
                 whileTap={{ scale: 0.99 }}
-                className={`group flex w-full cursor-pointer items-center gap-4 rounded-[14px] border border-l-[3px] bg-surface px-4 py-3 text-left transition hover:bg-surface-hover hover:shadow-card ${a.type === 'Video' ? 'border-border border-l-amber' : 'border-border border-l-green-border'}`}
+                className="group flex w-full cursor-pointer items-center gap-4 rounded-[14px] border border-border bg-surface px-4 py-3 text-left transition hover:bg-surface-hover hover:shadow-card"
               >
                 <div className="w-16 font-display text-[13px] font-semibold text-body">{a.time}</div>
                 <Avatar initials={p?.initials ?? '?'} size={38} />
@@ -615,7 +615,9 @@ function TodayView({ onOpenPatient, onStartVideo, onOpenCalendarForPractitioner,
                 )}
                 {apptInvoice && apptInvoice.amountReceived > 0 && <Badge tone="green">₹{apptInvoice.amountReceived.toLocaleString('en-IN')}</Badge>}
                 <Badge tone={a.type === 'Video' ? 'amber' : 'green'}>{a.type}</Badge>
-                <Badge tone={a.status === 'In consult' ? 'green' : 'neutral'}>{a.status}</Badge>
+                {a.status !== 'Upcoming' && (
+                  <Badge tone={a.status === 'In consult' ? 'green' : 'neutral'}>{a.status}</Badge>
+                )}
                 {a.status !== 'Seen' && a.status !== 'In consult' && (
                   <button
                     onClick={(e) => {
@@ -671,7 +673,9 @@ function TodayView({ onOpenPatient, onStartVideo, onOpenCalendarForPractitioner,
                             <span className="w-14 text-[12.5px] font-semibold text-body">{a.time}</span>
                             <span className="flex-1 truncate text-[12.5px] text-ink">{pt?.name ?? 'Patient'}</span>
                             <span className="truncate text-[11.5px] text-faint">{a.reason}</span>
-                            <Badge tone={a.status === 'In consult' ? 'green' : 'neutral'}>{a.status}</Badge>
+                            {a.status !== 'Upcoming' && (
+                              <Badge tone={a.status === 'In consult' ? 'green' : 'neutral'}>{a.status}</Badge>
+                            )}
                           </button>
                         )
                       })}

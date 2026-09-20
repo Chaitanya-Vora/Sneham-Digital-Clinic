@@ -22,7 +22,7 @@ import {
   CurrencyInr,
   DotsThreeVertical,
 } from '@phosphor-icons/react'
-import { todayISO, toISO, formatDayLabel, firstAvailableMorningSlot, isPastISO, isTodayISO } from '../core/day'
+import { todayISO, toISO, formatDayLabel, firstAvailableMorningSlot, isPastISO, isTodayISO, followUpPresetDate, FOLLOW_UP_PRESETS, type FollowUpPreset } from '../core/day'
 import { useClinic } from '../core/store'
 import type { Appointment, TimeBlock } from '../core/types'
 import { Avatar, Badge, BottomSheet, Card, Chip, Label } from '../design-system/ui'
@@ -190,15 +190,8 @@ export function TodayGrid({
     if (appt) setFollowUpSheet(appt.patientId)
   }
 
-  function handleScheduleFollowUp(patientId: string, preset: string) {
-    const now = new Date()
-    const addDays = (d: number) => { const dt = new Date(now); dt.setDate(dt.getDate() + d); return toISO(dt) }
-    const dayMap: Record<string, string> = {
-      '1 week': addDays(7),
-      '2 weeks': addDays(14),
-      '1 month': addDays(30),
-    }
-    const date = dayMap[preset] ?? preset
+  function handleScheduleFollowUp(patientId: string, preset: FollowUpPreset) {
+    const date = followUpPresetDate(preset)
     const time = firstAvailableMorningSlot(appts, date)
     scheduleFollowUp({ patientId, practitionerId: ME, time, date, type: 'In person', reason: 'Follow-up' })
     haptic('success')
@@ -802,14 +795,14 @@ function EndConsultSheet({ open, timerStr, onClose, onConfirm }: { open: boolean
   )
 }
 
-function FollowUpSheet({ open, patientName, onClose, onSelect }: { open: boolean; patientName: string; onClose: () => void; onSelect: (preset: string) => void }) {
+export function FollowUpSheet({ open, patientName, onClose, onSelect }: { open: boolean; patientName: string; onClose: () => void; onSelect: (preset: FollowUpPreset) => void }) {
   return (
     <BottomSheet open={open} onClose={onClose}>
       <div className="space-y-3">
         <div className="font-display text-[17px] font-bold text-ink">Schedule follow-up</div>
         <div className="text-[12.5px] text-muted">For {patientName}</div>
         <div className="space-y-2">
-          {['1 week', '2 weeks', '1 month'].map((preset) => (
+          {FOLLOW_UP_PRESETS.map((preset) => (
             <Pressable key={preset} as="div" hap="tick" scale={0.98} onClick={() => onSelect(preset)} className="flex cursor-pointer items-center gap-3 rounded-[16px] border border-border bg-surface px-4 py-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-[12px] bg-tint text-brand"><CalendarPlus size={20} weight="fill" /></div>
               <div className="flex-1 text-[14px] font-semibold text-ink">In {preset}</div>

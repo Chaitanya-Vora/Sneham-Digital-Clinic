@@ -1160,7 +1160,7 @@ function AppointmentsScreen({ onRefresh, patientId }: { onRefresh: () => Promise
                       {apt.reason && ` · ${apt.reason}`}
                     </div>
                   </div>
-                  <Badge tone={statusTone(apt.status)}>{apt.status}</Badge>
+                  {apt.status !== 'Upcoming' && <Badge tone={statusTone(apt.status)}>{apt.status}</Badge>}
                 </div>
                 {apt.tag && <div className="mt-1.5 text-[12px] text-faint">{apt.tag}</div>}
                 {apt.status === 'In consult' && (

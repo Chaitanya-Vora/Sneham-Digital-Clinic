@@ -1,11 +1,14 @@
 import { useState, useMemo, useEffect } from 'react'
-import { CheckCircle, Circle, CircleNotch, Prescription as RxIcon, FloppyDisk, CloudCheck, DeviceMobile, PencilSimpleLine, ClockCounterClockwise, NotePencil, Eye, WarningCircle, Plus, ArrowsCounterClockwise } from '@phosphor-icons/react'
+import { CheckCircle, Circle, CircleNotch, Prescription as RxIcon, FloppyDisk, CloudCheck, DeviceMobile, PencilSimpleLine, ClockCounterClockwise, NotePencil, Eye, WarningCircle, Plus, ArrowsCounterClockwise, CalendarPlus } from '@phosphor-icons/react'
 import { useClinic } from '../core/store'
 import { allTemplates, type CaseTemplateName, type SectionState, getSections } from '../core/caseTemplate'
+import { followUpPresetDate, firstAvailableMorningSlot, formatDayLabel, type FollowUpPreset } from '../core/day'
 import { Badge, Button, Card, Chip, Label, PatientNotFound } from '../design-system/ui'
 import { VoiceRecorder } from '../design-system/VoiceRecorder'
+import { useToast } from '../design-system/toast'
 import { CaseFieldEditor, sectionHasContent, useCaseProgress, useCaseSaveStatus } from '../components/CaseFields'
 import { CaseTemplateEditorModal } from './CaseTemplateEditor'
+import { FollowUpPresetMenu } from './FollowUpPresetMenu'
 
 function VisitHistoryPanel({
   sections,
@@ -171,6 +174,19 @@ export function CaseSheet({
   const [editingVisit, setEditingVisit] = useState(false)
   const [editingTemplate, setEditingTemplate] = useState<'new' | string | null>(null)
   const updateCaseVisit = useClinic((s) => s.updateCaseVisit)
+  const [followUpOpen, setFollowUpOpen] = useState(false)
+  const scheduleFollowUp = useClinic((s) => s.scheduleFollowUp)
+  const appts = useClinic((s) => s.appointments)
+  const currentPractitionerId = useClinic((s) => s.currentPractitionerId)
+  const toast = useToast()
+
+  function handleScheduleFollowUp(preset: FollowUpPreset) {
+    const date = followUpPresetDate(preset)
+    const time = firstAvailableMorningSlot(appts, date)
+    scheduleFollowUp({ patientId, practitionerId: currentPractitionerId, time, date, type: 'In person', reason: 'Follow-up' })
+    toast({ title: `Follow-up scheduled · ${formatDayLabel(date)} · ${time}` })
+    setFollowUpOpen(false)
+  }
 
   useEffect(() => {
     if (!caseState) ensureCase(patientId)
@@ -220,6 +236,12 @@ export function CaseSheet({
           >
             <FloppyDisk size={15} /> Save snapshot
           </Button>
+          <div className="relative">
+            <Button variant="ghost" size="sm" onClick={() => setFollowUpOpen((v) => !v)}>
+              <CalendarPlus size={15} /> Schedule follow-up
+            </Button>
+            <FollowUpPresetMenu open={followUpOpen} onClose={() => setFollowUpOpen(false)} onSelect={handleScheduleFollowUp} />
+          </div>
           <Button variant="primary" size="sm" onClick={onPrescribe}>
             <RxIcon size={15} weight="fill" /> Write prescription
           </Button>

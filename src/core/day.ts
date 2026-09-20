@@ -19,6 +19,19 @@ export function toISO(d: Date): ISODate {
   return `${y}-${m}-${day}`
 }
 
+export type FollowUpPreset = '1 week' | '2 weeks' | '1 month'
+export const FOLLOW_UP_PRESETS: FollowUpPreset[] = ['1 week', '2 weeks', '1 month']
+
+/** Shared with every "schedule a follow-up" entry point (Today tab, patient
+ *  profile, case sheet, follow-up review) so "2 weeks" means the same date
+ *  everywhere, computed once instead of four slightly-driftable copies. */
+export function followUpPresetDate(preset: FollowUpPreset, from: Date = new Date()): ISODate {
+  const days = { '1 week': 7, '2 weeks': 14, '1 month': 30 }[preset]
+  const dt = new Date(from)
+  dt.setDate(dt.getDate() + days)
+  return toISO(dt)
+}
+
 export function todayISO(): ISODate {
   return toISO(new Date())
 }

@@ -2,10 +2,12 @@ import { useState } from 'react'
 import { CaretLeft, TrendUp, Handshake, FloppyDisk, Check } from '@phosphor-icons/react'
 import { useClinic } from '../core/store'
 import type { CheckIn, OutcomeKind } from '../core/types'
-import { addDaysISO, todayISO, formatDayLabel } from '../core/day'
+import { addDaysISO, todayISO, formatDayLabel, followUpPresetDate, firstAvailableMorningSlot, type FollowUpPreset } from '../core/day'
 import { Badge, BottomSheet, Button, Card, Chip, Label } from '../design-system/ui'
 import { Pressable } from '../design-system/Pressable'
 import { haptic } from '../design-system/haptics'
+import { useToast } from '../design-system/toast'
+import { FollowUpSheet } from './TodayGrid'
 
 const OUTCOMES: OutcomeKind[] = ['Clear improvement', 'Partial', 'No change', 'Aggravation', 'Changed remedy']
 // Compare data is derived from case visits — no hardcoded mock
@@ -32,6 +34,9 @@ export function MobileFollowUp({
   const caseVisits = useClinic((s) => s.caseVisits.filter((v) => v.patientId === patientId).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()))
   const saveOutcome = useClinic((s) => s.saveOutcome)
   const createHandoff = useClinic((s) => s.createHandoff)
+  const scheduleFollowUp = useClinic((s) => s.scheduleFollowUp)
+  const appts = useClinic((s) => s.appointments)
+  const toast = useToast()
 
   const [outcome, setOutcome] = useState<OutcomeKind>('Partial')
   const [note, setNote] = useState(patient?.currentRemedy ? `Continue ${patient.currentRemedy}; review in two weeks.` : '')
@@ -40,6 +45,17 @@ export function MobileFollowUp({
   const [handoffReason, setHandoffReason] = useState('')
   const [coveringUntilDate, setCoveringUntilDate] = useState(addDaysISO(todayISO(), 7))
   const [saved, setSaved] = useState(false)
+  const [offerFollowUp, setOfferFollowUp] = useState(false)
+
+  function handleScheduleFollowUp(preset: FollowUpPreset) {
+    const date = followUpPresetDate(preset)
+    const time = firstAvailableMorningSlot(appts, date)
+    scheduleFollowUp({ patientId, practitionerId: doctorId, time, date, type: 'In person', reason: 'Follow-up' })
+    haptic('success')
+    toast({ title: `Follow-up scheduled · ${formatDayLabel(date)} · ${time}` })
+    setOfferFollowUp(false)
+    onDone()
+  }
 
   if (!patient) return (
     <div className="flex h-full items-center justify-center bg-screen">
@@ -192,9 +208,17 @@ export function MobileFollowUp({
           </div>
           <div className="mt-3 font-display text-[18px] font-bold text-ink">Outcome saved</div>
           <div className="mt-1 text-[13px] text-muted">{outcome} recorded for {patient.name}.</div>
-          <Button variant="primary" className="mt-5 w-full" onClick={() => { setSaved(false); onDone() }}>Done</Button>
+          <Button variant="primary" className="mt-5 w-full" onClick={() => { setSaved(false); setOfferFollowUp(true) }}>Done</Button>
         </div>
       </BottomSheet>
+
+      {/* offered right after saving — same optional, skippable pattern as ending a consult from Today */}
+      <FollowUpSheet
+        open={offerFollowUp}
+        patientName={patient.name}
+        onClose={() => { setOfferFollowUp(false); onDone() }}
+        onSelect={handleScheduleFollowUp}
+      />
     </div>
   )
 }

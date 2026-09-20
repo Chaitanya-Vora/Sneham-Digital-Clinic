@@ -5,7 +5,8 @@ import { useClinic } from '../core/store'
 import type { OutcomeKind } from '../core/types'
 import { Avatar, Badge, Button, Card, Chip, Label, PatientNotFound } from '../design-system/ui'
 import { useToast } from '../design-system/toast'
-import { addDaysISO, todayISO, formatDayLabel } from '../core/day'
+import { addDaysISO, todayISO, formatDayLabel, followUpPresetDate, firstAvailableMorningSlot, type FollowUpPreset } from '../core/day'
+import { FollowUpPresetMenu } from './FollowUpPresetMenu'
 
 const OUTCOMES: OutcomeKind[] = ['Clear improvement', 'Partial', 'No change', 'Aggravation', 'Changed remedy']
 
@@ -25,12 +26,15 @@ export function FollowUp({ patientId, onBack }: { patientId: string; onBack: () 
   const pastOutcomes = useClinic((s) => s.outcomes.filter((o) => o.patientId === patientId))
   const saveOutcome = useClinic((s) => s.saveOutcome)
   const createHandoff = useClinic((s) => s.createHandoff)
+  const scheduleFollowUp = useClinic((s) => s.scheduleFollowUp)
+  const appts = useClinic((s) => s.appointments)
   const toast = useToast()
 
   const [outcome, setOutcome] = useState<OutcomeKind>('Partial')
   const [note, setNote] = useState('')
   const [handoffOpen, setHandoffOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [followUpOpen, setFollowUpOpen] = useState(false)
 
   const ciTone = checkIn?.marked === 'worse' ? 'amber' as const : checkIn?.marked === 'better' ? 'green' as const : undefined
   const ciLabel = checkIn?.marked === 'worse' ? 'Needs attention' : checkIn?.marked === 'better' ? 'Feeling better' : 'No change'
@@ -45,6 +49,14 @@ export function FollowUp({ patientId, onBack }: { patientId: string; onBack: () 
     setSaving(true)
     saveOutcome({ patientId, practitionerId: doctorId, remedy: patient.currentRemedy ?? '—', outcome, note })
     toast({ title: 'Outcome saved', message: `${outcome} recorded for ${patient.name}.` })
+    setFollowUpOpen(true)
+  }
+
+  function handleScheduleFollowUp(preset: FollowUpPreset) {
+    const date = followUpPresetDate(preset)
+    const time = firstAvailableMorningSlot(appts, date)
+    scheduleFollowUp({ patientId, practitionerId: doctorId, time, date, type: 'In person', reason: 'Follow-up' })
+    toast({ title: `Follow-up scheduled · ${formatDayLabel(date)} · ${time}` })
     onBack()
   }
 
@@ -60,9 +72,12 @@ export function FollowUp({ patientId, onBack }: { patientId: string; onBack: () 
           <Button variant="ghost" size="sm" onClick={() => setHandoffOpen(true)}>
             <Handshake size={15} /> Hand off this follow-up
           </Button>
-          <Button variant="primary" size="sm" onClick={onSave} disabled={saving}>
-            <FloppyDisk size={15} /> Save outcome
-          </Button>
+          <div className="relative">
+            <Button variant="primary" size="sm" onClick={onSave} disabled={saving}>
+              <FloppyDisk size={15} /> Save outcome
+            </Button>
+            <FollowUpPresetMenu open={followUpOpen} onClose={onBack} onSelect={handleScheduleFollowUp} />
+          </div>
         </div>
       </div>
 

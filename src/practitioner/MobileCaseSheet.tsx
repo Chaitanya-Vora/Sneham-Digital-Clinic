@@ -1,14 +1,17 @@
 import { useState, useEffect } from 'react'
-import { CaretLeft, CheckCircle, CircleNotch, DeviceMobile, Microphone, PencilSimpleLine, Prescription as RxIcon, WarningCircle, ArrowsCounterClockwise } from '@phosphor-icons/react'
+import { CaretLeft, CheckCircle, CircleNotch, DeviceMobile, Microphone, PencilSimpleLine, Prescription as RxIcon, WarningCircle, ArrowsCounterClockwise, CalendarPlus } from '@phosphor-icons/react'
 import { useClinic } from '../core/store'
 import { uploadDocument } from '../core/db'
 import { allTemplates, type CaseTemplateName, getSections } from '../core/caseTemplate'
+import { followUpPresetDate, firstAvailableMorningSlot, formatDayLabel, type FollowUpPreset } from '../core/day'
 import { Button, Card, Label } from '../design-system/ui'
 import { Pressable } from '../design-system/Pressable'
 import { VoiceRecorder } from '../design-system/VoiceRecorder'
 import { useToast } from '../design-system/toast'
+import { haptic } from '../design-system/haptics'
 import { CaseFieldEditor, useCaseProgress, useCaseSaveStatus } from '../components/CaseFields'
 import { CaseTemplateEditorModal } from '../web/CaseTemplateEditor'
+import { FollowUpSheet } from './TodayGrid'
 
 export function MobileCaseSheet({
   patientId,
@@ -45,6 +48,19 @@ export function MobileCaseSheet({
   const [editingTemplate, setEditingTemplate] = useState(false)
   const [retakeOpen, setRetakeOpen] = useState(false)
   const [draftRetakeReason, setDraftRetakeReason] = useState('')
+  const [followUpOpen, setFollowUpOpen] = useState(false)
+  const scheduleFollowUp = useClinic((s) => s.scheduleFollowUp)
+  const appts = useClinic((s) => s.appointments)
+  const currentPractitionerId = useClinic((s) => s.currentPractitionerId)
+
+  function handleScheduleFollowUp(preset: FollowUpPreset) {
+    const date = followUpPresetDate(preset)
+    const time = firstAvailableMorningSlot(appts, date)
+    scheduleFollowUp({ patientId, practitionerId: currentPractitionerId, time, date, type: 'In person', reason: 'Follow-up' })
+    haptic('success')
+    toast({ title: `Follow-up scheduled · ${formatDayLabel(date)} · ${time}` })
+    setFollowUpOpen(false)
+  }
 
   useEffect(() => { if (!caseState) ensureCase(patientId) }, [patientId, caseState, ensureCase])
   if (!patient) return (
@@ -229,6 +245,14 @@ export function MobileCaseSheet({
 
       {/* action bar */}
       <div className="absolute inset-x-0 bottom-0 z-30 flex gap-2 border-t border-border bg-surface/95 px-[18px] pb-[var(--app-bottom)] pt-3 backdrop-blur">
+        <Pressable
+          ariaLabel="schedule follow-up"
+          hap="tick"
+          onClick={() => setFollowUpOpen(true)}
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] border border-border bg-surface text-body"
+        >
+          <CalendarPlus size={18} />
+        </Pressable>
         <Button
           variant="ghost"
           className="flex-1"
@@ -249,6 +273,13 @@ export function MobileCaseSheet({
           onSaved={(t) => { setTemplate(t.id); setActiveId(t.sections[0]?.id ?? 'chief') }}
         />
       )}
+
+      <FollowUpSheet
+        open={followUpOpen}
+        patientName={patient.name}
+        onClose={() => setFollowUpOpen(false)}
+        onSelect={handleScheduleFollowUp}
+      />
     </div>
   )
 }

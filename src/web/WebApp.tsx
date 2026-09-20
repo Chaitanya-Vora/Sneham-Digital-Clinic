@@ -8,6 +8,7 @@ import {
   Prescription as RxIcon,
   ArrowsClockwise,
   ChartLineUp,
+  CaretDown,
   CheckCircle,
   GearSix,
   MagnifyingGlass,
@@ -153,6 +154,7 @@ export function WebApp() {
   const dbError = useClinic((s) => s.dbError)
   const pendingCount = useClinic((s) => s.pendingWrites.length)
   const patients = useClinic((s) => s.patients)
+  const invoices = useClinic((s) => s.invoices)
   const unread = useClinic((s) => s.notifications.filter((n) => n.surface === 'web' && !n.read).length)
   const unreadMessages = useClinic((s) => s.messages.filter((m) => m.sender === 'patient' && !m.read).length)
   // Matches TodayView's own scope below (your schedule, not cancelled
@@ -236,6 +238,23 @@ export function WebApp() {
       icon: UsersThree,
       run: () => openPatient(p.id),
     })),
+    // The search placeholder has said "Search patients, cases, invoices"
+    // for a while — invoices weren't actually searchable until now. Opens
+    // the owning patient's profile (their Billing card lists every invoice
+    // they have), same as clicking a row in the Reports revenue breakdown.
+    ...invoices
+      .filter((i) => i.status !== 'cancelled')
+      .map((i) => {
+        const p = patients.find((pt) => pt.id === i.patientId)
+        return {
+          id: `inv-${i.id}`,
+          label: `Invoice #${i.invoiceNo}${p ? ` · ${p.name}` : ''}`,
+          hint: `₹${Math.round(i.amountReceived).toLocaleString('en-IN')} · ${i.date}`,
+          group: 'Invoices',
+          icon: CurrencyInr,
+          run: () => p && openPatient(p.id),
+        }
+      }),
   ]
 
   function navTo(id: string, locked?: boolean) {
@@ -407,7 +426,7 @@ export function WebApp() {
               {screen === 'prescriptions-all' && <PrescriptionsOverview onOpenPatient={openPatient} onWriteFor={openPrescription} />}
               {screen === 'casenotes-all' && <CaseNotesOverview onOpenCaseSheet={openCaseSheet} />}
               {screen === 'followups-all' && <FollowUpsOverview onOpenFollowUp={openFollowUp} />}
-              {screen === 'reports' && <ReportsView onGoToPatients={() => setScreen('patients')} />}
+              {screen === 'reports' && <ReportsView onGoToPatients={() => setScreen('patients')} onOpenPatient={openPatient} />}
               {screen === 'settings' && <SettingsView />}
               {screen === 'restricted' && <Restricted onBack={() => setScreen('today')} />}
             </motion.div>
@@ -3348,7 +3367,7 @@ function NotifPanel({ onClose }: { onClose: () => void }) {
 }
 
 // ── REPORTS ──
-function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
+function ReportsView({ onGoToPatients, onOpenPatient }: { onGoToPatients: () => void; onOpenPatient: (id: string) => void }) {
   const patients = useClinic((s) => s.patients)
   const appointments = useClinic((s) => s.appointments)
   const prescriptions = useClinic((s) => s.prescriptions)
@@ -3360,6 +3379,7 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
   const ME = useClinic((s) => s.currentPractitionerId)
   const [period, setPeriod] = useState<'month' | 'year'>('year')
   const [exportOpen, setExportOpen] = useState(false)
+  const [revenueExpanded, setRevenueExpanded] = useState(false)
   const exportRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -3414,8 +3434,15 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
   // Revenue is billing, not appointments — sourced from invoices (what was
   // actually received, excluding cancelled bills), scoped to the selected period.
   const activeInvoices = invoices.filter((i) => i.status !== 'cancelled')
-  const totalRevenue = activeInvoices.filter((i) => inRange(i.date, startOfThisPeriod, now)).reduce((sum, i) => sum + i.amountReceived, 0)
+  const periodInvoices = activeInvoices.filter((i) => inRange(i.date, startOfThisPeriod, now))
+  const totalRevenue = periodInvoices.reduce((sum, i) => sum + i.amountReceived, 0)
   const priorRevenue = activeInvoices.filter((i) => inRange(i.date, startOfPriorPeriod, endOfPriorPeriod)).reduce((sum, i) => sum + i.amountReceived, 0)
+  // What actually makes up the number above — sorted newest first, the
+  // same invoices, nothing recomputed differently.
+  const revenueBreakdown = [...periodInvoices]
+    .filter((i) => i.amountReceived > 0)
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .map((i) => ({ invoice: i, patient: patients.find((p) => p.id === i.patientId) }))
 
   // Adherence = of follow-ups that have actually come due (seen or cancelled —
   // not still upcoming), what fraction were kept vs. missed. Null rather than
@@ -3502,12 +3529,18 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
     ]))
   }
   const exportInvoices = () => {
-    const rows = invoices.map((inv) => ({
+    // Scoped to the same period selected above the stats (Month/Year), same
+    // as the revenue number itself — this used to export every invoice ever
+    // regardless of what was on screen. Cancelled ones stay in, with their
+    // status column, so this remains a real audit trail rather than hiding
+    // anything — just no longer silently wider than what she's looking at.
+    const periodRows = invoices.filter((inv) => inRange(inv.date, startOfThisPeriod, now))
+    const rows = periodRows.map((inv) => ({
       invoiceNo: inv.invoiceNo, date: inv.date, patient: patients.find((p) => p.id === inv.patientId)?.name ?? '',
       items: inv.items.map((it) => `${it.name} x${it.qty}`).join('; '), total: invoiceTotal(inv.items),
       received: inv.amountReceived, paymentMode: inv.paymentMode, status: inv.status,
     }))
-    downloadCsv(`sneham-invoices-${todayISO()}.csv`, toCsv(rows, [
+    downloadCsv(`sneham-invoices-${period}-${todayISO()}.csv`, toCsv(rows, [
       { key: 'invoiceNo', label: 'Invoice No' }, { key: 'date', label: 'Date' }, { key: 'patient', label: 'Patient' },
       { key: 'items', label: 'Items' }, { key: 'total', label: 'Total' }, { key: 'received', label: 'Received' },
       { key: 'paymentMode', label: 'Payment Mode' }, { key: 'status', label: 'Status' },
@@ -3657,12 +3690,16 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
             </div>
           )}
         </Card>
-        <Card className="px-4 py-4">
+        <button
+          onClick={() => setRevenueExpanded((v) => !v)}
+          className={`rounded-[20px] border px-4 py-4 text-left transition ${revenueExpanded ? 'border-green-border bg-tint-pale' : 'border-border bg-surface hover:border-green-border'}`}
+        >
           <div className="flex items-center gap-2.5">
             <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-tint text-success">
               <revenueStat.icon size={18} weight="fill" />
             </div>
             <Label>{revenueStat.label}</Label>
+            <CaretDown size={13} weight="bold" className={`ml-auto text-faint transition ${revenueExpanded ? 'rotate-180' : ''}`} />
           </div>
           <CountUp value={revenueStat.num} format={revenueStat.format} duration={1.4} className="mt-2 block font-display text-[26px] font-bold leading-none text-ink" />
           {revenueStat.delta && (
@@ -3670,8 +3707,36 @@ function ReportsView({ onGoToPatients }: { onGoToPatients: () => void }) {
               {revenueStat.delta.positive ? '↗' : '↘'} {revenueStat.delta.text}
             </div>
           )}
-        </Card>
+        </button>
       </div>
+
+      {revenueExpanded && (
+        <Card className="p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="font-display text-[15px] font-bold text-ink">What's counted in {revenueStat.label.toLowerCase()}</h2>
+            <span className="text-[12px] text-faint">{revenueBreakdown.length} payment{revenueBreakdown.length !== 1 ? 's' : ''}</span>
+          </div>
+          {revenueBreakdown.length === 0 ? (
+            <p className="text-[13px] text-muted">No payments recorded in this period yet.</p>
+          ) : (
+            <div className="space-y-1">
+              {revenueBreakdown.map(({ invoice, patient }) => (
+                <button
+                  key={invoice.id}
+                  onClick={() => patient && onOpenPatient(patient.id)}
+                  disabled={!patient}
+                  className="flex w-full items-center gap-3 rounded-[10px] px-2.5 py-2 text-left transition hover:bg-surface-hover disabled:cursor-default disabled:hover:bg-transparent"
+                >
+                  <span className="w-24 shrink-0 text-[12.5px] text-faint">{new Date(invoice.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</span>
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-ink">{patient?.name ?? 'Unknown patient'}</span>
+                  <span className="text-[12.5px] text-faint">#{invoice.invoiceNo}</span>
+                  <span className="text-[13.5px] font-semibold text-success">{inr(invoice.amountReceived)}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
 
       <div className="grid grid-cols-3 gap-4">
         <Card className="col-span-2 p-5">

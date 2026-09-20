@@ -135,6 +135,7 @@ export interface PublishRxInput {
   reminderTimes: string[]
   sharedVia: string[]
   origin: Surface
+  restockReminderEnabled?: boolean
 }
 
 export interface CreateInvestigationOrderInput {
@@ -531,6 +532,7 @@ export const useClinic = create<ClinicState>()(
           sharedVia: input.sharedVia,
           remindersEnabled: input.remindersEnabled,
           reminderTimes: input.reminderTimes,
+          restockReminderEnabled: input.restockReminderEnabled ?? false,
         }
 
         const newReminders: DoseReminder[] = input.remindersEnabled
@@ -604,6 +606,7 @@ export const useClinic = create<ClinicState>()(
           sharedVia: input.sharedVia,
           remindersEnabled: input.remindersEnabled,
           reminderTimes: input.reminderTimes,
+          restockReminderEnabled: input.restockReminderEnabled ?? false,
         }
         // Deliberately no dose reminders, no patient notification, no
         // currentRemedy update — a draft must stay completely invisible to
@@ -628,7 +631,7 @@ export const useClinic = create<ClinicState>()(
             remedy: input.remedy, potency: input.potency, doseGlobules: input.doseGlobules,
             repetition: input.repetition, durationDays: input.durationDays, preparation: input.preparation,
             bodyText: input.bodyText, sharedVia: input.sharedVia, remindersEnabled: input.remindersEnabled,
-            reminderTimes: input.reminderTimes, updatedAt,
+            reminderTimes: input.reminderTimes, restockReminderEnabled: input.restockReminderEnabled ?? false, updatedAt,
           } : r)),
         }))
         const dbPatch = {
@@ -636,6 +639,7 @@ export const useClinic = create<ClinicState>()(
           repetition: input.repetition, duration_days: input.durationDays, preparation: input.preparation,
           body_text: input.bodyText ?? null, shared_via: input.sharedVia,
           reminders_enabled: input.remindersEnabled, reminder_times: input.reminderTimes,
+          restock_reminder_enabled: input.restockReminderEnabled ?? false,
           updated_at: updatedAt,
         }
         if (get().offline) {
@@ -672,7 +676,8 @@ export const useClinic = create<ClinicState>()(
           remedy: input.remedy, potency: input.potency, doseGlobules: input.doseGlobules,
           repetition: input.repetition, durationDays: input.durationDays, preparation: input.preparation,
           bodyText: input.bodyText, sharedVia: input.sharedVia, remindersEnabled: input.remindersEnabled,
-          reminderTimes: input.reminderTimes, status: 'published', publishedAt, updatedAt: publishedAt,
+          reminderTimes: input.reminderTimes, restockReminderEnabled: input.restockReminderEnabled ?? false,
+          status: 'published', publishedAt, updatedAt: publishedAt,
         }
 
         set((s) => ({
@@ -687,6 +692,7 @@ export const useClinic = create<ClinicState>()(
           repetition: input.repetition, duration_days: input.durationDays, preparation: input.preparation,
           body_text: input.bodyText ?? null, shared_via: input.sharedVia,
           reminders_enabled: input.remindersEnabled, reminder_times: input.reminderTimes,
+          restock_reminder_enabled: input.restockReminderEnabled ?? false,
           status: 'published', published_at: publishedAt, updated_at: publishedAt,
         }
         if (get().offline) {

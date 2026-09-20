@@ -32,6 +32,31 @@ export function followUpPresetDate(preset: FollowUpPreset, from: Date = new Date
   return toISO(dt)
 }
 
+// How long after publishing a course of medicine to nudge about a refill
+// call, and how long that nudge stays visible before it quietly ages out
+// (rather than nagging forever if she decides not to restock).
+export const RESTOCK_REMINDER_DAYS = 21
+export const RESTOCK_REMINDER_WINDOW_DAYS = 14
+
+/** Whole days between an ISO timestamp (e.g. Prescription.publishedAt) and
+ *  today — used for the restock-reminder window, computed live on every
+ *  render, the same way Follow-ups due already is. No scheduled job. */
+export function daysSince(isoTimestamp: string, today: Date = new Date()): number {
+  const then = new Date(isoTimestamp)
+  const msPerDay = 86400000
+  // Compare calendar dates, not exact 24h spans, so "published this
+  // morning" reads as day 0 all day rather than flipping to day 1 by
+  // evening.
+  const a = new Date(then.getFullYear(), then.getMonth(), then.getDate())
+  const b = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+  return Math.round((b.getTime() - a.getTime()) / msPerDay)
+}
+
+export function isRestockDue(publishedAt: string, today: Date = new Date()): boolean {
+  const d = daysSince(publishedAt, today)
+  return d >= RESTOCK_REMINDER_DAYS && d <= RESTOCK_REMINDER_DAYS + RESTOCK_REMINDER_WINDOW_DAYS
+}
+
 export function todayISO(): ISODate {
   return toISO(new Date())
 }

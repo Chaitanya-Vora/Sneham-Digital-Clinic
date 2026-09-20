@@ -416,6 +416,7 @@ function toAppPrescription(r: any): Prescription {
     sharedVia: r.shared_via ?? [],
     remindersEnabled: r.reminders_enabled,
     reminderTimes: r.reminder_times ?? [],
+    restockReminderEnabled: r.restock_reminder_enabled ?? false,
   }
 }
 
@@ -439,6 +440,7 @@ function toDbPrescription(p: Prescription) {
     shared_via: p.sharedVia,
     reminders_enabled: p.remindersEnabled,
     reminder_times: p.reminderTimes,
+    restock_reminder_enabled: p.restockReminderEnabled ?? false,
   }
 }
 

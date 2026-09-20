@@ -21,8 +21,10 @@ import {
   CalendarBlank,
   CurrencyInr,
   DotsThreeVertical,
+  Bell,
 } from '@phosphor-icons/react'
 import { todayISO, toISO, formatDayLabel, firstAvailableMorningSlot, isPastISO, isTodayISO, followUpPresetDate, FOLLOW_UP_PRESETS, type FollowUpPreset } from '../core/day'
+import { restockRemindersDue } from '../core/restockReminders'
 import { useClinic } from '../core/store'
 import type { Appointment, TimeBlock } from '../core/types'
 import { Avatar, Badge, BottomSheet, Card, Chip, Label } from '../design-system/ui'
@@ -95,6 +97,7 @@ export function TodayGrid({
   const allAppts = useClinic((s) => s.appointments.filter((a) => a.status !== 'Cancelled'))
   const allTimeBlocks = useClinic((s) => s.timeBlocks)
   const patients = useClinic((s) => s.patients)
+  const prescriptions = useClinic((s) => s.prescriptions)
   const checkIns = useClinic((s) => s.checkIns)
   const doseReminders = useClinic((s) => s.doseReminders)
   const startConsult = useClinic((s) => s.startConsult)
@@ -107,6 +110,7 @@ export function TodayGrid({
   const ME = useClinic((s) => s.currentPractitionerId)
   const role = useClinic((s) => s.role)
   const practitioners = useClinic((s) => s.practitioners)
+  const restockDue = restockRemindersDue(prescriptions.filter((p) => p.practitionerId === ME))
   const pFind = (id: string) => patients.find((p) => p.id === id)
   const toast = useToast()
 
@@ -270,6 +274,32 @@ export function TodayGrid({
           <Warning size={16} weight="fill" className="shrink-0 text-danger" />
           <span className="text-[13px] font-medium text-danger">Could not reach the database — data below may be incomplete</span>
         </div>
+      )}
+
+      {restockDue.length > 0 && (
+        <Card className="border-amber-border bg-amber-tint p-3.5">
+          <div className="mb-1.5 flex items-center gap-1.5">
+            <Bell size={14} weight="fill" className="text-amber-text" />
+            <span className="text-[12.5px] font-bold text-amber-text">Restock calls due</span>
+          </div>
+          <div className="space-y-0.5">
+            {restockDue.map((rx) => {
+              const p = pFind(rx.patientId)
+              return (
+                <Pressable
+                  key={rx.id}
+                  as="div"
+                  hap="tick"
+                  onClick={() => p && setPeekPatientId(p.id)}
+                  className="flex w-full items-center gap-2 rounded-[8px] px-1.5 py-1 text-left"
+                >
+                  <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-ink">{p?.name ?? 'Patient'}</span>
+                  <span className="shrink-0 text-[11px] text-amber-text">{rx.remedy} {rx.potency}</span>
+                </Pressable>
+              )
+            })}
+          </div>
+        </Card>
       )}
       {/* schedule header — Quick bill/Instant meeting live behind one kebab
           (crammed inline as three separate pills, they wrapped onto two

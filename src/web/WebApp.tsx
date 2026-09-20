@@ -58,6 +58,7 @@ import {
   Copy,
 } from '@phosphor-icons/react'
 import { todayISO, formatDayLabel, addDaysISO, dateTimeKey } from '../core/day'
+import { restockRemindersDue } from '../core/restockReminders'
 import { ownerLabel, ownerTone, isMine, isUnassigned, isAssignedToOthers, activeCoveringHandoff } from '../core/assignment'
 import { getSections, CASE_TEMPLATES } from '../core/caseTemplate'
 import { useClinic, CASE_RETAKE_APPT_MARKER, type PublishRxInput } from '../core/store'
@@ -71,7 +72,7 @@ import { toCsv, downloadCsv } from '../core/csvExport'
 import { STANDARD_MEDICINE_INSTRUCTIONS } from '../core/rxInstructions'
 import { shareViaWhatsApp, shareViaSms, shareViaEmail, shareTextViaWhatsApp } from '../core/share'
 import { uploadDocument, getDocumentUrl, fetchPatientDeletionImpact, newId } from '../core/db'
-import { Avatar, Badge, Button, Card, Chip, Label, Stepper, PatientNotFound } from '../design-system/ui'
+import { Avatar, Badge, Button, Card, Chip, Label, Stepper, Toggle, PatientNotFound } from '../design-system/ui'
 import { PendingApproval, AccessRemoved } from '../design-system/PendingApproval'
 import { Pressable } from '../design-system/Pressable'
 import { CLINIC_DETAILS } from '../core/letterheadAssets'
@@ -492,6 +493,7 @@ function TodayView({ onOpenPatient, onStartVideo, onOpenCalendarForPractitioner,
   const allAppts = useClinic((s) => s.appointments.filter((a) => a.status !== 'Cancelled'))
   const invoices = useClinic((s) => s.invoices)
   const patients = useClinic((s) => s.patients)
+  const prescriptions = useClinic((s) => s.prescriptions)
   const role = useClinic((s) => s.role)
   const myId = useClinic((s) => s.currentPractitionerId)
   const practitioners = useClinic((s) => s.practitioners.filter((p) => p.status === 'active'))
@@ -512,6 +514,9 @@ function TodayView({ onOpenPatient, onStartVideo, onOpenCalendarForPractitioner,
   const remainingToday = todayAppts.filter((a) => a.status === 'Upcoming' || a.status === 'Waiting' || a.status === 'New').length
   const newToday = todayAppts.filter((a) => a.isFirstVisit).length
   const followUpsDue = appts.filter((a) => a.reason?.toLowerCase().includes('follow')).length
+  // Only her own prescriptions — same "mine first" scoping as the rest of
+  // this screen, not the whole clinic's opted-in courses.
+  const restockDue = restockRemindersDue(prescriptions.filter((p) => p.practitionerId === myId))
   // Revenue is billing, not appointments — sourced from invoices (what was
   // actually received, excluding cancelled bills), same practitioner/today
   // scope as the rest of this view.
@@ -553,6 +558,30 @@ function TodayView({ onOpenPatient, onStartVideo, onOpenCalendarForPractitioner,
           </motion.div>
         ))}
       </motion.div>
+
+      {restockDue.length > 0 && (
+        <Card className="border-amber-border bg-amber-tint p-4">
+          <div className="mb-2 flex items-center gap-2">
+            <Bell size={16} weight="fill" className="text-amber-text" />
+            <h2 className="font-display text-[14px] font-bold text-amber-text">Restock calls due</h2>
+          </div>
+          <div className="space-y-1">
+            {restockDue.map((rx) => {
+              const p = patients.find((pt) => pt.id === rx.patientId)
+              return (
+                <button
+                  key={rx.id}
+                  onClick={() => p && onOpenPatient(p.id)}
+                  className="flex w-full items-center gap-3 rounded-[10px] px-2 py-1.5 text-left transition hover:bg-white/40"
+                >
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-ink">{p?.name ?? 'Patient'}</span>
+                  <span className="text-[12px] text-amber-text">{rx.remedy} {rx.potency} · published {formatDayLabel(rx.publishedAt!.slice(0, 10))}</span>
+                </button>
+              )
+            })}
+          </div>
+        </Card>
+      )}
 
       <Card className="p-5">
         <div className="mb-3 flex items-center justify-between">
@@ -2732,6 +2761,9 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
   const [potency, setPotency] = useState<Potency>('200C')
   const [dose, setDose] = useState(4)
   const [duration, setDuration] = useState(14)
+  // Off by default — she opts in per prescription rather than every course
+  // getting a reminder whether she wants one or not.
+  const [restockReminder, setRestockReminder] = useState(false)
   // Brief "Published!" state on the button itself before navigating away —
   // this is a deliberate, occasional action (a few times a day per doctor),
   // not a high-frequency one, so a short earned moment of confirmation is
@@ -2775,6 +2807,7 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
     setBodyText(draft.bodyText ?? '')
     setBodyTouched(!!draft.bodyText)
     setChannels(draft.sharedVia.filter((c) => c !== 'Patient app'))
+    setRestockReminder(draft.restockReminderEnabled ?? false)
   }, [draft?.id])
 
   const [templatesOpen, setTemplatesOpen] = useState(false)
@@ -2860,6 +2893,7 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
       reminderTimes: rep === 'Twice daily' ? ['8:00 AM', '8:00 PM'] : ['8:00 PM'],
       sharedVia: ['Patient app', ...channels],
       origin: 'web',
+      restockReminderEnabled: restockReminder,
     }
     const rx = draftId ? publishDraft(draftId, payload) : publish(payload)
     if (!rx) return // draft vanished from under us (e.g. cancelled elsewhere) — bail quietly
@@ -2908,6 +2942,7 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
       reminderTimes: rep === 'Twice daily' ? ['8:00 AM', '8:00 PM'] : ['8:00 PM'],
       sharedVia: channels, // no 'Patient app' — nothing has been sent yet
       origin: 'web',
+      restockReminderEnabled: restockReminder,
     }
     if (draftId) updateDraft(draftId, payload)
     else saveDraft(payload)
@@ -3027,6 +3062,14 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
               <Label>Duration</Label>
               <div className="mt-2"><Stepper value={duration} min={1} max={90} onChange={setDuration} suffix="days" /></div>
             </div>
+          </div>
+
+          <div className="flex items-center justify-between rounded-[14px] border border-border bg-surface px-4 py-3">
+            <div>
+              <div className="text-[13.5px] font-semibold text-ink">Remind me about a refill</div>
+              <div className="text-[12px] text-muted">Shows under "Restock calls due" on Today from day 21, until you prescribe this again.</div>
+            </div>
+            <Toggle on={restockReminder} onChange={setRestockReminder} label="Remind me about a refill" />
           </div>
 
           <div>

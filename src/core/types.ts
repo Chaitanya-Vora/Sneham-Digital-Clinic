@@ -248,6 +248,12 @@ export interface Prescription {
   sharedVia: string[] // WhatsApp / SMS / Email / Patient app
   remindersEnabled: boolean
   reminderTimes: string[] // ["8:00 AM", "8:00 PM"]
+  // Opt-in, off by default. When on, this prescription shows up under
+  // "Restock calls due" on Today once ~21 days have passed since it was
+  // published — a practitioner-facing nudge to call about a refill,
+  // separate from remindersEnabled above (which is the patient's own
+  // daily take-your-dose reminders).
+  restockReminderEnabled?: boolean
 }
 
 // A set of investigations (lab tests / scans) the practitioner is asking

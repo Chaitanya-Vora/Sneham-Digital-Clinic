@@ -47,7 +47,7 @@ import type { Potency, Repetition } from '../core/types'
 import { isOneOffRepetition } from '../core/types'
 import { MASTER_REMEDIES } from '../core/remedies'
 import { INVESTIGATION_CATALOG, ALL_INVESTIGATIONS, wordsOf, matchesAllWords } from '../core/investigations'
-import { Avatar, Badge, BottomSheet, Card, Chip, Label, Stepper } from '../design-system/ui'
+import { Avatar, Badge, BottomSheet, Card, Chip, Label, Stepper, Toggle } from '../design-system/ui'
 import { PendingApproval, AccessRemoved } from '../design-system/PendingApproval'
 import { Pressable } from '../design-system/Pressable'
 import { haptic } from '../design-system/haptics'
@@ -556,6 +556,7 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
   const [potency, setPotency] = useState<Potency>('200C')
   const [dose, setDose] = useState(4)
   const [duration, setDuration] = useState(14)
+  const [restockReminder, setRestockReminder] = useState(false)
   const [rep, setRep] = useState<Repetition>('Once daily · night')
   const [prep, setPrep] = useState('')
   const [done, setDone] = useState(false)
@@ -622,7 +623,7 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
       patientId: currentPatient.id, practitionerId: ME, remedy: remedy.trim(), potency, doseGlobules: dose, repetition: rep,
       durationDays: isOneOffRepetition(rep) ? null : duration, preparation: prep, bodyText: bodyText.trim() || undefined,
       remindersEnabled: !isOneOffRepetition(rep), reminderTimes: rep === 'Twice daily' ? ['8:00 AM', '8:00 PM'] : ['8:00 PM'],
-      sharedVia: ['Patient app'], origin: 'practitioner',
+      sharedVia: ['Patient app'], origin: 'practitioner', restockReminderEnabled: restockReminder,
     })
     setPublishedRxId(rx.id)
     // Publishing books the review too, same as the web console — a course
@@ -743,6 +744,14 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
       <div className="flex items-center justify-between">
         <Label>Duration</Label>
         <Stepper value={duration} min={1} max={90} onChange={(v) => { haptic('tick'); setDuration(v) }} suffix="days" />
+      </div>
+
+      <div className="flex items-center justify-between rounded-[14px] border border-border bg-surface px-3.5 py-3">
+        <div className="flex-1 pr-3">
+          <div className="text-[13px] font-semibold text-ink">Remind me about a refill</div>
+          <div className="mt-0.5 text-[11.5px] text-muted">Shows on Today from day 21, until you prescribe this again.</div>
+        </div>
+        <Toggle on={restockReminder} onChange={(v) => { haptic('tick'); setRestockReminder(v) }} label="Remind me about a refill" />
       </div>
 
       <div>

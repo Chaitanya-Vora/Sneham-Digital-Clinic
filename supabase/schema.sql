@@ -116,6 +116,7 @@ create table if not exists prescriptions (
   shared_via text[] not null default '{}',
   reminders_enabled boolean not null default false,
   reminder_times text[] not null default '{}',
+  restock_reminder_enabled boolean not null default false,
   created_at timestamptz not null default now()
 );
 

@@ -34,7 +34,6 @@ import { spring, springSoft, pushVariants, listContainer, listItem } from '../de
 import { CountUp, ProgressBar } from '../design-system/feedback'
 import { PullToRefresh } from '../design-system/gestures'
 import { useToast } from '../design-system/toast'
-import { exportInvoicePdf, exportPatientHistoryPdf } from '../core/pdfExport'
 import { DEFAULT_CONSULT_FEE, invoiceTotal } from '../core/billing'
 import { Archive, ArrowCounterClockwise, ArrowsCounterClockwise, DownloadSimple, DotsThreeVertical, Phone, WhatsappLogo } from '@phosphor-icons/react'
 import { shareViaWhatsApp } from '../core/share'
@@ -644,7 +643,7 @@ export function PatientDetailScreen({
                             <PencilSimple size={16} />
                           </Pressable>
                         )}
-                        <Pressable hap="tick" onClick={() => exportInvoicePdf(inv, patient).catch(() => {})} className="text-faint">
+                        <Pressable hap="tick" onClick={() => { void import('../core/pdfExport').then((m) => m.exportInvoicePdf(inv, patient)).catch(() => {}) }} className="text-faint">
                           <Printer size={16} />
                         </Pressable>
                       </div>
@@ -803,7 +802,7 @@ export function PatientDetailScreen({
               setActionsOpen(false)
               setExporting(true)
               try {
-                await exportPatientHistoryPdf(patient, prescriptions, investigationOrders, outcomes)
+                await (await import('../core/pdfExport')).exportPatientHistoryPdf(patient, prescriptions, investigationOrders, outcomes)
               } catch (e) {
                 toast({ title: 'Export failed', message: e instanceof Error ? e.message : 'Please try again.' })
               } finally {
@@ -1230,7 +1229,7 @@ export function InvoiceSheet({
     if (!invoice) return
     haptic('success')
     toast({ title: existingInvoice ? 'Bill updated' : 'Bill saved', message: `₹${total.toLocaleString('en-IN')} · ${patient.name}` })
-    await exportInvoicePdf(invoice, patient).catch(() => {
+    await (await import('../core/pdfExport')).exportInvoicePdf(invoice, patient).catch(() => {
       toast({ title: 'Saved, but the PDF failed', message: 'You can reprint it from the invoice list.' })
     })
     onClose()

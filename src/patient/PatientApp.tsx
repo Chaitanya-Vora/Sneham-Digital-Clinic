@@ -44,7 +44,6 @@ import { CountUp, ProgressRing } from '../design-system/feedback'
 import { PullToRefresh, useHorizontalSwipe, EdgeSwipeBack, useNativeBackButton } from '../design-system/gestures'
 import { useToast } from '../design-system/toast'
 import { ChatThread } from '../components/ChatThread'
-import { exportPrescriptionPdf } from '../core/pdfExport'
 import { getDocumentUrl } from '../core/db'
 
 type Tab = 'home' | 'appointments' | 'prescriptions' | 'profile'
@@ -787,7 +786,7 @@ function RxScreen({ prescriptions, onToggleReminders, goDoses, onRefresh }: any)
                   onClick={async () => {
                     if (!patient) return
                     try {
-                      await exportPrescriptionPdf(rx, patient)
+                      await (await import('../core/pdfExport')).exportPrescriptionPdf(rx, patient)
                       toast({ title: 'PDF exported' })
                     } catch (e) {
                       // The PDF is written successfully before the native share

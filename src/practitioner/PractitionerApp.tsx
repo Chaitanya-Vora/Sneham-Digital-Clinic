@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   SunHorizon,
@@ -58,7 +58,6 @@ import { App as CapApp } from '@capacitor/app'
 import { useToast } from '../design-system/toast'
 import { shareViaWhatsApp, shareViaSms, shareViaEmail, shareTextViaWhatsApp } from '../core/share'
 import { STANDARD_MEDICINE_INSTRUCTIONS } from '../core/rxInstructions'
-import { exportPrescriptionPdf, exportInvoicePdf, exportInvestigationOrderPdf } from '../core/pdfExport'
 import { newId } from '../core/db'
 import { MobileCaseSheet } from './MobileCaseSheet'
 import { MobileFollowUp } from './MobileFollowUp'
@@ -66,7 +65,17 @@ import { CalendarScreen } from './Calendar'
 import { PatientSearchSheet, PatientDetailScreen, AddPatientSheet, InvoiceSheet } from './PatientSearch'
 import { TodayGrid } from './TodayGrid'
 import { PatientQuickView } from './PatientQuickView'
-import { VideoConsult } from '../video/VideoConsult'
+// Lazy — Jitsi's SDK is ~116KB and should only load on the rare screen
+// that actually starts a video call, not on every app boot.
+const VideoConsult = lazy(() => import('../video/VideoConsult').then((m) => ({ default: m.VideoConsult })))
+
+function VideoConsultFallback() {
+  return (
+    <div className="flex h-full items-center justify-center">
+      <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-white/20 border-t-white" />
+    </div>
+  )
+}
 import { ChatThread } from '../components/ChatThread'
 
 // ME is resolved from store inside the component
@@ -368,12 +377,14 @@ export function PractitionerApp() {
       />
       {guestMeeting && (
         <div className="absolute inset-0 z-50 bg-[#1a1a1a]">
-          <VideoConsult
-            patientName={guestMeeting.guestName || 'Guest'}
-            practitionerName={doctor?.name ?? 'Doctor'}
-            appointmentId={guestMeeting.id}
-            onEnd={() => setGuestMeeting(null)}
-          />
+          <Suspense fallback={<VideoConsultFallback />}>
+            <VideoConsult
+              patientName={guestMeeting.guestName || 'Guest'}
+              practitionerName={doctor?.name ?? 'Doctor'}
+              appointmentId={guestMeeting.id}
+              onEnd={() => setGuestMeeting(null)}
+            />
+          </Suspense>
         </div>
       )}
     </div>
@@ -807,7 +818,7 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
             hap="tick"
             onClick={async () => {
               if (!publishedRx) return
-              await exportPrescriptionPdf(publishedRx, currentPatient).catch(() => {})
+              await (await import('../core/pdfExport')).exportPrescriptionPdf(publishedRx, currentPatient).catch(() => {})
             }}
             className="mt-3 flex items-center gap-1.5 text-[12.5px] font-semibold text-body"
           >
@@ -870,7 +881,7 @@ function QuickInvestigationScreen({ patientId, onBack }: { patientId: string; on
     if (selected.length === 0) return
     const order = createOrder({ patientId, practitionerId: ME, tests: selected, notes: notes.trim() })
     haptic('success')
-    await exportInvestigationOrderPdf(order, patient).catch(() => {
+    await (await import('../core/pdfExport')).exportInvestigationOrderPdf(order, patient).catch(() => {
       toast({ title: 'PDF export failed', message: 'Please try again.' })
     })
     toast({ title: 'Investigation slip generated', message: `${selected.length} test${selected.length === 1 ? '' : 's'} for ${patient.name}.` })
@@ -1184,18 +1195,20 @@ function VideoConsultOverlay({ appointmentId, onClose }: { appointmentId: string
   const toast = useToast()
 
   return (
-    <VideoConsult
-      patientName={patient?.name ?? 'Patient'}
-      practitionerName={doctor?.name ?? 'Doctor'}
-      appointmentId={appointmentId}
-      onEnd={({ duration }) => {
-        endConsult(appointmentId)
-        haptic('success')
-        const mins = Math.floor(duration / 60)
-        toast({ title: `Video consult ended · ${mins > 0 ? `${mins}m` : `${duration}s`}` })
-        onClose()
-      }}
-    />
+    <Suspense fallback={<VideoConsultFallback />}>
+      <VideoConsult
+        patientName={patient?.name ?? 'Patient'}
+        practitionerName={doctor?.name ?? 'Doctor'}
+        appointmentId={appointmentId}
+        onEnd={({ duration }) => {
+          endConsult(appointmentId)
+          haptic('success')
+          const mins = Math.floor(duration / 60)
+          toast({ title: `Video consult ended · ${mins > 0 ? `${mins}m` : `${duration}s`}` })
+          onClose()
+        }}
+      />
+    </Suspense>
   )
 }
 

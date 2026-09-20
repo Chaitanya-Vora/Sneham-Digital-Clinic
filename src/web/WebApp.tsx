@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
@@ -83,8 +83,17 @@ import { FollowUp, HandoffDrawer } from './FollowUp'
 import { CommandPalette, type Command } from './CommandPalette'
 import { WebCalendar } from './WebCalendar'
 import { AppointmentModal, type AppointmentModalRequest } from './AppointmentModal'
-import { VideoConsult } from '../video/VideoConsult'
-import { exportPrescriptionPdf, exportInvoicePdf, exportInvestigationOrderPdf, exportPatientHistoryPdf } from '../core/pdfExport'
+// Lazy — Jitsi's SDK is ~116KB and should only load on the rare screen
+// that actually starts a video call, not on every console load.
+const VideoConsult = lazy(() => import('../video/VideoConsult').then((m) => ({ default: m.VideoConsult })))
+
+function VideoConsultFallback() {
+  return (
+    <div className="flex h-full items-center justify-center">
+      <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-white/20 border-t-white" />
+    </div>
+  )
+}
 
 type Screen = 'today' | 'calendar' | 'patients' | 'patient' | 'prescription' | 'investigations' | 'casesheet' | 'followup' | 'reports' | 'settings' | 'restricted' | 'prescriptions-all' | 'casenotes-all' | 'followups-all' | 'messages'
 const POTENCIES: Potency[] = ['6C', '12C', '30C', '200C', '1M', '10M', '50M', 'CM', 'LM', 'Q']
@@ -422,28 +431,32 @@ export function WebApp() {
 
       {guestMeeting && createPortal(
         <div className="fixed inset-0 z-[200] bg-[#1a1a1a]">
-          <VideoConsult
-            patientName={guestMeeting.guestName || 'Guest'}
-            practitionerName={doctor.name}
-            appointmentId={guestMeeting.id}
-            onEnd={() => setGuestMeeting(null)}
-          />
+          <Suspense fallback={<VideoConsultFallback />}>
+            <VideoConsult
+              patientName={guestMeeting.guestName || 'Guest'}
+              practitionerName={doctor.name}
+              appointmentId={guestMeeting.id}
+              onEnd={() => setGuestMeeting(null)}
+            />
+          </Suspense>
         </div>,
         document.body,
       )}
 
       {videoApptId && createPortal(
         <div className="fixed inset-0 z-[200] bg-[#1a1a1a]">
-          <VideoConsult
-            patientName={(() => {
-              const appt = useClinic.getState().appointments.find((a) => a.id === videoApptId)
-              const pt = useClinic.getState().patients.find((p) => p.id === appt?.patientId)
-              return pt?.name ?? 'Patient'
-            })()}
-            practitionerName={doctor.name}
-            appointmentId={videoApptId}
-            onEnd={() => { useClinic.getState().endConsult(videoApptId); setVideoApptId(null) }}
-          />
+          <Suspense fallback={<VideoConsultFallback />}>
+            <VideoConsult
+              patientName={(() => {
+                const appt = useClinic.getState().appointments.find((a) => a.id === videoApptId)
+                const pt = useClinic.getState().patients.find((p) => p.id === appt?.patientId)
+                return pt?.name ?? 'Patient'
+              })()}
+              practitionerName={doctor.name}
+              appointmentId={videoApptId}
+              onEnd={() => { useClinic.getState().endConsult(videoApptId); setVideoApptId(null) }}
+            />
+          </Suspense>
         </div>,
         document.body,
       )}
@@ -787,7 +800,7 @@ function InvoiceModal({
     setSaving(false)
     if (!invoice) return
     toast({ title: existingInvoice ? 'Bill updated' : 'Bill saved', message: `₹${total.toLocaleString('en-IN')} · ${patient.name}` })
-    await exportInvoicePdf(invoice, patient).catch((e) => {
+    await (await import('../core/pdfExport')).exportInvoicePdf(invoice, patient).catch((e) => {
       console.error('Invoice PDF failed', e)
       toast({ title: 'Saved, but the PDF failed', message: 'You can reprint it from the invoice list.' })
     })
@@ -1990,7 +2003,7 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
 
   const printInvoice = (inv: Invoice) => {
     if (!patient) return
-    exportInvoicePdf(inv, patient).catch(() => {})
+    void import('../core/pdfExport').then((m) => m.exportInvoicePdf(inv, patient)).catch(() => {})
   }
 
   // Just a preview — the real conversation now lives in its own Messages
@@ -2136,7 +2149,7 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
               <button
                 onClick={async () => {
                   setPatientMenuOpen(false)
-                  await exportPatientHistoryPdf(patient, rx, investigationOrders, outcomes).catch((e) => {
+                  await (await import('../core/pdfExport')).exportPatientHistoryPdf(patient, rx, investigationOrders, outcomes).catch((e) => {
                     console.error('Patient history PDF export failed', e)
                     toast({ title: 'Export failed', message: e instanceof Error ? e.message : 'Please try again.' })
                   })
@@ -3095,7 +3108,7 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
                 if (!remedy.trim()) { toast({ title: 'Enter a remedy first' }); return }
                 const nowIso = new Date().toISOString()
                 const rx = { id: crypto.randomUUID(), patientId: patient.id, practitionerId: doctor?.id ?? '', remedy: remedy.trim(), potency: potency as any, doseGlobules: dose, repetition: rep as any, durationDays: duration, preparation: prep, bodyText: bodyText.trim() || undefined, status: 'published' as const, publishedAt: nowIso, createdAt: nowIso, updatedAt: nowIso, sharedVia: [], remindersEnabled: false, reminderTimes: [] }
-                await exportPrescriptionPdf(rx, patient).catch((e) => {
+                await (await import('../core/pdfExport')).exportPrescriptionPdf(rx, patient).catch((e) => {
                   console.error('PDF export failed', e)
                   toast({ title: 'PDF export failed', message: e instanceof Error ? e.message : 'Please try again.' })
                 })
@@ -3163,7 +3176,7 @@ function InvestigationWriter({ patientId, onDone }: { patientId: string; onDone:
     if (!patient) return
     if (selected.length === 0) { toast({ title: 'Add at least one investigation' }); return }
     const order = createOrder({ patientId, practitionerId: doctor?.id ?? '', tests: selected, notes: notes.trim() })
-    await exportInvestigationOrderPdf(order, patient).catch((e) => {
+    await (await import('../core/pdfExport')).exportInvestigationOrderPdf(order, patient).catch((e) => {
       console.error('PDF export failed', e)
       toast({ title: 'PDF export failed', message: e instanceof Error ? e.message : 'Please try again.' })
     })

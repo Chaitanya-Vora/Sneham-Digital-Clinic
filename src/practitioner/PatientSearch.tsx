@@ -952,6 +952,7 @@ export function PatientDetailScreen({
               fromId: ME,
               toId: handoffToId,
               coveringUntil: formatDayLabel(handoffCoveringUntil),
+              coveringUntilDate: handoffCoveringUntil,
               note: {
                 currentRemedy: patient.currentRemedy ?? '—',
                 caseStatus: handoffCaseStatus.trim() || 'No status given.',

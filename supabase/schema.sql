@@ -214,6 +214,7 @@ create table if not exists handoffs (
   from_practitioner_id text not null references practitioners(id),
   to_practitioner_id text not null references practitioners(id),
   covering_until text not null,
+  covering_until_date text,
   note jsonb not null default '{}',
   status text not null default 'pending' check (status in ('pending','accepted','declined')),
   patient_notified boolean not null default false,

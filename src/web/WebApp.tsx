@@ -57,7 +57,7 @@ import {
   Copy,
 } from '@phosphor-icons/react'
 import { todayISO, formatDayLabel, addDaysISO, dateTimeKey } from '../core/day'
-import { ownerLabel, ownerTone, isMine, isUnassigned, isAssignedToOthers } from '../core/assignment'
+import { ownerLabel, ownerTone, isMine, isUnassigned, isAssignedToOthers, activeCoveringHandoff } from '../core/assignment'
 import { getSections, CASE_TEMPLATES } from '../core/caseTemplate'
 import { useClinic, CASE_RETAKE_APPT_MARKER, type PublishRxInput } from '../core/store'
 import { useAuth } from '../auth/AuthProvider'
@@ -1903,6 +1903,7 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
   const investigationOrders = useClinic((s) => s.investigationOrders.filter((o) => o.patientId === patientId))
   const checkIns = useClinic((s) => s.checkIns.filter((c) => c.patientId === patientId))
   const handoffs = useClinic((s) => s.handoffs.filter((h) => h.patientId === patientId))
+  const covering = patient ? activeCoveringHandoff(patient.id, handoffs, todayISO()) : undefined
   const secondOpinions = useClinic((s) => s.secondOpinions.filter((o) => o.patientId === patientId))
   const requestSecondOpinion = useClinic((s) => s.requestSecondOpinion)
   const answerSecondOpinion = useClinic((s) => s.answerSecondOpinion)
@@ -2117,6 +2118,11 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
                 </button>
               )}
             </div>
+            {covering && (
+              <Badge tone="purple">
+                {activePractitioners.find((p) => p.id === covering.toPractitionerId)?.name ?? 'Colleague'} covering until {covering.coveringUntil}
+              </Badge>
+            )}
           </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted">
             <span>{patient.age} · {patient.sex}</span>
@@ -2225,11 +2231,13 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
               .map((p) => ({ ...p, openCases: allPatients.filter((pt) => pt.owningPractitionerId === p.id && !pt.archivedAt).length }))}
             onClose={() => setHandoffOpen(false)}
             onSend={(toId, watchFor) => {
+              const coveringUntilDate = addDaysISO(todayISO(), 7)
               createHandoff({
                 patientId,
                 fromId: doctor?.id ?? '',
                 toId,
-                coveringUntil: formatDayLabel(addDaysISO(todayISO(), 7)),
+                coveringUntil: formatDayLabel(coveringUntilDate),
+                coveringUntilDate,
                 note: {
                   currentRemedy: patient.currentRemedy ?? '—',
                   caseStatus: patient.lastOutcome ?? 'No status given.',

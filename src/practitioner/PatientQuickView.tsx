@@ -4,7 +4,8 @@ import { Pressable } from '../design-system/Pressable'
 import { haptic } from '../design-system/haptics'
 import { useToast } from '../design-system/toast'
 import { shareViaWhatsApp } from '../core/share'
-import { ownerLabel, ownerTone } from '../core/assignment'
+import { ownerLabel, ownerTone, activeCoveringHandoff } from '../core/assignment'
+import { todayISO } from '../core/day'
 import { Phone, WhatsappLogo, Prescription as RxIcon, NotePencil } from '@phosphor-icons/react'
 
 // A quick "peek" at a patient — tapping a name on Today or Follow-ups opens
@@ -27,6 +28,8 @@ export function PatientQuickView({
   const rxCount = useClinic((s) => (patientId ? s.prescriptions.filter((r) => r.patientId === patientId && r.status !== 'draft').length : 0))
   const ME = useClinic((s) => s.currentPractitionerId)
   const practitioners = useClinic((s) => s.practitioners)
+  const handoffs = useClinic((s) => (patientId ? s.handoffs.filter((h) => h.patientId === patientId) : []))
+  const covering = patientId ? activeCoveringHandoff(patientId, handoffs, todayISO()) : undefined
   const toast = useToast()
 
   return (
@@ -38,6 +41,11 @@ export function PatientQuickView({
             <div className="min-w-0 flex-1">
               <div className="truncate font-display text-[17px] font-bold text-ink">{patient.name}</div>
               <div className="truncate text-[12.5px] text-muted">{patient.age}y · {patient.sex} · {patient.wsCode}</div>
+              {covering && (
+                <div className="mt-1 truncate text-[11.5px] font-semibold text-purple">
+                  {practitioners.find((p) => p.id === covering.toPractitionerId)?.name ?? 'Colleague'} covering until {covering.coveringUntil}
+                </div>
+              )}
             </div>
             <Badge tone={ownerTone(patient, ME)}>{ownerLabel(patient, ME, practitioners)}</Badge>
             {patient.phone && (

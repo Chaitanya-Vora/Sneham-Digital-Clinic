@@ -305,6 +305,10 @@ export interface Handoff {
   fromPractitionerId: string
   toPractitionerId: string
   coveringUntil: string
+  // Real ISO date alongside the display string above, so "is this handoff
+  // still active" can be computed live against today — optional only
+  // because handoffs created before this field existed won't have it.
+  coveringUntilDate?: string
   note: {
     currentRemedy: string
     caseStatus: string

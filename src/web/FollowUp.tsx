@@ -173,11 +173,13 @@ export function FollowUp({ patientId, onBack }: { patientId: string; onBack: () 
             practitioners={practitioners.filter((p) => p.id !== doctorId)}
             onClose={() => setHandoffOpen(false)}
             onSend={(toId, watchFor) => {
+              const coveringUntilDate = addDaysISO(todayISO(), 7)
               createHandoff({
                 patientId,
                 fromId: doctorId,
                 toId,
-                coveringUntil: formatDayLabel(addDaysISO(todayISO(), 7)),
+                coveringUntil: formatDayLabel(coveringUntilDate),
+                coveringUntilDate,
                 note: {
                   currentRemedy: patient.currentRemedy ?? '—',
                   caseStatus: `${outcome} at last review.`,

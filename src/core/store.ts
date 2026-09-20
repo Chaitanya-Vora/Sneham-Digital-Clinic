@@ -242,7 +242,7 @@ interface ClinicState {
   toggleCaseChip: (patientId: string, sectionId: string, key: string, value: string, multi: boolean) => void
   markSectionDone: (patientId: string, sectionId: string, done: boolean) => void
   saveOutcome: (input: { patientId: string; practitionerId: string; remedy: string; outcome: OutcomeKind; note: string }) => void
-  createHandoff: (input: { patientId: string; fromId: string; toId: string; coveringUntil: string; note: Handoff['note'] }) => void
+  createHandoff: (input: { patientId: string; fromId: string; toId: string; coveringUntil: string; coveringUntilDate: string; note: Handoff['note'] }) => void
   addPatient: (input: { name: string; age: number; sex: Patient['sex']; location: string; chiefComplaint: string; phone: string; referralSource?: Patient['referralSource'] }) => Patient
   linkPatientIdentity: (patientId: string, userId: string) => void
   updatePatientDetails: (id: string, patch: Partial<Pick<Patient, 'name' | 'age' | 'sex' | 'location' | 'phone' | 'chiefComplaint' | 'allergies' | 'regularMedication' | 'referralSource'>>) => void
@@ -1075,6 +1075,7 @@ export const useClinic = create<ClinicState>()(
           fromPractitionerId: input.fromId,
           toPractitionerId: input.toId,
           coveringUntil: input.coveringUntil,
+          coveringUntilDate: input.coveringUntilDate,
           note: input.note,
           status: 'pending',
           patientNotified: true,

@@ -190,6 +190,7 @@ export function MobileFollowUp({
               fromId: doctorId,
               toId,
               coveringUntil: formatDayLabel(coveringUntilDate),
+              coveringUntilDate,
               note: { currentRemedy: patient.currentRemedy ?? '—', caseStatus: `${outcome} at last review.`, reason: handoffReason.trim(), watchFor: note },
             })
             setHandoff(false)

@@ -204,11 +204,16 @@ export function PractitionerApp() {
   const hydrating = useClinic((s) => s.hydrating)
 
   useEffect(() => {
+    const unsubscribe = useClinic.getState().subscribeRealtime()
+    // Safety net only — realtime above covers normal changes within a
+    // second or two. This just catches a dropped websocket (common on
+    // flaky mobile networks), at a far slower cadence than the old 15s
+    // full-refetch since it's no longer the primary sync path.
     const t = setInterval(() => {
       const s = useClinic.getState()
       if (s.userId && !s.hydrating) s.hydrate(s.userId, '')
-    }, 15000)
-    return () => clearInterval(t)
+    }, 120000)
+    return () => { unsubscribe(); clearInterval(t) }
   }, [])
 
   if (!doctor) {

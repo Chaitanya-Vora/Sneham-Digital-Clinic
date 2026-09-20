@@ -143,13 +143,16 @@ export function PatientApp() {
   const hydrated = useClinic((s) => s.hydrated)
   const refresh = async () => { if (userId) await hydrate(userId, patient?.name ?? 'Patient') }
 
-  // Auto-refresh every 15s so changes from the practitioner appear without manual pull
+  // Realtime subscriptions surface a practitioner's changes within a
+  // second or two; the interval below is only a safety net for a dropped
+  // websocket, not the primary sync path anymore.
   useEffect(() => {
+    const unsubscribe = useClinic.getState().subscribeRealtime()
     const t = setInterval(() => {
       const s = useClinic.getState()
       if (s.userId && !s.hydrating) s.hydrate(s.userId, '')
-    }, 15000)
-    return () => clearInterval(t)
+    }, 120000)
+    return () => { unsubscribe(); clearInterval(t) }
   }, [])
 
   if (!patient) {

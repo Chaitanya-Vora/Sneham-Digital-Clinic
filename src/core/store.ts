@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { todayISO, formatDayLabel } from './day'
 import { persist } from 'zustand/middleware'
+import { supabase } from './supabase'
 import type {
   Appointment,
   AssignmentState,
@@ -88,6 +89,13 @@ import {
   DEFAULT_CLINIC_SETTINGS,
   upsertPractitionerSettings,
   DEFAULT_PRACTITIONER_SETTINGS,
+  fetchPatients,
+  fetchAppointments,
+  fetchPrescriptions,
+  fetchInvoices,
+  fetchCheckIns,
+  fetchHandoffs,
+  fetchMessages,
 } from './db'
 
 const caseTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -199,6 +207,13 @@ interface ClinicState {
   lastDoseResetDate: string
 
   hydrate: (userId: string, userName: string, userEmail?: string) => Promise<void>
+  // Opens Supabase Realtime subscriptions for the tables that need to feel
+  // "live" (appointments, messages, prescriptions, handoffs, patients,
+  // check-ins, invoices) so a change on one device reaches every other
+  // open screen in a second or two, without the old 15s poll re-fetching
+  // and re-rendering everything whether or not anything actually changed.
+  // Returns an unsubscribe function — callers must run it on unmount.
+  subscribeRealtime: () => () => void
   setRole: (r: Role) => void
   setOffline: (v: boolean) => void
   retryPendingWrites: () => Promise<void>
@@ -418,6 +433,49 @@ export const useClinic = create<ClinicState>()(
             hydrated: true,
             offline: true,
           })
+        }
+      },
+
+      subscribeRealtime: () => {
+        // Fetches just the one table that changed and only touches the
+        // store if the result actually differs — a chat message arriving
+        // shouldn't force every screen reading `patients` or `appointments`
+        // to re-render too. JSON comparison is cheap at these row counts
+        // (low hundreds); revisit if a table ever grows into the thousands.
+        const syncTable = async <K extends 'patients' | 'appointments' | 'prescriptions' | 'invoices' | 'checkIns' | 'handoffs' | 'messages'>(
+          key: K,
+          fetcher: () => Promise<ClinicState[K]>,
+        ) => {
+          try {
+            const next = await fetcher()
+            const prev = get()[key]
+            if (JSON.stringify(prev) !== JSON.stringify(next)) {
+              set({ [key]: next } as Pick<ClinicState, K>)
+            }
+          } catch (e) {
+            console.error(`Realtime sync of ${key} failed:`, e)
+          }
+        }
+
+        // A unique topic per call, not a fixed name — supabase-js reuses
+        // the same channel object for a repeated topic string, and throws
+        // if you try to attach listeners to one that's already subscribed.
+        // A fixed name works fine through React's normal mount/cleanup
+        // order, but a unique one makes a double-subscribe structurally
+        // impossible instead of relying on every caller cleaning up first.
+        const channel = supabase
+          .channel(`clinic-live-${Math.random().toString(36).slice(2)}`)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'patients' }, () => void syncTable('patients', fetchPatients))
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'appointments' }, () => void syncTable('appointments', fetchAppointments))
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'prescriptions' }, () => void syncTable('prescriptions', fetchPrescriptions))
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'invoices' }, () => void syncTable('invoices', fetchInvoices))
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'check_ins' }, () => void syncTable('checkIns', fetchCheckIns))
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'handoffs' }, () => void syncTable('handoffs', fetchHandoffs))
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => void syncTable('messages', fetchMessages))
+          .subscribe()
+
+        return () => {
+          void supabase.removeChannel(channel)
         }
       },
 

@@ -172,15 +172,18 @@ export function WebApp() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  // Auto-refresh every 15s, same as the practitioner and patient apps —
-  // without this, the web console only ever loaded data once at login and
-  // needed a manual page reload to see anything new.
+  // Realtime subscriptions keep the console live within a second or two of
+  // a real change, same as the practitioner and patient apps. The interval
+  // below is just a safety net for a dropped websocket, not the primary
+  // sync path anymore — without either, the console only loads once at
+  // login and needs a manual reload to see anything new.
   useEffect(() => {
+    const unsubscribe = useClinic.getState().subscribeRealtime()
     const t = setInterval(() => {
       const s = useClinic.getState()
       if (s.userId && !s.hydrating) s.hydrate(s.userId, '')
-    }, 15000)
-    return () => clearInterval(t)
+    }, 120000)
+    return () => { unsubscribe(); clearInterval(t) }
   }, [])
 
   if (!doctor) {

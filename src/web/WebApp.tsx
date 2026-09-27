@@ -3244,6 +3244,15 @@ function InvestigationWriter({ patientId, onDone }: { patientId: string; onDone:
   const toggleTest = (test: string) =>
     setSelected((s) => (s.includes(test) ? s.filter((t) => t !== test) : [...s, test]))
 
+  // Lets her add a test that isn't in our preset catalog yet (new
+  // investigations come up), or a one-off instruction alongside the
+  // picked tests — it prints on the slip exactly like any other line.
+  const trimmedQuery = query.trim()
+  const canAddCustom =
+    trimmedQuery.length > 1 &&
+    !selected.some((s) => s.toLowerCase() === trimmedQuery.toLowerCase()) &&
+    !ALL_INVESTIGATIONS.some(({ test }) => test.toLowerCase() === trimmedQuery.toLowerCase())
+
   if (!patient) return <PatientNotFound onBack={onDone} />
 
   async function handleGenerate() {
@@ -3283,7 +3292,7 @@ function InvestigationWriter({ patientId, onDone }: { patientId: string; onDone:
                 className="w-full bg-transparent text-[13.5px] outline-none placeholder:text-faint"
               />
             </div>
-            {searchOpen && matches.length > 0 && (
+            {searchOpen && (matches.length > 0 || canAddCustom) && (
               <div ref={searchDropRef} className="absolute left-0 right-0 top-full z-20 mt-1">
                 <Card className="max-h-[280px] overflow-y-auto p-1.5 shadow-float">
                   {matches.map(({ test, category }) => (
@@ -3296,6 +3305,15 @@ function InvestigationWriter({ patientId, onDone }: { patientId: string; onDone:
                       <span className="shrink-0 text-[11px] text-faint">{category}</span>
                     </button>
                   ))}
+                  {canAddCustom && (
+                    <button
+                      onClick={() => { setSelected((s) => [...s, trimmedQuery]); setQuery('') }}
+                      className={`flex w-full items-center gap-2 rounded-[8px] border-dashed px-3 py-2 text-left transition hover:bg-tint ${matches.length > 0 ? 'mt-1 border-t border-border' : ''}`}
+                    >
+                      <Plus size={13} className="text-brand" />
+                      <span className="text-[13px] font-semibold text-ink">Add &quot;{trimmedQuery}&quot; as a custom line</span>
+                    </button>
+                  )}
                 </Card>
               </div>
             )}

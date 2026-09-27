@@ -83,8 +83,9 @@ export function AppointmentModal({ request, onClose }: { request: AppointmentMod
     if (!patientId) return
     const time = hourToTime(hour)
     if (request.mode === 'edit') {
-      updateAppointment(request.appointment.id, { date, time, type: apptType, reason: reason.trim() || request.appointment.reason || 'Consultation' })
-      toast({ title: 'Appointment updated', message: `${formatDayLabel(date)} · ${time}` })
+      updateAppointment(request.appointment.id, { date, time, type: apptType, reason: reason.trim() || request.appointment.reason || 'Consultation', practitionerId: practitionerId || request.appointment.practitionerId })
+      const reassigned = practitionerId && practitionerId !== request.appointment.practitionerId
+      toast({ title: 'Appointment updated', message: reassigned ? `Reassigned to ${practitioners.find((p) => p.id === practitionerId)?.name ?? 'another doctor'} · ${formatDayLabel(date)} · ${time}` : `${formatDayLabel(date)} · ${time}` })
     } else {
       // Defaults to the patient's own doctor (set above), but stays
       // editable — booking this for a colleague, e.g. handing a retake to
@@ -165,16 +166,14 @@ export function AppointmentModal({ request, onClose }: { request: AppointmentMod
               )}
             </div>
 
-            {request.mode === 'add' && (
-              <div>
-                <Label>Doctor</Label>
-                <div className="mt-1.5 flex flex-wrap gap-1.5">
-                  {practitioners.map((pr) => (
-                    <Chip key={pr.id} selected={practitionerId === pr.id} onClick={() => setPractitionerId(pr.id)}>{pr.name}</Chip>
-                  ))}
-                </div>
+            <div>
+              <Label>Doctor</Label>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {practitioners.map((pr) => (
+                  <Chip key={pr.id} selected={practitionerId === pr.id} onClick={() => setPractitionerId(pr.id)}>{pr.name}</Chip>
+                ))}
               </div>
-            )}
+            </div>
 
             <div>
               <Label>Date</Label>

@@ -35,7 +35,8 @@ import { CountUp, ProgressBar } from '../design-system/feedback'
 import { PullToRefresh } from '../design-system/gestures'
 import { useToast } from '../design-system/toast'
 import { DEFAULT_CONSULT_FEE, invoiceTotal } from '../core/billing'
-import { Archive, ArrowCounterClockwise, ArrowsCounterClockwise, DownloadSimple, DotsThreeVertical, Phone, WhatsappLogo } from '@phosphor-icons/react'
+import { Archive, ArrowCounterClockwise, ArrowsCounterClockwise, DownloadSimple, DotsThreeVertical, Phone } from '@phosphor-icons/react'
+import { WhatsAppIcon } from '../design-system/BrandIcons'
 import { shareViaWhatsApp } from '../core/share'
 import { getSections, type CaseTemplateName } from '../core/caseTemplate'
 import { PatientQuickView } from './PatientQuickView'
@@ -388,7 +389,7 @@ export function PatientDetailScreen({
                 }}
                 className="flex h-9 w-9 items-center justify-center rounded-full bg-[#25D366] text-white"
               >
-                <WhatsappLogo size={17} weight="fill" />
+                <WhatsAppIcon size={18} color="#fff" />
               </Pressable>
             </div>
           )}

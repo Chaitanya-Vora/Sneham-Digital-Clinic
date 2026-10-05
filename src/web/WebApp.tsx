@@ -18,7 +18,6 @@ import {
   Check,
   CaretRight,
   Plus,
-  WhatsappLogo,
   DeviceMobile,
   X,
   Handshake,
@@ -82,6 +81,7 @@ import { CountUp } from '../design-system/feedback'
 import { easeCalm, listContainer, listItem } from '../design-system/motion'
 import { CaseSheet } from './CaseSheet'
 import { FollowUp, HandoffDrawer } from './FollowUp'
+import { WhatsAppIcon } from '../design-system/BrandIcons'
 import { CommandPalette, type Command } from './CommandPalette'
 import { WebCalendar } from './WebCalendar'
 import { AppointmentModal, type AppointmentModalRequest } from './AppointmentModal'
@@ -3142,7 +3142,7 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
             <Label>Publish &amp; share</Label>
             <div className="flex gap-2">
               {[
-                ['WhatsApp', WhatsappLogo],
+                ['WhatsApp', WhatsAppIcon],
                 ['SMS', DeviceMobile],
                 ['Email', EnvelopeSimple],
               ].map(([c, Icon]: any) => (
@@ -4698,7 +4698,7 @@ function InstantMeetingModal({ onClose, onStart }: { onClose: () => void; onStar
             className="w-full"
             onClick={() => shareTextViaWhatsApp(shareMessage)}
           >
-            <WhatsappLogo size={16} weight="fill" className="text-success" /> Share via WhatsApp
+            <WhatsAppIcon size={17} /> Share via WhatsApp
           </Button>
         </div>
 

@@ -326,6 +326,19 @@ export interface Handoff {
   createdAt?: string
 }
 
+// A photo or voice note attached to a follow-up. Only this small record
+// travels with the outcome row — the file itself stays in storage and is
+// fetched on demand, so attachments never add weight to the app-wide load.
+export interface OutcomeAttachment {
+  id: string
+  kind: 'image' | 'audio'
+  path: string // storage path inside the followup-attachments bucket
+  name: string
+  mime: string
+  sizeBytes: number
+  seconds?: number // audio only
+}
+
 export interface Outcome {
   id: string
   patientId: string
@@ -334,6 +347,7 @@ export interface Outcome {
   remedy: string
   outcome: OutcomeKind
   note: string
+  attachments?: OutcomeAttachment[]
 }
 
 export interface ClinicDocument {

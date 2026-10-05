@@ -18,6 +18,7 @@ import type {
   AppNotification,
   MessageSender,
   Outcome,
+  OutcomeAttachment,
   OutcomeKind,
   Patient,
   PaymentMode,
@@ -242,7 +243,7 @@ interface ClinicState {
   setCaseField: (patientId: string, sectionId: string, key: string, value: string) => void
   toggleCaseChip: (patientId: string, sectionId: string, key: string, value: string, multi: boolean) => void
   markSectionDone: (patientId: string, sectionId: string, done: boolean) => void
-  saveOutcome: (input: { patientId: string; practitionerId: string; remedy: string; outcome: OutcomeKind; note: string }) => void
+  saveOutcome: (input: { patientId: string; practitionerId: string; remedy: string; outcome: OutcomeKind; note: string; attachments?: OutcomeAttachment[] }) => void
   createHandoff: (input: { patientId: string; fromId: string; toId: string; coveringUntil: string; coveringUntilDate: string; note: Handoff['note'] }) => void
   addPatient: (input: { name: string; age: number; sex: Patient['sex']; location: string; chiefComplaint: string; phone: string; referralSource?: Patient['referralSource'] }) => Patient
   linkPatientIdentity: (patientId: string, userId: string) => void
@@ -1061,6 +1062,7 @@ export const useClinic = create<ClinicState>()(
           remedy: input.remedy,
           outcome: input.outcome,
           note: input.note,
+          attachments: input.attachments ?? [],
         }
         set((s) => ({
           outcomes: [outcome, ...s.outcomes],

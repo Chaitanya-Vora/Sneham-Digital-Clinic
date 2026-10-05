@@ -259,7 +259,8 @@ create table if not exists outcomes (
   date timestamptz not null default now(),
   remedy text not null,
   outcome text not null,
-  note text not null default ''
+  note text not null default '',
+  attachments jsonb not null default '[]'::jsonb -- photos / voice notes; files live in the private followup-attachments bucket (migration_v47)
 );
 
 alter table outcomes enable row level security;

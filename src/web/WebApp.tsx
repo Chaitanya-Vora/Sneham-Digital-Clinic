@@ -57,7 +57,7 @@ import {
   VideoCamera,
   Copy,
 } from '@phosphor-icons/react'
-import { todayISO, formatDayLabel, addDaysISO, dateTimeKey } from '../core/day'
+import { todayISO, formatDayLabel, addDaysISO, dateTimeKey, followUpPresetDate, firstAvailableMorningSlot, type FollowUpPreset } from '../core/day'
 import { restockRemindersDue } from '../core/restockReminders'
 import { ownerLabel, ownerTone, isMine, isUnassigned, isAssignedToOthers, activeCoveringHandoff } from '../core/assignment'
 import { getSections, CASE_TEMPLATES } from '../core/caseTemplate'
@@ -82,6 +82,7 @@ import { CountUp } from '../design-system/feedback'
 import { easeCalm, listContainer, listItem } from '../design-system/motion'
 import { CaseSheet } from './CaseSheet'
 import { FollowUp, HandoffDrawer } from './FollowUp'
+import { FollowUpPresetMenu } from './FollowUpPresetMenu'
 import { CommandPalette, type Command } from './CommandPalette'
 import { WebCalendar } from './WebCalendar'
 import { AppointmentModal, type AppointmentModalRequest } from './AppointmentModal'
@@ -2751,7 +2752,9 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
   const publishDraft = useClinic((s) => s.publishDraftPrescription)
   const updatePractitioner = useClinic((s) => s.updatePractitioner)
   const scheduleFollowUp = useClinic((s) => s.scheduleFollowUp)
+  const appts = useClinic((s) => s.appointments)
   const toast = useToast()
+  const [followUpOpen, setFollowUpOpen] = useState(false)
 
   // The remedy field is the actual value — typing always works, chips below
   // are just a fast-select that fill the same field. It used to only accept
@@ -2898,32 +2901,28 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
     const rx = draftId ? publishDraft(draftId, payload) : publish(payload)
     if (!rx) return // draft vanished from under us (e.g. cancelled elsewhere) — bail quietly
 
-    // Publishing books the review too — a course that ends without anyone
-    // checking back on it is the exact gap a follow-up reminder exists to
-    // close. "As needed" has no natural end date, so it's skipped.
-    let followUpNote = ''
-    if (!isOneOffRepetition(rep) && duration > 0) {
-      const followUpDate = addDaysISO(todayISO(), duration)
-      scheduleFollowUp({
-        patientId,
-        practitionerId: doctor?.id ?? '',
-        time: '10:00 AM',
-        date: followUpDate,
-        type: 'In person',
-        reason: 'Follow-up',
-      })
-      followUpNote = ` Follow-up auto-booked for ${formatDayLabel(followUpDate)} — reschedule any time from Follow-ups.`
-    }
-
     setJustPublished(true)
     setTimeout(() => {
       toast({
         title: 'Prescription published',
-        message: `${remedy} ${potency} sent to ${patient.name}'s app${channels.length ? ` and ${channels.join(', ')}` : ''}.${followUpNote}`,
+        message: `${remedy} ${potency} sent to ${patient.name}'s app${channels.length ? ` and ${channels.join(', ')}` : ''}.`,
         action: { label: 'Back to patient', onClick: onDone },
       })
-      onDone()
+      // A course that ends without anyone checking back on it is the exact
+      // gap a follow-up closes — but the choice of when is hers, not a
+      // silent guess off the medicine's duration. "As needed" has no
+      // natural end date, so it's skipped.
+      if (!isOneOffRepetition(rep) && duration > 0) setFollowUpOpen(true)
+      else onDone()
     }, 550)
+  }
+
+  function handleScheduleFollowUp(preset: FollowUpPreset) {
+    const date = followUpPresetDate(preset)
+    const time = firstAvailableMorningSlot(appts, date)
+    scheduleFollowUp({ patientId, practitionerId: doctor?.id ?? '', time, date, type: 'In person', reason: 'Follow-up' })
+    toast({ title: `Follow-up scheduled · ${formatDayLabel(date)} · ${time}` })
+    onDone()
   }
 
   function onSave() {
@@ -3159,7 +3158,8 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
             </div>
             <div className="flex gap-2">
               <Button variant="ghost" className="flex-1" onClick={onSave} disabled={justPublished}>Save — don't send yet</Button>
-              <Button variant="accent" className="flex-1" onClick={onPublish} disabled={justPublished}>
+              <div className="relative flex-1">
+              <Button variant="accent" className="w-full" onClick={onPublish} disabled={justPublished}>
                 {justPublished ? (
                   <motion.span
                     key="published"
@@ -3176,6 +3176,8 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
                   </>
                 )}
               </Button>
+              <FollowUpPresetMenu open={followUpOpen} onClose={onDone} onSelect={handleScheduleFollowUp} />
+              </div>
             </div>
             <div className="flex justify-center">
               <button onClick={async () => {

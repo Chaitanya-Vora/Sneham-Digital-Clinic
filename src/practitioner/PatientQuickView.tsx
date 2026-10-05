@@ -6,7 +6,8 @@ import { useToast } from '../design-system/toast'
 import { shareViaWhatsApp } from '../core/share'
 import { ownerLabel, ownerTone, activeCoveringHandoff } from '../core/assignment'
 import { todayISO } from '../core/day'
-import { Phone, WhatsappLogo, Prescription as RxIcon, NotePencil } from '@phosphor-icons/react'
+import { Phone, Prescription as RxIcon, NotePencil } from '@phosphor-icons/react'
+import { WhatsAppIcon } from '../design-system/BrandIcons'
 
 // A quick "peek" at a patient — tapping a name on Today or Follow-ups opens
 // this instead of committing straight to the full case sheet. Deliberately
@@ -67,7 +68,7 @@ export function PatientQuickView({
                   }}
                   className="flex h-9 w-9 items-center justify-center rounded-full bg-[#25D366] text-white"
                 >
-                  <WhatsappLogo size={17} weight="fill" />
+                  <WhatsAppIcon size={18} color="#fff" />
                 </Pressable>
               </div>
             )}

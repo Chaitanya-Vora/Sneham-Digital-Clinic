@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { WhatsAppIcon } from '../design-system/BrandIcons'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   SunHorizon,
@@ -34,7 +35,6 @@ import {
   CurrencyInr,
   TestTube,
   X,
-  WhatsappLogo,
   DeviceMobile,
   EnvelopeSimple,
   Copy,
@@ -808,7 +808,7 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
           </div>
 
           <div className="mt-4 flex w-full gap-2">
-            {([['WhatsApp', WhatsappLogo], ['SMS', DeviceMobile], ['Email', EnvelopeSimple]] as const).map(([c, Icon]) => (
+            {([['WhatsApp', WhatsAppIcon], ['SMS', DeviceMobile], ['Email', EnvelopeSimple]] as const).map(([c, Icon]) => (
               <Pressable
                 key={c}
                 hap="tick"
@@ -1286,7 +1286,7 @@ function InstantMeetingSheet({ open, onClose, onStart }: { open: boolean; onClos
         onClick={() => shareTextViaWhatsApp(shareMessage)}
         className="mt-3 flex w-full items-center justify-center gap-2 rounded-pill border border-border bg-surface py-2.5 text-[13.5px] font-semibold text-body"
       >
-        <WhatsappLogo size={16} weight="fill" className="text-success" /> Share via WhatsApp
+        <WhatsAppIcon size={17} /> Share via WhatsApp
       </Pressable>
 
       <Pressable

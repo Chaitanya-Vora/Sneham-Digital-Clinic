@@ -8,6 +8,7 @@ import { ownerLabel, ownerTone, activeCoveringHandoff } from '../core/assignment
 import { todayISO } from '../core/day'
 import { Phone, Prescription as RxIcon, NotePencil } from '@phosphor-icons/react'
 import { WhatsAppIcon } from '../design-system/BrandIcons'
+import { useShallow } from 'zustand/react/shallow'
 
 // A quick "peek" at a patient — tapping a name on Today or Follow-ups opens
 // this instead of committing straight to the full case sheet. Deliberately
@@ -26,10 +27,10 @@ export function PatientQuickView({
   onViewProfile?: (id: string) => void
 }) {
   const patient = useClinic((s) => s.patients.find((p) => p.id === patientId))
-  const rxCount = useClinic((s) => (patientId ? s.prescriptions.filter((r) => r.patientId === patientId && r.status !== 'draft').length : 0))
+  const rxCount = useClinic(useShallow((s) => (patientId ? s.prescriptions.filter((r) => r.patientId === patientId && r.status !== 'draft').length : 0)))
   const ME = useClinic((s) => s.currentPractitionerId)
   const practitioners = useClinic((s) => s.practitioners)
-  const handoffs = useClinic((s) => (patientId ? s.handoffs.filter((h) => h.patientId === patientId) : []))
+  const handoffs = useClinic(useShallow((s) => (patientId ? s.handoffs.filter((h) => h.patientId === patientId) : [])))
   const covering = patientId ? activeCoveringHandoff(patientId, handoffs, todayISO()) : undefined
   const toast = useToast()
 

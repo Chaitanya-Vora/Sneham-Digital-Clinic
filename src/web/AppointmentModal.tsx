@@ -6,6 +6,7 @@ import type { Appointment, ConsultType } from '../core/types'
 import { todayISO, formatDayLabel } from '../core/day'
 import { Avatar, Badge, Chip, Label } from '../design-system/ui'
 import { useToast } from '../design-system/toast'
+import { useShallow } from 'zustand/react/shallow'
 
 const BOOK_HOURS = Array.from({ length: 12 }, (_, i) => i + 8) // 8 AM – 7 PM
 
@@ -34,7 +35,7 @@ export type AppointmentModalRequest =
 
 export function AppointmentModal({ request, onClose }: { request: AppointmentModalRequest | null; onClose: () => void }) {
   const patients = useClinic((s) => s.patients)
-  const practitioners = useClinic((s) => s.practitioners.filter((p) => p.status === 'active'))
+  const practitioners = useClinic(useShallow((s) => s.practitioners.filter((p) => p.status === 'active')))
   const currentPractitionerId = useClinic((s) => s.currentPractitionerId)
   const scheduleFollowUp = useClinic((s) => s.scheduleFollowUp)
   const updateAppointment = useClinic((s) => s.updateAppointment)

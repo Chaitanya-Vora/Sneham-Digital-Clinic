@@ -10,6 +10,7 @@ import { useToast } from '../design-system/toast'
 import { FollowUpSheet } from './TodayGrid'
 import { AttachmentComposer, AttachmentList } from '../components/FollowUpAttachments'
 import { uploadOutcomeAttachments, type AttachmentDraft } from '../core/db'
+import { useShallow } from 'zustand/react/shallow'
 
 const OUTCOMES: OutcomeKind[] = ['Clear improvement', 'Partial', 'No change', 'Aggravation', 'Changed remedy']
 // Compare data is derived from case visits — no hardcoded mock
@@ -31,9 +32,9 @@ export function MobileFollowUp({
 }) {
   const patient = useClinic((s) => s.patients.find((p) => p.id === patientId))
   const doctorId = useClinic((s) => s.currentPractitionerId)
-  const practitioners = useClinic((s) => s.practitioners.filter((p) => p.id !== doctorId && p.status === 'active'))
+  const practitioners = useClinic(useShallow((s) => s.practitioners.filter((p) => p.id !== doctorId && p.status === 'active')))
   const checkIn = useClinic((s) => s.checkIns.find((c) => c.patientId === patientId))
-  const caseVisits = useClinic((s) => s.caseVisits.filter((v) => v.patientId === patientId).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()))
+  const caseVisits = useClinic(useShallow((s) => s.caseVisits.filter((v) => v.patientId === patientId).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())))
   const allOutcomes = useClinic((s) => s.outcomes)
   const pastOutcomes = useMemo(() => allOutcomes.filter((o) => o.patientId === patientId).slice(0, 3), [allOutcomes, patientId])
   const saveOutcome = useClinic((s) => s.saveOutcome)

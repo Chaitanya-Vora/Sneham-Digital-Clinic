@@ -23,6 +23,7 @@ import { PullToRefresh } from '../design-system/gestures'
 import { useToast } from '../design-system/toast'
 import { PatientQuickView } from './PatientQuickView'
 import { BlockTimeSheet, blockColorStyle } from './BlockTimeSheet'
+import { useShallow } from 'zustand/react/shallow'
 
 // ── helpers ──
 
@@ -151,7 +152,7 @@ export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatien
 
   const ME = useClinic((s) => s.currentPractitionerId)
   const role = useClinic((s) => s.role)
-  const team = useClinic((s) => s.practitioners.filter((p) => p.status === 'active'))
+  const team = useClinic(useShallow((s) => s.practitioners.filter((p) => p.status === 'active')))
   const scheduleFollowUp = useClinic((s) => s.scheduleFollowUp)
   const updateAppointment = useClinic((s) => s.updateAppointment)
   const updateAppointmentStatus = useClinic((s) => s.updateAppointmentStatus)

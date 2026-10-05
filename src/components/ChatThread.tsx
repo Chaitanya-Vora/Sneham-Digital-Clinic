@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo } from 'react'
 import { PaperPlaneRight, Checks } from '@phosphor-icons/react'
 import { useClinic } from '../core/store'
 import type { MessageSender } from '../core/types'
+import { useShallow } from 'zustand/react/shallow'
 
 export function ChatThread({
   patientId,
@@ -12,7 +13,7 @@ export function ChatThread({
   viewAs: MessageSender
   compact?: boolean
 }) {
-  const messages = useClinic((s) => s.messages.filter((m) => m.patientId === patientId))
+  const messages = useClinic(useShallow((s) => s.messages.filter((m) => m.patientId === patientId)))
   const sendMessage = useClinic((s) => s.sendMessage)
   const markConvoRead = useClinic((s) => s.markConvoRead)
   const [draft, setDraft] = useState('')

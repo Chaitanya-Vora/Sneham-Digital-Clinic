@@ -42,10 +42,11 @@ import { haptic } from '../design-system/haptics'
 import { spring, springSoft, tabVariants, pushVariants, listContainer, listItem } from '../design-system/motion'
 import { CountUp, ProgressRing } from '../design-system/feedback'
 import { PullToRefresh, useHorizontalSwipe, EdgeSwipeBack, useNativeBackButton } from '../design-system/gestures'
-import { GuardedMotionDiv } from '../design-system/presence'
+import { GuardedMotionDiv, useGhostSweep } from '../design-system/presence'
 import { useToast } from '../design-system/toast'
 import { ChatThread } from '../components/ChatThread'
 import { getDocumentUrl } from '../core/db'
+import { useShallow } from 'zustand/react/shallow'
 
 type Tab = 'home' | 'appointments' | 'prescriptions' | 'profile'
 const TAB_ORDER: Tab[] = ['home', 'appointments', 'prescriptions', 'profile']
@@ -94,6 +95,7 @@ export function PatientApp() {
   const [tab, setTab] = useState<Tab>('home')
   const [dir, setDir] = useState(1)
   const [pushed, setPushed] = useState<PushedScreen>(null)
+  const pushedEpoch = useGhostSweep(pushed !== null)
   const toast = useToast()
   // Same fix as the practitioner app: Android's back gesture exits the app
   // outright the moment there's nothing in browser history to pop, and a
@@ -116,9 +118,9 @@ export function PatientApp() {
   const ME = patient?.id ?? ''
   // Only published prescriptions — a draft or cancelled one must be
   // invisible here, not merely unlabelled (see selPublishedPrescriptionsFor).
-  const prescriptions = useClinic((s) => s.prescriptions.filter((r) => r.patientId === ME && r.status === 'published'))
-  const doses = useClinic((s) => s.doseReminders.filter((d) => d.patientId === ME))
-  const notifs = useClinic((s) => s.notifications.filter((n) => n.surface === 'patient'))
+  const prescriptions = useClinic(useShallow((s) => s.prescriptions.filter((r) => r.patientId === ME && r.status === 'published')))
+  const doses = useClinic(useShallow((s) => s.doseReminders.filter((d) => d.patientId === ME)))
+  const notifs = useClinic(useShallow((s) => s.notifications.filter((n) => n.surface === 'patient')))
   const toggleDose = useClinic((s) => s.toggleDoseLogged)
   const setRemindersEnabled = useClinic((s) => s.setRemindersEnabled)
   const markRead = useClinic((s) => s.markNotificationRead)
@@ -178,7 +180,7 @@ export function PatientApp() {
       </AnimatePresence>
 
       {/* pushed screens */}
-      <AnimatePresence custom={1}>
+      <AnimatePresence key={pushedEpoch} custom={1}>
         {pushed === 'doses' && (
           <GuardedMotionDiv
             key="doses"
@@ -459,7 +461,7 @@ function HomeScreen({ patient, doses, onToggleDose, go, openDoses, onRefresh, no
   const toast = useToast()
   const practitioners = useClinic((s) => s.practitioners)
   const allAppointments = useClinic((s) => s.appointments)
-  const nextAppt = useClinic((s) => s.appointments.filter((a) => a.patientId === patientId && a.status !== 'Seen' && a.status !== 'Cancelled' && !isPastISO(a.date)).sort((a, b) => a.date.localeCompare(b.date))[0])
+  const nextAppt = useClinic(useShallow((s) => s.appointments.filter((a) => a.patientId === patientId && a.status !== 'Seen' && a.status !== 'Cancelled' && !isPastISO(a.date)).sort((a, b) => a.date.localeCompare(b.date))[0]))
   const doctorName = useClinic((s) => s.practitioners.find((p) => p.id === (nextAppt?.practitionerId ?? patient?.owningPractitionerId ?? s.practitioners[0]?.id))?.name ?? 'your doctor')
   const reschedule = useClinic((s) => s.rescheduleAppointment)
   const [notifOpen, setNotifOpen] = useState(false)
@@ -941,9 +943,9 @@ function findNextAvailableSlot(appts: Appointment[], practitionerId: string, fro
 }
 
 function usePastVisits(patientId: string) {
-  const appointments = useClinic((s) => s.appointments.filter((a) => a.patientId === patientId && (a.status === 'Seen' || isPastISO(a.date))))
+  const appointments = useClinic(useShallow((s) => s.appointments.filter((a) => a.patientId === patientId && (a.status === 'Seen' || isPastISO(a.date)))))
   const practitioners = useClinic((s) => s.practitioners)
-  const outcomes = useClinic((s) => s.outcomes.filter((o) => o.patientId === patientId))
+  const outcomes = useClinic(useShallow((s) => s.outcomes.filter((o) => o.patientId === patientId)))
 
   return useMemo(() =>
     appointments.map((apt, i) => {
@@ -975,7 +977,7 @@ const outcomeTone = (o: string) => {
 
 function AppointmentsScreen({ onRefresh, patientId }: { onRefresh: () => Promise<void>; patientId: string }) {
   const toast = useToast()
-  const appointments = useClinic((s) => s.appointments.filter((a) => a.patientId === patientId))
+  const appointments = useClinic(useShallow((s) => s.appointments.filter((a) => a.patientId === patientId)))
   const allAppointments = useClinic((s) => s.appointments)
   const practitioners = useClinic((s) => s.practitioners)
   const myPractitionerId = useClinic((s) => s.patients.find((p) => p.id === patientId)?.owningPractitionerId)
@@ -1365,10 +1367,10 @@ function DataPrivacyScreen({ back, onRefresh }: { back: () => void; onRefresh: (
   const patient = useMyPatient()
   // Only published prescriptions — a draft or cancelled one must not leak
   // into the patient's own "download my data" export either.
-  const prescriptions = useClinic((s) => s.prescriptions.filter((r) => r.patientId === patient?.id && r.status === 'published'))
-  const appointments = useClinic((s) => s.appointments.filter((a) => a.patientId === patient?.id))
-  const doses = useClinic((s) => s.doseReminders.filter((d) => d.patientId === patient?.id))
-  const messages = useClinic((s) => s.messages.filter((m) => m.patientId === patient?.id))
+  const prescriptions = useClinic(useShallow((s) => s.prescriptions.filter((r) => r.patientId === patient?.id && r.status === 'published')))
+  const appointments = useClinic(useShallow((s) => s.appointments.filter((a) => a.patientId === patient?.id)))
+  const doses = useClinic(useShallow((s) => s.doseReminders.filter((d) => d.patientId === patient?.id)))
+  const messages = useClinic(useShallow((s) => s.messages.filter((m) => m.patientId === patient?.id)))
 
   const handleExport = async () => {
     const data = { patient, prescriptions, appointments, doses, messages, exportedAt: new Date().toISOString() }
@@ -1489,8 +1491,8 @@ function CheckInScreen({ back, onRefresh, patientId }: { back: () => void; onRef
   // Only published prescriptions — a draft the patient was never told
   // about must not become `prescriptions[0]` here and silently drive
   // which prescription this check-in attaches to.
-  const prescriptions = useClinic((s) => s.prescriptions.filter((r) => r.patientId === patientId && r.status === 'published'))
-  const existingCheckIns = useClinic((s) => s.checkIns.filter((c) => c.patientId === patientId))
+  const prescriptions = useClinic(useShallow((s) => s.prescriptions.filter((r) => r.patientId === patientId && r.status === 'published')))
+  const existingCheckIns = useClinic(useShallow((s) => s.checkIns.filter((c) => c.patientId === patientId)))
   const submitCheckIn = useClinic((s) => s.submitCheckIn)
   const rx = prescriptions[0]
 
@@ -1659,7 +1661,7 @@ function CheckInScreen({ back, onRefresh, patientId }: { back: () => void; onRef
 // ── DOCUMENTS ──
 function DocumentsScreen({ back, onRefresh, patientId }: { back: () => void; onRefresh: () => Promise<void>; patientId: string }) {
   const toast = useToast()
-  const documents = useClinic((s) => s.documents.filter((d) => d.patientId === patientId))
+  const documents = useClinic(useShallow((s) => s.documents.filter((d) => d.patientId === patientId)))
 
   const kindIcon = (kind: string) => {
     switch (kind) {

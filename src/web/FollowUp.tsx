@@ -9,6 +9,7 @@ import { addDaysISO, todayISO, formatDayLabel, followUpPresetDate, firstAvailabl
 import { FollowUpPresetMenu } from './FollowUpPresetMenu'
 import { AttachmentComposer, AttachmentList } from '../components/FollowUpAttachments'
 import { uploadOutcomeAttachments, type AttachmentDraft } from '../core/db'
+import { useShallow } from 'zustand/react/shallow'
 
 const OUTCOMES: OutcomeKind[] = ['Clear improvement', 'Partial', 'No change', 'Aggravation', 'Changed remedy']
 
@@ -25,7 +26,7 @@ export function FollowUp({ patientId, onBack }: { patientId: string; onBack: () 
   const doctorId = useClinic((s) => s.currentPractitionerId)
   const practitioners = useClinic((s) => s.practitioners)
   const checkIn = useClinic((s) => s.checkIns.find((c) => c.patientId === patientId))
-  const pastOutcomes = useClinic((s) => s.outcomes.filter((o) => o.patientId === patientId))
+  const pastOutcomes = useClinic(useShallow((s) => s.outcomes.filter((o) => o.patientId === patientId)))
   const saveOutcome = useClinic((s) => s.saveOutcome)
   const createHandoff = useClinic((s) => s.createHandoff)
   const scheduleFollowUp = useClinic((s) => s.scheduleFollowUp)

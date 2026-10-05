@@ -42,6 +42,7 @@ import { getSections, type CaseTemplateName } from '../core/caseTemplate'
 import { PatientQuickView } from './PatientQuickView'
 import { AttachmentList } from '../components/FollowUpAttachments'
 import { GuardedMotionDiv } from '../design-system/presence'
+import { useShallow } from 'zustand/react/shallow'
 
 const REFERRAL_SOURCES: ReferralSource[] = ['Offline', 'Instagram', 'References', 'Referral']
 
@@ -234,14 +235,14 @@ export function PatientDetailScreen({
   onOrderInvestigations: () => void
 }) {
   const patient = useClinic((s) => s.patients.find((p) => p.id === patientId))
-  const appointments = useClinic((s) => s.appointments.filter((a) => a.patientId === patientId))
+  const appointments = useClinic(useShallow((s) => s.appointments.filter((a) => a.patientId === patientId)))
   const allAppointments = useClinic((s) => s.appointments)
-  const invoices = useClinic((s) => s.invoices.filter((i) => i.patientId === patientId))
+  const invoices = useClinic(useShallow((s) => s.invoices.filter((i) => i.patientId === patientId)))
   const prescriptions = useClinic(selPrescriptionsFor(patientId))
   const doses = useClinic(selDosesFor(patientId))
-  const outcomes = useClinic((s) => s.outcomes.filter((o) => o.patientId === patientId))
-  const investigationOrders = useClinic((s) => s.investigationOrders.filter((o) => o.patientId === patientId))
-  const checkIns = useClinic((s) => s.checkIns.filter((c) => c.patientId === patientId))
+  const outcomes = useClinic(useShallow((s) => s.outcomes.filter((o) => o.patientId === patientId)))
+  const investigationOrders = useClinic(useShallow((s) => s.investigationOrders.filter((o) => o.patientId === patientId)))
+  const checkIns = useClinic(useShallow((s) => s.checkIns.filter((c) => c.patientId === patientId)))
   const archivePatient = useClinic((s) => s.archivePatient)
   const restorePatient = useClinic((s) => s.restorePatient)
   const toast = useToast()
@@ -250,8 +251,8 @@ export function PatientDetailScreen({
   const practitioners = useClinic((s) => s.practitioners)
   const assignPatient = useClinic((s) => s.assignPatient)
   const createHandoff = useClinic((s) => s.createHandoff)
-  const handoffs = useClinic((s) => s.handoffs.filter((h) => h.patientId === patientId))
-  const caseVisits = useClinic((s) => s.caseVisits.filter((v) => v.patientId === patientId))
+  const handoffs = useClinic(useShallow((s) => s.handoffs.filter((h) => h.patientId === patientId)))
+  const caseVisits = useClinic(useShallow((s) => s.caseVisits.filter((v) => v.patientId === patientId)))
   const startCaseRetake = useClinic((s) => s.startCaseRetake)
   const caseRetakeActive = useClinic((s) => !!s.caseRetakeIntent[patientId])
   const customCaseTemplates = useClinic((s) => s.caseTemplates)

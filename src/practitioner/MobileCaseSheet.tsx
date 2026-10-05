@@ -12,6 +12,7 @@ import { haptic } from '../design-system/haptics'
 import { CaseFieldEditor, useCaseProgress, useCaseSaveStatus } from '../components/CaseFields'
 import { CaseTemplateEditorModal } from '../web/CaseTemplateEditor'
 import { FollowUpSheet } from './TodayGrid'
+import { useShallow } from 'zustand/react/shallow'
 
 export function MobileCaseSheet({
   patientId,
@@ -26,9 +27,9 @@ export function MobileCaseSheet({
   const ensureCase = useClinic((s) => s.ensureCase)
   const markDone = useClinic((s) => s.markSectionDone)
   const addDocument = useClinic((s) => s.addDocument)
-  const voiceNotes = useClinic((s) => s.documents.filter((d) => d.patientId === patientId && d.format === 'WEBM'))
+  const voiceNotes = useClinic(useShallow((s) => s.documents.filter((d) => d.patientId === patientId && d.format === 'WEBM')))
   const caseState = useClinic((s) => s.caseData[patientId])
-  const caseVisits = useClinic((s) => s.caseVisits.filter((v) => v.patientId === patientId))
+  const caseVisits = useClinic(useShallow((s) => s.caseVisits.filter((v) => v.patientId === patientId)))
   const customTemplates = useClinic((s) => s.caseTemplates)
   const templates = allTemplates(customTemplates)
   const startCaseRetake = useClinic((s) => s.startCaseRetake)

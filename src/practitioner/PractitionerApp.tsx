@@ -54,7 +54,7 @@ import { haptic } from '../design-system/haptics'
 import { spring, springSoft, tabVariants, pushVariants, listContainer, listItem } from '../design-system/motion'
 import { CountUp } from '../design-system/feedback'
 import { PullToRefresh, useHorizontalSwipe, EdgeSwipeBack, useNativeBackButton } from '../design-system/gestures'
-import { GuardedMotionDiv } from '../design-system/presence'
+import { GuardedMotionDiv, useGhostSweep } from '../design-system/presence'
 import { App as CapApp } from '@capacitor/app'
 import { useToast } from '../design-system/toast'
 import { shareViaWhatsApp, shareViaSms, shareViaEmail, shareTextViaWhatsApp } from '../core/share'
@@ -78,6 +78,7 @@ function VideoConsultFallback() {
   )
 }
 import { ChatThread } from '../components/ChatThread'
+import { useShallow } from 'zustand/react/shallow'
 
 // ME is resolved from store inside the component
 type Tab = 'today' | 'calendar' | 'followups' | 'rx' | 'inbox'
@@ -119,6 +120,7 @@ export function PractitionerApp() {
   // fix + explanation on BottomSheet in design-system/ui.tsx.
   const overlayTransformRef = useRef<HTMLDivElement>(null)
   const overlay = overlayNav.current
+  const overlayEpoch = useGhostSweep(!!overlayNav.current)
   const overlayDir = overlayNav.dir
   const [switchOpen, setSwitchOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -302,7 +304,7 @@ export function PractitionerApp() {
 
       {/* overlays: case sheet / compare / video — dir flips to -1 on Back so
           the slide direction matches native forward/back conventions */}
-      <AnimatePresence custom={overlayDir}>
+      <AnimatePresence key={overlayEpoch} custom={overlayDir}>
         {overlay && (
           <GuardedMotionDiv
             key={overlay.kind + ('patientId' in overlay ? overlay.patientId : overlay.appointmentId)}
@@ -1011,7 +1013,7 @@ function ChatOverlay({ patientId, patientName, onBack }: { patientId: string; pa
 function InboxScreen({ onOpenPatient, onOpenChat }: { onOpenPatient: (id: string) => void; onOpenChat: (id: string, name: string) => void }) {
   const messages = useClinic((s) => s.messages)
   const patients = useClinic((s) => s.patients)
-  const notifs = useClinic((s) => s.notifications.filter((n) => n.surface === 'web' || n.surface === 'practitioner'))
+  const notifs = useClinic(useShallow((s) => s.notifications.filter((n) => n.surface === 'web' || n.surface === 'practitioner')))
   const accept = useClinic((s) => s.acceptHandoff)
   const markRead = useClinic((s) => s.markNotificationRead)
   const handoffs = useClinic((s) => s.handoffs)

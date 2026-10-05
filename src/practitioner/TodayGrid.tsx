@@ -34,6 +34,7 @@ import { springSoft, listContainer, listItem } from '../design-system/motion'
 import { useToast } from '../design-system/toast'
 import { PatientQuickView } from './PatientQuickView'
 import { BlockTimeSheet, blockColorStyle } from './BlockTimeSheet'
+import { useShallow } from 'zustand/react/shallow'
 
 // ME is resolved from store's currentPractitionerId inside the component
 const HOURS = Array.from({ length: 12 }, (_, i) => i + 8) // 8 AM – 7 PM
@@ -94,7 +95,7 @@ export function TodayGrid({
   // accidental walk-in can be cancelled instead of being permanently stuck
   // with no way to edit or remove it), just excluded from every stat and
   // list here, same treatment as the web console.
-  const allAppts = useClinic((s) => s.appointments.filter((a) => a.status !== 'Cancelled'))
+  const allAppts = useClinic(useShallow((s) => s.appointments.filter((a) => a.status !== 'Cancelled')))
   const allTimeBlocks = useClinic((s) => s.timeBlocks)
   const patients = useClinic((s) => s.patients)
   const prescriptions = useClinic((s) => s.prescriptions)

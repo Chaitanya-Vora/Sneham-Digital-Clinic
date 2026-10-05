@@ -85,6 +85,7 @@ import { WhatsAppIcon } from '../design-system/BrandIcons'
 import { CommandPalette, type Command } from './CommandPalette'
 import { WebCalendar } from './WebCalendar'
 import { AppointmentModal, type AppointmentModalRequest } from './AppointmentModal'
+import { useShallow } from 'zustand/react/shallow'
 // Lazy — Jitsi's SDK is ~116KB and should only load on the rare screen
 // that actually starts a video call, not on every console load.
 const VideoConsult = lazy(() => import('../video/VideoConsult').then((m) => ({ default: m.VideoConsult })))
@@ -162,7 +163,7 @@ export function WebApp() {
   // appointments) — this header used to count every appointment for today
   // across the whole clinic, cancelled ones included, while the stat cards
   // right under it showed a different, smaller number for the same day.
-  const todayAppts = useClinic((s) => s.appointments.filter((a) => a.date === todayISO() && a.status !== 'Cancelled' && a.practitionerId === s.currentPractitionerId))
+  const todayAppts = useClinic(useShallow((s) => s.appointments.filter((a) => a.date === todayISO() && a.status !== 'Cancelled' && a.practitionerId === s.currentPractitionerId)))
   const toast = useToast()
 
   // Every hook in this component must run unconditionally, before any early
@@ -490,13 +491,13 @@ function TodayView({ onOpenPatient, onStartVideo, onOpenCalendarForPractitioner,
   // accidental walk-in can now be cancelled instead of being permanently
   // stuck with no way to edit or remove it), just excluded from every
   // stat and list here, same as a cancelled invoice is excluded from revenue.
-  const allAppts = useClinic((s) => s.appointments.filter((a) => a.status !== 'Cancelled'))
+  const allAppts = useClinic(useShallow((s) => s.appointments.filter((a) => a.status !== 'Cancelled')))
   const invoices = useClinic((s) => s.invoices)
   const patients = useClinic((s) => s.patients)
   const prescriptions = useClinic((s) => s.prescriptions)
   const role = useClinic((s) => s.role)
   const myId = useClinic((s) => s.currentPractitionerId)
-  const practitioners = useClinic((s) => s.practitioners.filter((p) => p.status === 'active'))
+  const practitioners = useClinic(useShallow((s) => s.practitioners.filter((p) => p.status === 'active')))
   const toast = useToast()
   // null = modal closed. patientId: null = show the patient picker first
   // (top-level "Quick bill"); a real id = already scoped to that patient
@@ -1064,7 +1065,7 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
   const restorePatient = useClinic((s) => s.restorePatient)
   const patients = useMemo(() => allPatients.filter((p) => !p.archivedAt), [allPatients])
   const archivedPatients = useMemo(() => allPatients.filter((p) => p.archivedAt), [allPatients])
-  const practitioners = useClinic((s) => s.practitioners.filter((p) => p.status === 'active'))
+  const practitioners = useClinic(useShallow((s) => s.practitioners.filter((p) => p.status === 'active')))
   const assignPatient = useClinic((s) => s.assignPatient)
   const invoices = useClinic((s) => s.invoices)
   const ME = useClinic((s) => s.currentPractitionerId)
@@ -1746,7 +1747,7 @@ function MessagesView({ initialPatientId, onOpenPatient }: { initialPatientId: s
 // a chat app: no wallpaper texture, solid brand-green sent bubbles, no
 // read-receipt ticks, timestamps below each bubble, date dividers.
 function WebChatThread({ patientId }: { patientId: string }) {
-  const messages = useClinic((s) => s.messages.filter((m) => m.patientId === patientId))
+  const messages = useClinic(useShallow((s) => s.messages.filter((m) => m.patientId === patientId)))
   const sendMessage = useClinic((s) => s.sendMessage)
   const markConvoRead = useClinic((s) => s.markConvoRead)
   const [draft, setDraft] = useState('')
@@ -1942,22 +1943,22 @@ function DonutChart({ segments, size = 120, strokeWidth = 18 }: { segments: { la
 // ── PATIENT DETAIL ──
 function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSheet, onFollowUp, onOpenMessages, onBack }: { patientId: string; onPrescribe: (draftId?: string) => void; onOrderInvestigations: () => void; onCaseSheet: (tab?: 'edit' | 'history') => void; onFollowUp: () => void; onOpenMessages: () => void; onBack: () => void }) {
   const patient = useClinic((s) => s.patients.find((p) => p.id === patientId))
-  const rx = useClinic((s) => s.prescriptions.filter((r) => r.patientId === patientId))
-  const patientCaseVisits = useClinic((s) => s.caseVisits.filter((v) => v.patientId === patientId))
+  const rx = useClinic(useShallow((s) => s.prescriptions.filter((r) => r.patientId === patientId)))
+  const patientCaseVisits = useClinic(useShallow((s) => s.caseVisits.filter((v) => v.patientId === patientId)))
   const startCaseRetake = useClinic((s) => s.startCaseRetake)
   const caseRetakeActive = useClinic((s) => !!s.caseRetakeIntent[patientId])
-  const docs = useClinic((s) => s.documents.filter((d) => d.patientId === patientId))
-  const outcomes = useClinic((s) => s.outcomes.filter((o) => o.patientId === patientId))
-  const investigationOrders = useClinic((s) => s.investigationOrders.filter((o) => o.patientId === patientId))
-  const checkIns = useClinic((s) => s.checkIns.filter((c) => c.patientId === patientId))
-  const handoffs = useClinic((s) => s.handoffs.filter((h) => h.patientId === patientId))
+  const docs = useClinic(useShallow((s) => s.documents.filter((d) => d.patientId === patientId)))
+  const outcomes = useClinic(useShallow((s) => s.outcomes.filter((o) => o.patientId === patientId)))
+  const investigationOrders = useClinic(useShallow((s) => s.investigationOrders.filter((o) => o.patientId === patientId)))
+  const checkIns = useClinic(useShallow((s) => s.checkIns.filter((c) => c.patientId === patientId)))
+  const handoffs = useClinic(useShallow((s) => s.handoffs.filter((h) => h.patientId === patientId)))
   const covering = patient ? activeCoveringHandoff(patient.id, handoffs, todayISO()) : undefined
-  const secondOpinions = useClinic((s) => s.secondOpinions.filter((o) => o.patientId === patientId))
+  const secondOpinions = useClinic(useShallow((s) => s.secondOpinions.filter((o) => o.patientId === patientId)))
   const requestSecondOpinion = useClinic((s) => s.requestSecondOpinion)
   const answerSecondOpinion = useClinic((s) => s.answerSecondOpinion)
-  const appointments = useClinic((s) => s.appointments.filter((a) => a.patientId === patientId))
-  const invoices = useClinic((s) => s.invoices.filter((i) => i.patientId === patientId))
-  const patientMessages = useClinic((s) => s.messages.filter((m) => m.patientId === patientId))
+  const appointments = useClinic(useShallow((s) => s.appointments.filter((a) => a.patientId === patientId)))
+  const invoices = useClinic(useShallow((s) => s.invoices.filter((i) => i.patientId === patientId)))
+  const patientMessages = useClinic(useShallow((s) => s.messages.filter((m) => m.patientId === patientId)))
   // Kept unfiltered — historical handoff entries below need to resolve a
   // since-removed practitioner's real name, not show "Unknown". The
   // assignment dropdown further down uses its own active-only list instead.
@@ -3365,7 +3366,7 @@ function InvestigationWriter({ patientId, onDone }: { patientId: string; onDone:
 
 // ── NOTIFICATIONS PANEL ──
 function NotifPanel({ onClose }: { onClose: () => void }) {
-  const notifs = useClinic((s) => s.notifications.filter((n) => n.surface === 'web'))
+  const notifs = useClinic(useShallow((s) => s.notifications.filter((n) => n.surface === 'web')))
   const handoffs = useClinic((s) => s.handoffs)
   const patients = useClinic((s) => s.patients)
   const accept = useClinic((s) => s.acceptHandoff)
@@ -4503,7 +4504,7 @@ function SettingsView() {
 }
 
 function ScheduleSettings({ practitionerId, consultDuration }: { practitionerId: string; consultDuration: number }) {
-  const timeBlocks = useClinic((s) => s.timeBlocks.filter((t) => t.practitionerId === practitionerId))
+  const timeBlocks = useClinic(useShallow((s) => s.timeBlocks.filter((t) => t.practitionerId === practitionerId)))
   const addTimeBlock = useClinic((s) => s.addTimeBlock)
   const removeTimeBlock = useClinic((s) => s.removeTimeBlock)
   const practitionerSettings = useClinic((s) => s.practitionerSettings)

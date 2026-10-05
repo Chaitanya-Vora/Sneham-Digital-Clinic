@@ -1,13 +1,15 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { CaretLeft, TrendUp, Handshake, FloppyDisk, Check } from '@phosphor-icons/react'
 import { useClinic } from '../core/store'
-import type { CheckIn, OutcomeKind } from '../core/types'
+import type { CheckIn, OutcomeAttachment, OutcomeKind } from '../core/types'
 import { addDaysISO, todayISO, formatDayLabel, followUpPresetDate, firstAvailableMorningSlot, type FollowUpPreset } from '../core/day'
 import { Badge, BottomSheet, Button, Card, Chip, Label } from '../design-system/ui'
 import { Pressable } from '../design-system/Pressable'
 import { haptic } from '../design-system/haptics'
 import { useToast } from '../design-system/toast'
 import { FollowUpSheet } from './TodayGrid'
+import { AttachmentComposer, AttachmentList } from '../components/FollowUpAttachments'
+import { uploadOutcomeAttachments, type AttachmentDraft } from '../core/db'
 
 const OUTCOMES: OutcomeKind[] = ['Clear improvement', 'Partial', 'No change', 'Aggravation', 'Changed remedy']
 // Compare data is derived from case visits — no hardcoded mock
@@ -32,6 +34,8 @@ export function MobileFollowUp({
   const practitioners = useClinic((s) => s.practitioners.filter((p) => p.id !== doctorId && p.status === 'active'))
   const checkIn = useClinic((s) => s.checkIns.find((c) => c.patientId === patientId))
   const caseVisits = useClinic((s) => s.caseVisits.filter((v) => v.patientId === patientId).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()))
+  const allOutcomes = useClinic((s) => s.outcomes)
+  const pastOutcomes = useMemo(() => allOutcomes.filter((o) => o.patientId === patientId).slice(0, 3), [allOutcomes, patientId])
   const saveOutcome = useClinic((s) => s.saveOutcome)
   const createHandoff = useClinic((s) => s.createHandoff)
   const scheduleFollowUp = useClinic((s) => s.scheduleFollowUp)
@@ -46,6 +50,8 @@ export function MobileFollowUp({
   const [coveringUntilDate, setCoveringUntilDate] = useState(addDaysISO(todayISO(), 7))
   const [saved, setSaved] = useState(false)
   const [offerFollowUp, setOfferFollowUp] = useState(false)
+  const [drafts, setDrafts] = useState<AttachmentDraft[]>([])
+  const [saving, setSaving] = useState(false)
 
   function handleScheduleFollowUp(preset: FollowUpPreset) {
     const date = followUpPresetDate(preset)
@@ -66,9 +72,25 @@ export function MobileFollowUp({
     </div>
   )
 
-  function save() {
-    if (saved) return
-    saveOutcome({ patientId, practitionerId: doctorId, remedy: patient?.currentRemedy ?? '—', outcome, note })
+  async function save() {
+    if (saved || saving) return
+    setSaving(true)
+    // Files go up first, all together — if any fail nothing is saved and
+    // everything stays on screen so she can simply tap Save again.
+    let attachments: OutcomeAttachment[] = []
+    if (drafts.length > 0) {
+      const uploaded = await uploadOutcomeAttachments(patientId, drafts)
+      if (!uploaded) {
+        setSaving(false)
+        haptic('warn')
+        toast({ title: 'Couldn’t upload the attachments', message: 'Nothing was saved yet — check your connection and tap Save again.' })
+        return
+      }
+      attachments = uploaded
+    }
+    saveOutcome({ patientId, practitionerId: doctorId, remedy: patient?.currentRemedy ?? '—', outcome, note, attachments })
+    setDrafts([])
+    setSaving(false)
     setSaved(true)
   }
 
@@ -129,14 +151,32 @@ export function MobileFollowUp({
             className="mt-2 w-full resize-y rounded-[14px] border border-border bg-surface px-3.5 py-2.5 text-[13px] leading-relaxed text-body outline-none focus:border-green-border"
           />
         </div>
+
+        <AttachmentComposer drafts={drafts} onChange={setDrafts} disabled={saving} />
+
+        {pastOutcomes.length > 0 && (
+          <Card className="p-4">
+            <Label>Previous follow-ups</Label>
+            {pastOutcomes.map((o) => (
+              <div key={o.id} className="border-b border-border py-2.5 last:border-0">
+                <div className="flex items-center gap-3">
+                  <span className="flex-1 text-[13px] font-semibold text-ink">{new Date(o.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>
+                  <Badge tone={o.outcome === 'Clear improvement' ? 'green' : o.outcome === 'Partial' ? 'amber' : 'neutral'}>{o.outcome}</Badge>
+                </div>
+                {o.note && <div className="mt-1 text-[12px] text-muted">{o.note}</div>}
+                <AttachmentList attachments={o.attachments} />
+              </div>
+            ))}
+          </Card>
+        )}
       </div>
 
       <div className="absolute inset-x-0 bottom-0 z-30 flex gap-2 border-t border-border bg-surface/95 px-[18px] pb-[var(--app-bottom)] pt-3 backdrop-blur">
         <Button variant="ghost" className="flex-1" onClick={() => setHandoff(true)}>
           <Handshake size={16} /> Hand off
         </Button>
-        <Button variant="primary" className="flex-1" onClick={save} disabled={saved}>
-          <FloppyDisk size={16} /> Save outcome
+        <Button variant="primary" className="flex-1" onClick={() => void save()} disabled={saved || saving}>
+          <FloppyDisk size={16} /> {saving ? 'Saving…' : 'Save outcome'}
         </Button>
       </div>
 

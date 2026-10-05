@@ -40,6 +40,7 @@ import { WhatsAppIcon } from '../design-system/BrandIcons'
 import { shareViaWhatsApp } from '../core/share'
 import { getSections, type CaseTemplateName } from '../core/caseTemplate'
 import { PatientQuickView } from './PatientQuickView'
+import { AttachmentList } from '../components/FollowUpAttachments'
 
 const REFERRAL_SOURCES: ReferralSource[] = ['Offline', 'Instagram', 'References', 'Referral']
 
@@ -674,6 +675,7 @@ export function PatientDetailScreen({
                         <span className="text-[13px] font-semibold text-ink">{o.remedy}</span>
                       </div>
                       {o.note && <div className="mt-1 text-[12px] text-muted">{o.note}</div>}
+                      <AttachmentList attachments={o.attachments} />
                     </Card>
                   </motion.div>
                 ))}

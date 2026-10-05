@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { todayISO, formatDayLabel } from './day'
 import { persist } from 'zustand/middleware'
 import { replaceEqualDeep } from './structuralShare'
+import { diag } from './diagnostics'
 import { supabase } from './supabase'
 import type {
   Appointment,
@@ -374,6 +375,7 @@ export const useClinic = create<ClinicState>()(
       hydrate: async (userId, userName, userEmail) => {
         if (get().hydrating) return
         set({ hydrating: true })
+        const hydrateStart = performance.now()
         try {
           resetHydrateErrors()
           const isPatientSurface = (import.meta.env.VITE_DEFAULT_SURFACE as string | undefined) === 'patient'
@@ -384,6 +386,7 @@ export const useClinic = create<ClinicState>()(
             // One or more tables failed to load — keep whatever is already
             // in the store rather than replacing real clinic data with a
             // partial or empty fetch. Just surface the warning banner.
+            diag('hydrate', `FAILED partially (${fetchErrors} table errors) after ${Math.round(performance.now() - hydrateStart)}ms`)
             set({ hydrated: true, hydrating: false, userId, dbError: true })
             return
           }
@@ -438,6 +441,7 @@ export const useClinic = create<ClinicState>()(
             lastDoseResetDate: today,
           })
           lastHydrateAt = Date.now()
+          diag('hydrate', `ok ${Math.round(performance.now() - hydrateStart)}ms`)
           if (needsReset) {
             for (const d of data.doseReminders.filter((r) => r.loggedToday)) {
               void updateDoseReminderDb(d.id, { logged_today: false })

@@ -57,6 +57,8 @@ import { PullToRefresh, useHorizontalSwipe, EdgeSwipeBack, useNativeBackButton }
 import { GuardedMotionDiv, useGhostSweep } from '../design-system/presence'
 import { readResume, clearResume } from '../core/drafts'
 import { ToastHost } from '../design-system/toast'
+import { AppInfoRow } from '../components/AppInfo'
+import { diag } from '../core/diagnostics'
 import { App as CapApp } from '@capacitor/app'
 import { useToast } from '../design-system/toast'
 import { shareViaWhatsApp, shareViaSms, shareViaEmail, shareTextViaWhatsApp } from '../core/share'
@@ -107,6 +109,7 @@ function headerDisplayName(name: string) {
 
 export function PractitionerApp() {
   const [tab, setTab] = useState<Tab>('today')
+  useEffect(() => { diag('tab', tab) }, [tab])
   const [dir, setDir] = useState(1)
   // Overlay navigation as one atomic value — current screen, what's
   // stacked underneath it (so Patient detail -> Case sheet -> Back returns
@@ -123,6 +126,7 @@ export function PractitionerApp() {
   const overlayTransformRef = useRef<HTMLDivElement>(null)
   const overlay = overlayNav.current
   const overlayEpoch = useGhostSweep(!!overlayNav.current)
+  useEffect(() => { diag('overlay', overlayNav.current?.kind ?? 'none') }, [overlayNav.current?.kind])
   const overlayDir = overlayNav.dir
   const [switchOpen, setSwitchOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -465,6 +469,10 @@ function ProfileSheet({ open, onClose }: { open: boolean; onClose: () => void })
           <div className="text-[12px] font-semibold uppercase tracking-label text-muted">Remedy list</div>
           <div className="mt-1 text-[13px] text-body">{doctor.remedyList.length} remedies configured</div>
         </div>
+      </div>
+
+      <div className="mt-2">
+        <AppInfoRow />
       </div>
 
       <Pressable

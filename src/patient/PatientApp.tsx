@@ -44,6 +44,7 @@ import { CountUp, ProgressRing } from '../design-system/feedback'
 import { PullToRefresh, useHorizontalSwipe, EdgeSwipeBack, useNativeBackButton } from '../design-system/gestures'
 import { GuardedMotionDiv, useGhostSweep } from '../design-system/presence'
 import { ToastHost } from '../design-system/toast'
+import { AppInfoRow } from '../components/AppInfo'
 import { useToast } from '../design-system/toast'
 import { ChatThread } from '../components/ChatThread'
 import { getDocumentUrl } from '../core/db'
@@ -1278,6 +1279,9 @@ function ProfileScreen({ patient, onRefresh, onPush }: { patient: any; onRefresh
             <span className="text-faint">&rsaquo;</span>
           </Pressable>
         ))}
+        <div className="mt-2">
+          <AppInfoRow />
+        </div>
         <SignOutRow />
       </div>
     </Screen>

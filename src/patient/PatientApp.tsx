@@ -43,6 +43,7 @@ import { spring, springSoft, tabVariants, pushVariants, listContainer, listItem 
 import { CountUp, ProgressRing } from '../design-system/feedback'
 import { PullToRefresh, useHorizontalSwipe, EdgeSwipeBack, useNativeBackButton } from '../design-system/gestures'
 import { GuardedMotionDiv, useGhostSweep } from '../design-system/presence'
+import { ToastHost } from '../design-system/toast'
 import { useToast } from '../design-system/toast'
 import { ChatThread } from '../components/ChatThread'
 import { getDocumentUrl } from '../core/db'
@@ -175,6 +176,7 @@ export function PatientApp() {
 
   return (
     <div className="relative h-full w-full overflow-clip bg-screen">
+      <ToastHost placement="mobile" />
       <AnimatePresence>
         {banner && <NotifBanner n={banner} onClose={() => markAllPatientRead('patient')} />}
       </AnimatePresence>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { TrendUp, TrendDown, Minus, Handshake, FloppyDisk, X, CheckCircle } from '@phosphor-icons/react'
 import { useClinic } from '../core/store'
@@ -9,6 +9,7 @@ import { addDaysISO, todayISO, formatDayLabel, followUpPresetDate, firstAvailabl
 import { FollowUpPresetMenu } from './FollowUpPresetMenu'
 import { AttachmentComposer, AttachmentList } from '../components/FollowUpAttachments'
 import { uploadOutcomeAttachments, type AttachmentDraft } from '../core/db'
+import { readDraft, clearDraft, useDraftWriter } from '../core/drafts'
 import { useShallow } from 'zustand/react/shallow'
 
 const OUTCOMES: OutcomeKind[] = ['Clear improvement', 'Partial', 'No change', 'Aggravation', 'Changed remedy']
@@ -33,11 +34,22 @@ export function FollowUp({ patientId, onBack }: { patientId: string; onBack: () 
   const appts = useClinic((s) => s.appointments)
   const toast = useToast()
 
-  const [outcome, setOutcome] = useState<OutcomeKind>('Partial')
-  const [note, setNote] = useState('')
+  const draftKey = `followup:${patientId}`
+  const restoredDraft = useMemo(() => readDraft<{ outcome: OutcomeKind; note: string }>(draftKey), [draftKey])
+  const [outcome, setOutcome] = useState<OutcomeKind>(restoredDraft?.outcome ?? 'Partial')
+  const [note, setNote] = useState(restoredDraft?.note ?? '')
   const [handoffOpen, setHandoffOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const draftValue = useMemo(() => ({ outcome, note }), [outcome, note])
+  useDraftWriter(draftKey, draftValue, !saved && (outcome !== 'Partial' || note.trim() !== ''))
+  const announcedRestore = useRef(false)
+  useEffect(() => {
+    if (restoredDraft && !announcedRestore.current) {
+      announcedRestore.current = true
+      toast({ title: 'Restored your unsaved follow-up', message: 'Picked up exactly where you left off.' })
+    }
+  }, [restoredDraft, toast])
   const [followUpOpen, setFollowUpOpen] = useState(false)
   const [drafts, setDrafts] = useState<AttachmentDraft[]>([])
 
@@ -65,6 +77,7 @@ export function FollowUp({ patientId, onBack }: { patientId: string; onBack: () 
       attachments = uploaded
     }
     saveOutcome({ patientId, practitionerId: doctorId, remedy: patient.currentRemedy ?? '—', outcome, note, attachments })
+    clearDraft(draftKey)
     setDrafts([])
     setSaving(false)
     setSaved(true)

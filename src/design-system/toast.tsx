@@ -26,10 +26,20 @@ export const useToasts = create<ToastState>((set) => ({
   dismiss: (id) => set((s) => ({ toasts: s.toasts.filter((x) => x.id !== id) })),
 }))
 
-export function ToastHost() {
+// 'desktop' floats in the corner of the web console; 'mobile' spans the width
+// of the phone just below the status bar and sits above every sheet/overlay
+// (the phone apps previously had no host at all, so every toast — including
+// "Could not save" and offline warnings — was silently dropped there).
+export function ToastHost({ placement = 'desktop' }: { placement?: 'desktop' | 'mobile' }) {
   const { toasts, dismiss } = useToasts()
   return (
-    <div className="pointer-events-none absolute right-5 top-5 z-[80] flex w-[340px] flex-col gap-2.5">
+    <div
+      className={
+        placement === 'mobile'
+          ? 'pointer-events-none absolute inset-x-0 top-0 z-[300] flex flex-col gap-2.5 px-4 pt-[var(--app-top)]'
+          : 'pointer-events-none absolute right-5 top-5 z-[80] flex w-[340px] flex-col gap-2.5'
+      }
+    >
       <AnimatePresence>
         {toasts.map((t) => (
           <motion.div

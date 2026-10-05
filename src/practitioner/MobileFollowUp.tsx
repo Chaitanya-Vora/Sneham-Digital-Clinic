@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { CaretLeft, TrendUp, Handshake, FloppyDisk, Check } from '@phosphor-icons/react'
 import { useClinic } from '../core/store'
 import type { CheckIn, OutcomeAttachment, OutcomeKind } from '../core/types'
@@ -11,6 +11,7 @@ import { FollowUpSheet } from './TodayGrid'
 import { AttachmentComposer, AttachmentList } from '../components/FollowUpAttachments'
 import { uploadOutcomeAttachments, type AttachmentDraft } from '../core/db'
 import { useShallow } from 'zustand/react/shallow'
+import { readDraft, clearDraft, useDraftWriter, setResume, clearResume } from '../core/drafts'
 
 const OUTCOMES: OutcomeKind[] = ['Clear improvement', 'Partial', 'No change', 'Aggravation', 'Changed remedy']
 // Compare data is derived from case visits — no hardcoded mock
@@ -43,8 +44,13 @@ export function MobileFollowUp({
   const appts = useClinic((s) => s.appointments)
   const toast = useToast()
 
-  const [outcome, setOutcome] = useState<OutcomeKind>('Partial')
-  const [note, setNote] = useState(patient?.currentRemedy ? `Continue ${patient.currentRemedy}; review in two weeks.` : '')
+  // Anything typed here and not yet saved survives the app being killed in
+  // the background or reloaded — see core/drafts.
+  const draftKey = `followup:${patientId}`
+  const defaultNote = patient?.currentRemedy ? `Continue ${patient.currentRemedy}; review in two weeks.` : ''
+  const restoredDraft = useMemo(() => readDraft<{ outcome: OutcomeKind; note: string }>(draftKey), [draftKey])
+  const [outcome, setOutcome] = useState<OutcomeKind>(restoredDraft?.outcome ?? 'Partial')
+  const [note, setNote] = useState(restoredDraft?.note ?? defaultNote)
   const [handoff, setHandoff] = useState(false)
   const [toId, setToId] = useState(practitioners[0]?.id ?? '')
   const [handoffReason, setHandoffReason] = useState('')
@@ -53,6 +59,22 @@ export function MobileFollowUp({
   const [offerFollowUp, setOfferFollowUp] = useState(false)
   const [drafts, setDrafts] = useState<AttachmentDraft[]>([])
   const [saving, setSaving] = useState(false)
+
+  const draftValue = useMemo(() => ({ outcome, note }), [outcome, note])
+  const hasUnsavedText = !saved && (outcome !== 'Partial' || note !== defaultNote)
+  useDraftWriter(draftKey, draftValue, hasUnsavedText)
+  useEffect(() => {
+    if (hasUnsavedText) setResume({ kind: 'compare', patientId })
+    else clearResume()
+  }, [hasUnsavedText, patientId])
+  useEffect(() => () => clearResume(), [])
+  const announcedRestore = useRef(false)
+  useEffect(() => {
+    if (restoredDraft && !announcedRestore.current) {
+      announcedRestore.current = true
+      toast({ title: 'Restored your unsaved follow-up', message: 'Picked up exactly where you left off.' })
+    }
+  }, [restoredDraft, toast])
 
   function handleScheduleFollowUp(preset: FollowUpPreset) {
     const date = followUpPresetDate(preset)
@@ -90,6 +112,8 @@ export function MobileFollowUp({
       attachments = uploaded
     }
     saveOutcome({ patientId, practitionerId: doctorId, remedy: patient?.currentRemedy ?? '—', outcome, note, attachments })
+    clearDraft(draftKey)
+    clearResume()
     setDrafts([])
     setSaving(false)
     setSaved(true)

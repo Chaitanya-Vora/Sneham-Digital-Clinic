@@ -55,6 +55,8 @@ import { spring, springSoft, tabVariants, pushVariants, listContainer, listItem 
 import { CountUp } from '../design-system/feedback'
 import { PullToRefresh, useHorizontalSwipe, EdgeSwipeBack, useNativeBackButton } from '../design-system/gestures'
 import { GuardedMotionDiv, useGhostSweep } from '../design-system/presence'
+import { readResume, clearResume } from '../core/drafts'
+import { ToastHost } from '../design-system/toast'
 import { App as CapApp } from '@capacitor/app'
 import { useToast } from '../design-system/toast'
 import { shareViaWhatsApp, shareViaSms, shareViaEmail, shareTextViaWhatsApp } from '../core/share'
@@ -197,6 +199,19 @@ export function PractitionerApp() {
       return { current: s.history[s.history.length - 1], history: s.history.slice(0, -1), dir: -1 }
     })
   }
+  // The app was killed while a follow-up held unsaved text (the screen sets a
+  // resume pointer only in that case and clears it on any normal exit) —
+  // reopen straight to it so the restored text is right there.
+  useEffect(() => {
+    const r = readResume()
+    clearResume()
+    if (r?.kind === 'compare' && useClinic.getState().patients.some((p) => p.id === r.patientId)) {
+      openOverlay({ kind: 'compare', patientId: r.patientId })
+    }
+    // run once, on app start
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // Prescribing exits the whole patient-detail flow into a different tab —
   // the overlay history no longer applies once we've left it.
   const exitOverlayToRx = (patientId: string) => {
@@ -256,6 +271,7 @@ export function PractitionerApp() {
 
   return (
     <div className="relative h-full w-full overflow-clip bg-screen">
+      <ToastHost placement="mobile" />
       {/* base app */}
       <div className="flex h-full flex-col">
         {/* pinned top bar */}

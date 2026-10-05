@@ -3,6 +3,7 @@ import { PaperPlaneRight, Checks } from '@phosphor-icons/react'
 import { useClinic } from '../core/store'
 import type { MessageSender } from '../core/types'
 import { useShallow } from 'zustand/react/shallow'
+import { readDraft, clearDraft, useDraftWriter } from '../core/drafts'
 
 export function ChatThread({
   patientId,
@@ -16,7 +17,9 @@ export function ChatThread({
   const messages = useClinic(useShallow((s) => s.messages.filter((m) => m.patientId === patientId)))
   const sendMessage = useClinic((s) => s.sendMessage)
   const markConvoRead = useClinic((s) => s.markConvoRead)
-  const [draft, setDraft] = useState('')
+  const draftKey = `chat:${viewAs}:${patientId}`
+  const [draft, setDraft] = useState(() => readDraft<string>(draftKey) ?? '')
+  useDraftWriter(draftKey, draft, draft.trim() !== '')
   const endRef = useRef<HTMLDivElement>(null)
 
   const sorted = useMemo(
@@ -38,6 +41,7 @@ export function ChatThread({
     const text = draft.trim()
     if (!text) return
     sendMessage(patientId, text, viewAs)
+    clearDraft(draftKey)
     setDraft('')
   }
 

@@ -5,10 +5,11 @@ import { Stethoscope, User, Monitor, SignOut, QrCode, X } from '@phosphor-icons/
 import QRCode from 'qrcode'
 import { Capacitor } from '@capacitor/core'
 import { StatusBar, Style } from '@capacitor/status-bar'
+import { App as CapApp } from '@capacitor/app'
 import { useAuth } from './auth/AuthProvider'
 import { UpdatePrompt } from './design-system/UpdatePrompt'
 import type { Surface } from './core/types'
-import { useClinic } from './core/store'
+import { useClinic, getLastHydrateAt } from './core/store'
 import { useShell } from './core/shell'
 import { SnehamMark, SnehamLockup } from './design-system/Logo'
 import { SplashIntro } from './design-system/SplashIntro'
@@ -85,16 +86,47 @@ export default function App() {
     }
   }, [])
 
+  // Load everything when a (different) person signs in, or when the store was
+  // reset — NOT every time Supabase re-announces the same signed-in user,
+  // which it does on every return to the app (that used to trigger a full
+  // 23-table reload and a redraw of every screen on each resume).
+  const userId = user?.id
+  const userRef = useRef(user)
+  userRef.current = user
   useEffect(() => {
-    if (user) {
-      const name = user.user_metadata?.full_name || user.email || 'Doctor'
-      hydrate(user.id, name, user.email)
-      const surface = import.meta.env.VITE_DEFAULT_SURFACE as string | undefined
-      if (surface === 'practitioner' || surface === 'patient') {
-        registerForPushNotifications(user.id, surface)
-      }
+    const u = userRef.current
+    if (!u) return
+    const s = useClinic.getState()
+    if (!s.hydrated || s.userId !== u.id) {
+      hydrate(u.id, u.user_metadata?.full_name || u.email || 'Doctor', u.email)
     }
-  }, [user, hydrate, hydrated])
+  }, [userId, hydrated, hydrate])
+
+  useEffect(() => {
+    const surface = import.meta.env.VITE_DEFAULT_SURFACE as string | undefined
+    if (userId && (surface === 'practitioner' || surface === 'patient')) {
+      registerForPushNotifications(userId, surface)
+    }
+  }, [userId])
+
+  // Coming back to the app: live updates may have been missed while it was in
+  // the background (the connection drops), so catch up — but only if the data
+  // is actually stale, and quietly (unchanged data keeps its identity).
+  useEffect(() => {
+    const catchUp = () => {
+      const u = userRef.current
+      if (!u) return
+      if (Date.now() - getLastHydrateAt() < 45_000) return
+      hydrate(u.id, u.user_metadata?.full_name || u.email || 'Doctor', u.email)
+    }
+    const onVisible = () => { if (document.visibilityState === 'visible') catchUp() }
+    document.addEventListener('visibilitychange', onVisible)
+    let nativeSub: { remove: () => void } | undefined
+    if (Capacitor.isNativePlatform()) {
+      CapApp.addListener('appStateChange', ({ isActive }) => { if (isActive) catchUp() }).then((h) => { nativeSub = h })
+    }
+    return () => { document.removeEventListener('visibilitychange', onVisible); nativeSub?.remove() }
+  }, [hydrate])
 
   useEffect(() => {
     const onVisible = () => {

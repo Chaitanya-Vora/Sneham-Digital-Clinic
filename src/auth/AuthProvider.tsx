@@ -82,7 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (settled) return
       settled = true
       setSession(s)
-      setUser(s?.user ?? null)
+      setUser((prev) => (prev && s?.user && prev.id === s.user.id ? prev : s?.user ?? null))
       setLoading(false)
     }
 
@@ -102,7 +102,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // normal sign-in.
       if (event === 'PASSWORD_RECOVERY') setPasswordRecovery(true)
       setSession(s)
-      setUser(s?.user ?? null)
+      setUser((prev) => (prev && s?.user && prev.id === s.user.id ? prev : s?.user ?? null))
       setLoading(false)
     })
 

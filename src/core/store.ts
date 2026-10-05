@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { todayISO, formatDayLabel } from './day'
 import { persist } from 'zustand/middleware'
+import { replaceEqualDeep } from './structuralShare'
 import { supabase } from './supabase'
 import type {
   Appointment,
@@ -360,6 +361,11 @@ const emptyState = () => ({
   lastDoseResetDate: '',
 })
 
+// When the last successful full refresh finished — lets "the app just came back"
+// decide whether a refresh is actually worth doing (see App.tsx).
+let lastHydrateAt = 0
+export function getLastHydrateAt(): number { return lastHydrateAt }
+
 export const useClinic = create<ClinicState>()(
   persist(
     (set, get) => ({
@@ -402,12 +408,24 @@ export const useClinic = create<ClinicState>()(
               caseData[patientId] = priorCaseData[patientId]
             }
           }
-          set({
+          // Keep the identity of everything that did not actually change, and
+          // only write the tables that did — so a refresh that found nothing
+          // new re-renders nothing, instead of replacing every array.
+          const incoming: Record<string, unknown> = {
             ...data,
             caseData,
             doseReminders: needsReset
               ? data.doseReminders.map((d) => ({ ...d, loggedToday: false }))
               : data.doseReminders,
+          }
+          const current = get() as unknown as Record<string, unknown>
+          const changed: Record<string, unknown> = {}
+          for (const [k, v] of Object.entries(incoming)) {
+            const shared = v !== null && typeof v === 'object' ? replaceEqualDeep(current[k], v) : v
+            if (shared !== current[k]) changed[k] = shared
+          }
+          set({
+            ...(changed as Partial<ClinicState>),
             hydrated: true,
             hydrating: false,
             userId,
@@ -419,6 +437,7 @@ export const useClinic = create<ClinicState>()(
             dbError: false,
             lastDoseResetDate: today,
           })
+          lastHydrateAt = Date.now()
           if (needsReset) {
             for (const d of data.doseReminders.filter((r) => r.loggedToday)) {
               void updateDoseReminderDb(d.id, { logged_today: false })
@@ -449,11 +468,15 @@ export const useClinic = create<ClinicState>()(
           fetcher: () => Promise<ClinicState[K]>,
         ) => {
           try {
+            const errorsBefore = getHydrateErrors()
             const next = await fetcher()
+            // The fetchers swallow errors and hand back [] — applying that
+            // would blank the list on screen until the next good refresh.
+            // A failed refresh must never replace real data.
+            if (getHydrateErrors() > errorsBefore) return
             const prev = get()[key]
-            if (JSON.stringify(prev) !== JSON.stringify(next)) {
-              set({ [key]: next } as Pick<ClinicState, K>)
-            }
+            const shared = replaceEqualDeep(prev, next)
+            if (shared !== prev) set({ [key]: shared } as Pick<ClinicState, K>)
           } catch (e) {
             console.error(`Realtime sync of ${key} failed:`, e)
           }

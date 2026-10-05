@@ -41,6 +41,7 @@ import { shareViaWhatsApp } from '../core/share'
 import { getSections, type CaseTemplateName } from '../core/caseTemplate'
 import { PatientQuickView } from './PatientQuickView'
 import { AttachmentList } from '../components/FollowUpAttachments'
+import { GuardedMotionDiv } from '../design-system/presence'
 
 const REFERRAL_SOURCES: ReferralSource[] = ['Offline', 'Instagram', 'References', 'Referral']
 
@@ -117,7 +118,7 @@ export function PatientSearchSheet({
   return (
     <AnimatePresence>
       {open && (
-        <motion.div
+        <GuardedMotionDiv
           ref={sheetTransformRef}
           className="absolute inset-0 z-50 flex flex-col bg-screen"
           variants={pushVariants}
@@ -205,7 +206,7 @@ export function PatientSearchSheet({
               onViewProfile={(id) => { onSelect(id); onClose() }}
             />
           )}
-        </motion.div>
+        </GuardedMotionDiv>
       )}
     </AnimatePresence>
   )

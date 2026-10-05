@@ -42,6 +42,7 @@ import { haptic } from '../design-system/haptics'
 import { spring, springSoft, tabVariants, pushVariants, listContainer, listItem } from '../design-system/motion'
 import { CountUp, ProgressRing } from '../design-system/feedback'
 import { PullToRefresh, useHorizontalSwipe, EdgeSwipeBack, useNativeBackButton } from '../design-system/gestures'
+import { GuardedMotionDiv } from '../design-system/presence'
 import { useToast } from '../design-system/toast'
 import { ChatThread } from '../components/ChatThread'
 import { getDocumentUrl } from '../core/db'
@@ -171,7 +172,7 @@ export function PatientApp() {
   }
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-screen">
+    <div className="relative h-full w-full overflow-clip bg-screen">
       <AnimatePresence>
         {banner && <NotifBanner n={banner} onClose={() => markAllPatientRead('patient')} />}
       </AnimatePresence>
@@ -179,7 +180,7 @@ export function PatientApp() {
       {/* pushed screens */}
       <AnimatePresence custom={1}>
         {pushed === 'doses' && (
-          <motion.div
+          <GuardedMotionDiv
             key="doses"
             className="absolute inset-0 z-40 bg-screen"
             custom={1}
@@ -192,10 +193,10 @@ export function PatientApp() {
             <EdgeSwipeBack onBack={() => setPushed(null)}>
               <DosesScreen doses={doses} onToggle={toggleDose} back={() => setPushed(null)} onRefresh={refresh} />
             </EdgeSwipeBack>
-          </motion.div>
+          </GuardedMotionDiv>
         )}
         {pushed === 'personal' && (
-          <motion.div
+          <GuardedMotionDiv
             key="personal"
             className="absolute inset-0 z-40 bg-screen"
             custom={1}
@@ -217,10 +218,10 @@ export function PatientApp() {
                 </div>
               </ProfileDetail>
             </EdgeSwipeBack>
-          </motion.div>
+          </GuardedMotionDiv>
         )}
         {pushed === 'medical' && (
-          <motion.div
+          <GuardedMotionDiv
             key="medical"
             className="absolute inset-0 z-40 bg-screen"
             custom={1}
@@ -240,10 +241,10 @@ export function PatientApp() {
                 </div>
               </ProfileDetail>
             </EdgeSwipeBack>
-          </motion.div>
+          </GuardedMotionDiv>
         )}
         {pushed === 'notifications' && (
-          <motion.div
+          <GuardedMotionDiv
             key="notif-settings"
             className="absolute inset-0 z-40 bg-screen"
             custom={1}
@@ -256,10 +257,10 @@ export function PatientApp() {
             <EdgeSwipeBack onBack={() => setPushed(null)}>
               <NotificationSettingsScreen back={() => setPushed(null)} onRefresh={refresh} />
             </EdgeSwipeBack>
-          </motion.div>
+          </GuardedMotionDiv>
         )}
         {pushed === 'privacy' && (
-          <motion.div
+          <GuardedMotionDiv
             key="privacy"
             className="absolute inset-0 z-40 bg-screen"
             custom={1}
@@ -272,10 +273,10 @@ export function PatientApp() {
             <EdgeSwipeBack onBack={() => setPushed(null)}>
               <DataPrivacyScreen back={() => setPushed(null)} onRefresh={refresh} />
             </EdgeSwipeBack>
-          </motion.div>
+          </GuardedMotionDiv>
         )}
         {pushed === 'checkin' && (
-          <motion.div
+          <GuardedMotionDiv
             key="checkin"
             className="absolute inset-0 z-40 bg-screen"
             custom={1}
@@ -288,10 +289,10 @@ export function PatientApp() {
             <EdgeSwipeBack onBack={() => setPushed(null)}>
               <CheckInScreen back={() => setPushed(null)} onRefresh={refresh} patientId={ME} />
             </EdgeSwipeBack>
-          </motion.div>
+          </GuardedMotionDiv>
         )}
         {pushed === 'documents' && (
-          <motion.div
+          <GuardedMotionDiv
             key="documents"
             className="absolute inset-0 z-40 bg-screen"
             custom={1}
@@ -304,10 +305,10 @@ export function PatientApp() {
             <EdgeSwipeBack onBack={() => setPushed(null)}>
               <DocumentsScreen back={() => setPushed(null)} onRefresh={refresh} patientId={ME} />
             </EdgeSwipeBack>
-          </motion.div>
+          </GuardedMotionDiv>
         )}
         {pushed === 'messages' && (
-          <motion.div
+          <GuardedMotionDiv
             key="messages"
             className="absolute inset-0 z-40 bg-screen"
             custom={1}
@@ -320,13 +321,13 @@ export function PatientApp() {
             <EdgeSwipeBack onBack={() => setPushed(null)}>
               <MessagesScreen back={() => setPushed(null)} onRefresh={refresh} patientId={ME} />
             </EdgeSwipeBack>
-          </motion.div>
+          </GuardedMotionDiv>
         )}
       </AnimatePresence>
 
       {/* tab content */}
       <AnimatePresence custom={dir} initial={false}>
-        <motion.div
+        <GuardedMotionDiv
           key={tab}
           className="absolute inset-0"
           custom={dir}
@@ -345,7 +346,7 @@ export function PatientApp() {
           )}
           {tab === 'appointments' && <AppointmentsScreen onRefresh={refresh} patientId={ME} />}
           {tab === 'profile' && <ProfileScreen patient={patient} onRefresh={refresh} onPush={setPushed} />}
-        </motion.div>
+        </GuardedMotionDiv>
       </AnimatePresence>
 
       <TabBar tab={tab} onChange={(t) => { setPushed(null); goTab(t) }} />

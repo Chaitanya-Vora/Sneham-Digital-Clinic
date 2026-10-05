@@ -7,6 +7,7 @@ import { useRef, type ReactNode } from 'react'
 import { Minus, Plus, UsersThree } from '@phosphor-icons/react'
 import { haptic } from './haptics'
 import { springSnappy } from './motion'
+import { GuardedLayer } from './presence'
 
 // ── Button ──
 type BtnVariant = 'primary' | 'accent' | 'ghost' | 'quiet' | 'danger'
@@ -362,7 +363,7 @@ export function BottomSheet({
   return (
     <AnimatePresence>
       {open && (
-        <div className="absolute inset-0 z-[70] flex items-end justify-center overflow-hidden">
+        <GuardedLayer className="absolute inset-0 z-[70] flex items-end justify-center overflow-clip">
           <motion.div
             className="absolute inset-0 bg-black/30 backdrop-blur-[2px]"
             initial={{ opacity: 0 }}
@@ -387,7 +388,7 @@ export function BottomSheet({
             <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-border-dash" />
             {children}
           </motion.div>
-        </div>
+        </GuardedLayer>
       )}
     </AnimatePresence>
   )

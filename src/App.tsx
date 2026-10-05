@@ -123,7 +123,7 @@ function MobileShell() {
   if (!surface) return <Launcher onPick={setSurface} />
 
   return (
-    <div className="relative h-[100dvh] w-full overflow-hidden bg-screen">
+    <div className="relative h-[100dvh] w-full overflow-clip bg-screen">
       <Suspense fallback={<SurfaceFallback />}>
         {surface === 'web' ? <WebApp /> : surface === 'practitioner' ? <PractitionerApp /> : <PatientApp />}
       </Suspense>

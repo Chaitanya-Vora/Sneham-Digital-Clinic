@@ -54,6 +54,7 @@ import { haptic } from '../design-system/haptics'
 import { spring, springSoft, tabVariants, pushVariants, listContainer, listItem } from '../design-system/motion'
 import { CountUp } from '../design-system/feedback'
 import { PullToRefresh, useHorizontalSwipe, EdgeSwipeBack, useNativeBackButton } from '../design-system/gestures'
+import { GuardedMotionDiv } from '../design-system/presence'
 import { App as CapApp } from '@capacitor/app'
 import { useToast } from '../design-system/toast'
 import { shareViaWhatsApp, shareViaSms, shareViaEmail, shareTextViaWhatsApp } from '../core/share'
@@ -252,7 +253,7 @@ export function PractitionerApp() {
   }
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-screen">
+    <div className="relative h-full w-full overflow-clip bg-screen">
       {/* base app */}
       <div className="flex h-full flex-col">
         {/* pinned top bar */}
@@ -275,9 +276,9 @@ export function PractitionerApp() {
           </Pressable>
         </div>
 
-        <div className="relative flex-1 overflow-hidden">
+        <div className="relative flex-1 overflow-clip">
           <AnimatePresence custom={dir} initial={false}>
-            <motion.div key={tab} className="absolute inset-0" custom={dir} variants={tabVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.15 }} {...swipe}>
+            <GuardedMotionDiv key={tab} className="absolute inset-0" custom={dir} variants={tabVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.15 }} {...swipe}>
               {tab === 'calendar' ? (
                 <CalendarScreen
                   onOpenPatient={(id) => openOverlay({ kind: 'patient-detail', patientId: id })}
@@ -292,7 +293,7 @@ export function PractitionerApp() {
                   {tab === 'inbox' && <InboxScreen onOpenPatient={(id) => openOverlay({ kind: 'patient-detail', patientId: id })} onOpenChat={(id, name) => openOverlay({ kind: 'chat', patientId: id, patientName: name })} />}
                 </PullToRefresh>
               )}
-            </motion.div>
+            </GuardedMotionDiv>
           </AnimatePresence>
         </div>
       </div>
@@ -303,7 +304,7 @@ export function PractitionerApp() {
           the slide direction matches native forward/back conventions */}
       <AnimatePresence custom={overlayDir}>
         {overlay && (
-          <motion.div
+          <GuardedMotionDiv
             key={overlay.kind + ('patientId' in overlay ? overlay.patientId : overlay.appointmentId)}
             className="absolute inset-0 z-40 bg-screen"
             custom={overlayDir}
@@ -339,7 +340,7 @@ export function PractitionerApp() {
                 />
               )}
             </EdgeSwipeBack>
-          </motion.div>
+          </GuardedMotionDiv>
         )}
       </AnimatePresence>
 

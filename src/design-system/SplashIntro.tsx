@@ -5,21 +5,23 @@ import { GuardedMotionDiv } from './presence'
 // The brand block shared by every loading moment (launch, sign-in hand-off).
 // Sizes match the login screen's SnehamHero exactly, so the logo reads as one
 // continuous thing from splash to login to loading instead of changing size at
-// each step. Same entrance animations as before (mark pops in, text rises).
-export function BrandSplash({ children }: { children?: React.ReactNode }) {
+// each step. Each moment keeps its own entrance: the launch hand-off pops the
+// mark in quickly; the sign-in loader (`relaxed`) uses its original, slower
+// pop and text rise.
+export function BrandSplash({ children, relaxed = false }: { children?: React.ReactNode; relaxed?: boolean }) {
   return (
     <div className="flex flex-col items-center gap-3.5">
       <motion.div
-        initial={{ opacity: 0, scale: 0.7 }}
+        initial={{ opacity: 0, scale: relaxed ? 0.5 : 0.7 }}
         animate={{ opacity: 1, scale: 1 }}
-        transition={{ type: 'spring', stiffness: 300, damping: 18 }}
+        transition={relaxed ? { type: 'spring', stiffness: 260, damping: 20, delay: 0.1 } : { type: 'spring', stiffness: 300, damping: 18 }}
       >
         <SnehamMark size={48} />
       </motion.div>
       <motion.div
-        initial={{ opacity: 0, y: 6 }}
+        initial={{ opacity: 0, y: relaxed ? 12 : 6 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.15, duration: 0.25 }}
+        transition={relaxed ? { duration: 0.5, delay: 0.4, ease: [0.22, 1, 0.36, 1] } : { delay: 0.15, duration: 0.25 }}
         className="text-center"
       >
         <div className="font-display text-[34px] font-bold leading-[1] tracking-[-0.03em] text-ink">Sneham</div>

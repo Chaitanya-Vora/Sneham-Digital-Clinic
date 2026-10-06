@@ -19,7 +19,7 @@ function SplashScreen() {
       exit={{ opacity: 0 }}
       transition={{ duration: 0.4 }}
     >
-      <BrandSplash>
+      <BrandSplash relaxed>
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}

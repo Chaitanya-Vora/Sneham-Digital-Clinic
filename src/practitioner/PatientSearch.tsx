@@ -24,6 +24,7 @@ import {
   Heartbeat,
   Handshake,
   Check,
+  Prohibit,
 } from '@phosphor-icons/react'
 import { useClinic, selPrescriptionsFor, selDosesFor, CASE_RETAKE_APPT_MARKER } from '../core/store'
 import type { Appointment, Patient, Invoice, InvoiceLineItem, PaymentMode, ReferralSource, CaseVisit } from '../core/types'
@@ -245,6 +246,7 @@ export function PatientDetailScreen({
   const checkIns = useClinic(useShallow((s) => s.checkIns.filter((c) => c.patientId === patientId)))
   const archivePatient = useClinic((s) => s.archivePatient)
   const restorePatient = useClinic((s) => s.restorePatient)
+  const cancelPrescription = useClinic((s) => s.cancelPrescription)
   const toast = useToast()
 
   const ME = useClinic((s) => s.currentPractitionerId)
@@ -259,6 +261,9 @@ export function PatientDetailScreen({
 
   const scheduleFollowUpAction = useClinic((s) => s.scheduleFollowUp)
   const [tab, setTab] = useState<DetailTab>('overview')
+  // The id stays after the sheet closes so its text doesn't change mid-exit.
+  const [cancelRx, setCancelRx] = useState<{ id: string; open: boolean }>({ id: '', open: false })
+  const rxToCancel = prescriptions.find((r) => r.id === cancelRx.id)
   const [followUpOpen, setFollowUpOpen] = useState(false)
   const [billing, setBilling] = useState<{ appointmentId?: string; existingInvoice?: Invoice } | null>(null)
   // null = showing the preset list; a date string = the "Custom" picker is open
@@ -694,18 +699,30 @@ export function PatientDetailScreen({
               <motion.div variants={listContainer} initial="hidden" animate="show" className="space-y-2.5">
                 {prescriptions.map((rx) => (
                   <motion.div key={rx.id} variants={listItem}>
-                    <Card className="px-4 py-3">
+                    <Card className={`px-4 py-3 ${rx.status === 'cancelled' ? 'opacity-60' : ''}`}>
                       <div className="flex items-center justify-between">
-                        <div className="font-display text-[14px] font-semibold text-ink">{rx.remedy}</div>
-                        <Badge tone="green">{rx.potency}</Badge>
+                        <div className={`font-display text-[14px] font-semibold text-ink ${rx.status === 'cancelled' ? 'line-through' : ''}`}>{rx.remedy}</div>
+                        <Badge tone={rx.status === 'cancelled' ? 'danger' : 'green'}>{rx.potency}</Badge>
                       </div>
                       <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[12px] text-muted">
                         <span>{rx.repetition}</span>
                         <span>&middot;</span>
                         <span>{rx.durationDays ? `${rx.durationDays} days` : 'Until settled'}</span>
                       </div>
-                      <div className="mt-1.5 text-[11px] text-faint">
-                        {rx.status === 'published' ? 'Published' : rx.status === 'cancelled' ? 'Cancelled' : 'Saved (not yet published)'} {new Date(rx.publishedAt ?? rx.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      <div className="mt-1.5 flex items-center justify-between gap-3">
+                        <div className="text-[11px] text-faint">
+                          {rx.status === 'published' ? 'Published' : rx.status === 'cancelled' ? 'Cancelled' : 'Saved (not yet published)'} {new Date(rx.publishedAt ?? rx.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        </div>
+                        {rx.status !== 'cancelled' && (
+                          <Pressable
+                            hap="tick"
+                            ariaLabel={rx.status === 'draft' ? 'discard draft' : 'cancel prescription'}
+                            onClick={() => setCancelRx({ id: rx.id, open: true })}
+                            className="relative tap-pad-text flex shrink-0 items-center gap-1 text-[11px] font-medium text-danger/70"
+                          >
+                            <Prohibit size={12} /> {rx.status === 'draft' ? 'Discard' : 'Cancel'}
+                          </Pressable>
+                        )}
                       </div>
                     </Card>
                   </motion.div>
@@ -777,6 +794,34 @@ export function PatientDetailScreen({
             </div>
           </>
         )}
+      </BottomSheet>
+
+      <BottomSheet open={cancelRx.open} onClose={() => setCancelRx((c) => ({ ...c, open: false }))}>
+        <div className="flex flex-col items-center py-2 text-center">
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-danger/10 text-danger"><Prohibit size={28} weight="bold" /></div>
+          <div className="mt-3 font-display text-[17px] font-bold text-ink">{rxToCancel?.status === 'draft' ? 'Discard this draft?' : 'Cancel this prescription?'}</div>
+          <div className="mt-1 text-[13px] text-muted">{rxToCancel ? `${rxToCancel.remedy} ${rxToCancel.potency}` : ''}</div>
+          <div className="mt-2 text-[12.5px] leading-relaxed text-muted">
+            {rxToCancel?.status === 'draft'
+              ? 'It was never sent to the patient.'
+              : `It disappears from ${patient.name.split(' ')[0]}'s app and its dose reminders stop. It stays in your records, marked cancelled.`}
+          </div>
+          <div className="mt-4 flex w-full gap-2">
+            <Pressable hap="tick" onClick={() => setCancelRx((c) => ({ ...c, open: false }))} className="flex-1 rounded-pill border border-border bg-surface py-2.5 text-center text-[14px] font-semibold text-body">Keep it</Pressable>
+            <Pressable
+              hap="impact"
+              onClick={() => {
+                const wasDraft = rxToCancel?.status === 'draft'
+                if (cancelRx.id) cancelPrescription(cancelRx.id)
+                setCancelRx((c) => ({ ...c, open: false }))
+                toast({ title: wasDraft ? 'Draft discarded' : 'Prescription cancelled' })
+              }}
+              className="flex-1 rounded-pill bg-danger py-2.5 text-center text-[14px] font-semibold text-white"
+            >
+              {rxToCancel?.status === 'draft' ? 'Discard' : 'Cancel it'}
+            </Pressable>
+          </div>
+        </div>
       </BottomSheet>
 
       <InvoiceSheet

@@ -1640,7 +1640,7 @@ function CheckInScreen({ back, onRefresh, patientId }: { back: () => void; onRef
                   </div>
                   {ci.changeChips.length > 0 && (
                     <div className="mt-1.5 flex flex-wrap gap-1">
-                      {ci.changeChips.map((c) => <span key={c} className="rounded-pill bg-screen px-2 py-0.5 text-[10px] font-medium text-body">{c}</span>)}
+                      {ci.changeChips.map((c) => <span key={c} className="rounded-pill bg-screen px-2 py-0.5 text-[11px] font-medium text-body">{c}</span>)}
                     </div>
                   )}
                 </Card>
@@ -1802,7 +1802,7 @@ function TabBar({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
               {on && <motion.span layoutId="patient-tab" className="absolute inset-0 rounded-pill bg-tint-pale" transition={spring} />}
               <span className={`relative ${on ? 'text-brand' : 'text-faint'}`}><it.icon size={21} weight={on ? 'fill' : 'regular'} /></span>
             </span>
-            <span className={`text-[10px] font-medium ${on ? 'text-brand' : 'text-faint'}`}>{it.label}</span>
+            <span className={`text-[11px] font-medium ${on ? 'text-brand' : 'text-faint'}`}>{it.label}</span>
           </Pressable>
         )
       })}

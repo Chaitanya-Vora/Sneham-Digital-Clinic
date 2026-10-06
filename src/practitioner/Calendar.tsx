@@ -344,7 +344,7 @@ export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatien
                 Today
               </Pressable>
             )}
-            <Pressable hap="tick" onClick={() => setAddChooserOpen(true)} className="flex h-8 w-8 items-center justify-center rounded-full bg-brand text-screen">
+            <Pressable hap="tick" onClick={() => setAddChooserOpen(true)} className="relative tap-pad-sm flex h-8 w-8 items-center justify-center rounded-full bg-brand text-screen">
               <Plus size={16} weight="bold" />
             </Pressable>
           </div>
@@ -357,7 +357,7 @@ export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatien
               key={v}
               hap="tick"
               onClick={() => { setView(v); haptic('select') }}
-              className={`relative z-10 flex-1 rounded-[10px] py-[7px] text-center text-[13px] font-semibold transition-colors ${view === v ? 'text-ink' : 'text-muted'}`}
+              className={`relative tap-pad-y z-10 flex-1 rounded-[10px] py-[7px] text-center text-[13px] font-semibold transition-colors ${view === v ? 'text-ink' : 'text-muted'}`}
             >
               {view === v && (
                 <motion.span
@@ -411,13 +411,13 @@ export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatien
               {/* day strip */}
               <div className="px-[18px] pb-2 pt-3">
                 <div className="flex items-center justify-between">
-                  <Pressable hap="tick" onClick={() => shiftWeek(-1)} className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-surface">
+                  <Pressable hap="tick" onClick={() => shiftWeek(-1)} className="relative tap-pad-sm flex h-8 w-8 items-center justify-center rounded-full border border-border bg-surface">
                     <CaretLeft size={16} className="text-body" />
                   </Pressable>
                   <div className="text-[13px] font-semibold text-muted">
                     {weekDays[0].getDate()} {MONTH_NAMES_SHORT[weekDays[0].getMonth()]} – {weekDays[6].getDate()} {MONTH_NAMES_SHORT[weekDays[6].getMonth()]}
                   </div>
-                  <Pressable hap="tick" onClick={() => shiftWeek(1)} className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-surface">
+                  <Pressable hap="tick" onClick={() => shiftWeek(1)} className="relative tap-pad-sm flex h-8 w-8 items-center justify-center rounded-full border border-border bg-surface">
                     <CaretRight size={16} className="text-body" />
                   </Pressable>
                 </div>
@@ -629,11 +629,11 @@ function MonthGrid({
     <div>
       {/* month header */}
       <div className="flex items-center justify-between">
-        <Pressable hap="tick" onClick={() => onShift(-1)} className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
+        <Pressable hap="tick" onClick={() => onShift(-1)} className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
           <CaretLeft size={16} className="text-body" />
         </Pressable>
         <div className="font-display text-[17px] font-bold text-ink">{formatMonth(monthDate)}</div>
-        <Pressable hap="tick" onClick={() => onShift(1)} className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
+        <Pressable hap="tick" onClick={() => onShift(1)} className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
           <CaretRight size={16} className="text-body" />
         </Pressable>
       </div>
@@ -744,7 +744,7 @@ function AppointmentCard({
         <div className="font-display text-[13px] font-bold text-ink">
           {a.time.replace(' AM', '').replace(' PM', '')}
         </div>
-        <div className="text-[10px] text-faint">
+        <div className="text-[11px] text-faint">
           {a.time.includes('AM') ? 'AM' : 'PM'}
         </div>
       </div>
@@ -775,7 +775,7 @@ function AppointmentCard({
             <Pressable
               hap="tick"
               onClick={(e) => { e?.stopPropagation(); onEdit() }}
-              className="text-[11px] font-medium text-brand"
+              className="relative tap-pad-text text-[11px] font-medium text-brand"
             >
               Edit
             </Pressable>
@@ -784,7 +784,7 @@ function AppointmentCard({
             <Pressable
               hap="tick"
               onClick={(e) => { e?.stopPropagation(); onCancel() }}
-              className="text-[11px] font-medium text-danger/70"
+              className="relative tap-pad-text text-[11px] font-medium text-danger/70"
             >
               Cancel
             </Pressable>
@@ -793,7 +793,7 @@ function AppointmentCard({
             <Pressable
               hap="tick"
               onClick={(e) => { e?.stopPropagation(); onReassign() }}
-              className="text-[11px] font-medium text-brand"
+              className="relative tap-pad-text text-[11px] font-medium text-brand"
             >
               Reassign to me
             </Pressable>

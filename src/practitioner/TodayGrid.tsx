@@ -316,7 +316,7 @@ export function TodayGrid({
                   key={m}
                   hap="tick"
                   onClick={() => setViewMode(m)}
-                  className={`flex items-center gap-1 rounded-pill px-3 py-1 text-[12px] font-semibold transition ${viewMode === m ? 'bg-brand text-screen' : 'text-muted'}`}
+                  className={`relative tap-pad-y flex items-center gap-1 rounded-pill px-3 py-1 text-[12px] font-semibold transition ${viewMode === m ? 'bg-brand text-screen' : 'text-muted'}`}
                 >
                   {m === 'mine' ? <UserIcon size={12} weight={viewMode === m ? 'fill' : 'regular'} /> : <UsersThree size={12} weight={viewMode === m ? 'fill' : 'regular'} />}
                   {m === 'mine' ? 'Mine' : 'Everyone'}
@@ -328,7 +328,7 @@ export function TodayGrid({
             ariaLabel="quick actions"
             hap="tick"
             onClick={() => setQuickActionsOpen(true)}
-            className="flex h-7 w-7 items-center justify-center rounded-full border border-border bg-surface"
+            className="relative tap-pad flex h-7 w-7 items-center justify-center rounded-full border border-border bg-surface"
           >
             <DotsThreeVertical size={16} weight="bold" className="text-body" />
           </Pressable>
@@ -367,7 +367,7 @@ export function TodayGrid({
           {stats.map(([l, v, tone]) => (
             <div key={l} className={`rounded-[14px] border border-border bg-surface px-2.5 py-2 text-center ${tone === 'amber' && v > 0 ? 'border-amber/40 bg-amber-tint/30' : ''}`}>
               <div className={`font-display text-[18px] font-bold ${tone === 'amber' && v > 0 ? 'text-amber-text' : 'text-ink'}`}>{v}</div>
-              <div className="text-[10px] font-medium uppercase tracking-wider text-faint">{l}</div>
+              <div className="text-[11px] font-medium uppercase tracking-wider text-faint">{l}</div>
             </div>
           ))}
         </div>
@@ -377,7 +377,7 @@ export function TodayGrid({
               key={v}
               hap="tick"
               onClick={() => setView(v)}
-              className={`flex items-center gap-1 px-3.5 py-2 text-[12.5px] font-semibold capitalize transition ${view === v ? 'bg-brand text-screen' : 'text-body'} ${v === 'day' ? 'rounded-l-[10px]' : 'rounded-r-[10px]'}`}
+              className={`relative tap-pad-y flex items-center gap-1 px-3.5 py-2 text-[12.5px] font-semibold capitalize transition ${view === v ? 'bg-brand text-screen' : 'text-body'} ${v === 'day' ? 'rounded-l-[10px]' : 'rounded-r-[10px]'}`}
             >
               {v === 'day' ? <SquaresFour size={13} weight={view === v ? 'fill' : 'regular'} /> : <Rows size={13} weight={view === v ? 'fill' : 'regular'} />}
               {v === 'day' ? 'Grid' : 'List'}
@@ -603,7 +603,7 @@ function DayGridView({ appts, timeBlocks, patients, practitioners, myId, activeA
           return (
             <div key={h} className="flex border-b border-border last:border-b-0" style={{ minHeight: `${HOUR_HEIGHT}px` }}>
               {/* time label */}
-              <div className="flex w-[54px] shrink-0 items-start justify-end border-r border-border px-2 pt-1.5 text-[10px] font-medium text-faint">
+              <div className="flex w-[54px] shrink-0 items-start justify-end border-r border-border px-2 pt-1.5 text-[11px] font-medium text-faint">
                 {fmtHour(h)}
               </div>
 
@@ -685,21 +685,21 @@ function DayGridView({ appts, timeBlocks, patients, practitioners, myId, activeA
                             {a.type === 'Video' && <VideoCamera size={11} weight="fill" className="shrink-0 text-brand" />}
                             {!isMine && <Badge tone="neutral" className="!px-1.5 !py-0 !text-[9px]">{prFind(a.practitionerId)?.name ?? 'Team'}</Badge>}
                           </div>
-                          <div className="truncate text-[10px] text-muted">{a.time} · {a.reason ?? ''}</div>
+                          <div className="truncate text-[11px] text-muted">{a.time} · {a.reason ?? ''}</div>
                         </div>
                         <div className="flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
                           {canStart && (
-                            <Pressable hap="impact" onClick={() => onStartConsult(a.id)} className="flex items-center gap-0.5 rounded-pill bg-brand px-2 py-1 text-[10px] font-semibold text-screen">
+                            <Pressable hap="impact" onClick={() => onStartConsult(a.id)} className="relative tap-pad-y flex items-center gap-0.5 rounded-pill bg-brand px-2 py-1 text-[11px] font-semibold text-screen">
                               <Play size={9} weight="fill" /> Start
                             </Pressable>
                           )}
                           {isActive && isMine && (
-                            <Pressable hap="tick" onClick={() => onEndConsult(a.id)} className="flex items-center gap-0.5 rounded-pill bg-danger/10 px-2 py-1 text-[10px] font-semibold text-danger">
+                            <Pressable hap="tick" onClick={() => onEndConsult(a.id)} className="relative tap-pad-y flex items-center gap-0.5 rounded-pill bg-danger/10 px-2 py-1 text-[11px] font-semibold text-danger">
                               <Stop size={9} weight="fill" /> End
                             </Pressable>
                           )}
                           {!isSeen && !isActive && isMine && (
-                            <Pressable hap="tick" onClick={() => onSelectForReschedule(a.id)} className="rounded-full p-1 text-faint hover:bg-raised">
+                            <Pressable hap="tick" onClick={() => onSelectForReschedule(a.id)} className="relative tap-pad-sm rounded-full p-1 text-faint hover:bg-raised">
                               <DotsSixVertical size={13} weight="bold" />
                             </Pressable>
                           )}
@@ -770,7 +770,7 @@ function ListView({
             <Pressable as="div" hap="tick" scale={0.99} onClick={() => onOpenCase(p.id)} className={`flex cursor-pointer items-center gap-3 rounded-[20px] border border-border bg-surface px-3.5 py-3 shadow-card ${isSeen ? 'opacity-60' : ''}`}>
               <div className="text-center">
                 <div className="font-display text-[13px] font-bold text-ink">{a.time.replace(' AM', '').replace(' PM', '')}</div>
-                <div className="text-[10px] text-faint">{a.durationMin}m</div>
+                <div className="text-[11px] text-faint">{a.durationMin}m</div>
               </div>
               <Avatar initials={p.initials} size={38} />
               <div className="min-w-0 flex-1">
@@ -793,7 +793,7 @@ function ListView({
                   <Badge tone={a.status === 'In consult' ? 'green' : a.status === 'New' ? 'amber' : a.status === 'Waiting' ? 'amber' : 'neutral'}>{a.status}</Badge>
                 )}
                 {canStart && (
-                  <Pressable hap="impact" onClick={() => onStartConsult(a.id)} className="flex items-center gap-1 rounded-pill bg-brand px-2.5 py-1 text-[11px] font-semibold text-screen">
+                  <Pressable hap="impact" onClick={() => onStartConsult(a.id)} className="relative tap-pad-y4 flex items-center gap-1 rounded-pill bg-brand px-2.5 py-1 text-[11px] font-semibold text-screen">
                     <Play size={10} weight="fill" /> Start
                   </Pressable>
                 )}

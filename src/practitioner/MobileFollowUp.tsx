@@ -122,7 +122,7 @@ export function MobileFollowUp({
   return (
     <div className="flex h-full flex-col bg-screen">
       <div className="px-[18px] pb-2 pt-[var(--app-top)]">
-        <Pressable ariaLabel="back" hap="tick" onClick={onBack} className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
+        <Pressable ariaLabel="back" hap="tick" onClick={onBack} className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
           <CaretLeft size={18} className="text-body" />
         </Pressable>
         <div className="mt-1 flex items-center gap-2">

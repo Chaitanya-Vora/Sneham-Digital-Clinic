@@ -59,6 +59,15 @@
 }
 
 @layer utilities {
+  /* Grows a control's touch area without changing how it looks — the pseudo
+     element is invisible but catches taps. Parent must be positioned. */
+  .tap-pad-text::after { content: ''; position: absolute; inset: -8px -4px; }
+  .tap-pad-sm::after { content: ''; position: absolute; inset: -4px; }
+  .tap-pad::after { content: ''; position: absolute; inset: -8px; }
+  .tap-pad-lg::after { content: ''; position: absolute; inset: -12px; }
+  .tap-pad-y::after { content: ''; position: absolute; inset: -8px 0; }
+  .tap-pad-y4::after { content: ''; position: absolute; inset: -4px 0; }
+  .tap-pad-y12::after { content: ''; position: absolute; inset: -12px 0; }
   .font-display {
     font-family: 'Outfit', system-ui, sans-serif;
   }

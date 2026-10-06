@@ -134,7 +134,7 @@ export function PatientSearchSheet({
         >
           {/* header + search */}
           <div className="flex items-center gap-2 px-[18px] pb-2 pt-[var(--app-top)]">
-            <Pressable ariaLabel="back" hap="tick" onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
+            <Pressable ariaLabel="back" hap="tick" onClick={onClose} className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
               <CaretLeft size={18} className="text-body" />
             </Pressable>
             <div className="flex flex-1 items-center gap-2 rounded-pill border border-border bg-surface px-3.5 py-2">
@@ -144,16 +144,16 @@ export function PatientSearchSheet({
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Name, WS code, complaint, remedy..."
-                className="w-full bg-transparent text-[13px] outline-none placeholder:text-faint"
+                className="-my-2 w-full bg-transparent py-2 text-[13px] outline-none placeholder:text-faint"
                 data-selectable="true"
               />
               {query && (
-                <Pressable ariaLabel="clear" hap="tick" onClick={() => setQuery('')} className="text-faint">
+                <Pressable ariaLabel="clear" hap="tick" onClick={() => setQuery('')} className="relative tap-pad-lg text-faint">
                   <X size={14} />
                 </Pressable>
               )}
             </div>
-            <Pressable ariaLabel="add patient" hap="tick" onClick={onAddPatient} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-brand">
+            <Pressable ariaLabel="add patient" hap="tick" onClick={onAddPatient} className="relative tap-pad-sm flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-brand">
               <Plus size={18} weight="bold" />
             </Pressable>
           </div>
@@ -285,7 +285,7 @@ export function PatientDetailScreen({
     return (
       <div className="flex h-full flex-col bg-screen">
         <div className="px-[18px] pb-3 pt-[var(--app-top)]">
-          <Pressable ariaLabel="back" hap="tick" onClick={onBack} className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
+          <Pressable ariaLabel="back" hap="tick" onClick={onBack} className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
             <CaretLeft size={18} className="text-body" />
           </Pressable>
         </div>
@@ -357,11 +357,11 @@ export function PatientDetailScreen({
       {/* header */}
       <div className="px-[18px] pb-3 pt-[var(--app-top)]">
         <div className="flex items-center gap-2">
-          <Pressable ariaLabel="back" hap="tick" onClick={onBack} className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
+          <Pressable ariaLabel="back" hap="tick" onClick={onBack} className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
             <CaretLeft size={18} className="text-body" />
           </Pressable>
           <div className="flex-1" />
-          <Pressable ariaLabel="more actions" hap="tick" onClick={() => setActionsOpen(true)} className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
+          <Pressable ariaLabel="more actions" hap="tick" onClick={() => setActionsOpen(true)} className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
             <DotsThreeVertical size={18} weight="bold" className="text-body" />
           </Pressable>
         </div>
@@ -379,7 +379,7 @@ export function PatientDetailScreen({
               <a
                 href={`tel:${patient.phone}`}
                 onClick={() => haptic('tick')}
-                className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface text-body"
+                className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface text-body"
               >
                 <Phone size={15} />
               </a>
@@ -390,7 +390,7 @@ export function PatientDetailScreen({
                   const ok = shareViaWhatsApp(patient.phone, `Hi ${patient.name.split(' ')[0]}, this is Sneham Digital Clinic.`)
                   if (!ok) toast({ title: 'No phone number on file', message: 'Add a phone number for this patient first.' })
                 }}
-                className="flex h-9 w-9 items-center justify-center rounded-full bg-[#25D366] text-white"
+                className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full bg-[#25D366] text-white"
               >
                 <WhatsAppIcon size={18} color="#fff" />
               </Pressable>
@@ -624,7 +624,7 @@ export function PatientDetailScreen({
                   </div>
                   <div className="font-display text-[14px] font-semibold text-ink">Billing</div>
                 </div>
-                <Pressable hap="tick" onClick={() => setBilling({})} className="text-[12px] font-semibold text-brand">Quick bill</Pressable>
+                <Pressable hap="tick" onClick={() => setBilling({})} className="relative tap-pad-lg text-[12px] font-semibold text-brand">Quick bill</Pressable>
               </div>
               {invoices.length === 0 ? (
                 <p className="py-3 text-center text-[12.5px] text-faint">No invoices yet.</p>

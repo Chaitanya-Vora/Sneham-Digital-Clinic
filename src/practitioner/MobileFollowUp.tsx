@@ -56,12 +56,15 @@ export function MobileFollowUp({
   const [handoffReason, setHandoffReason] = useState('')
   const [coveringUntilDate, setCoveringUntilDate] = useState(addDaysISO(todayISO(), 7))
   const [saved, setSaved] = useState(false)
+  // `saved` only drives the confirmation sheet and resets on Done; this stays
+  // true, so the text still sitting in the form is never kept as a draft again.
+  const [didSave, setDidSave] = useState(false)
   const [offerFollowUp, setOfferFollowUp] = useState(false)
   const [drafts, setDrafts] = useState<AttachmentDraft[]>([])
   const [saving, setSaving] = useState(false)
 
   const draftValue = useMemo(() => ({ outcome, note }), [outcome, note])
-  const hasUnsavedText = !saved && (outcome !== 'Partial' || note !== defaultNote)
+  const hasUnsavedText = !saved && !didSave && (outcome !== 'Partial' || note !== defaultNote)
   useDraftWriter(draftKey, draftValue, hasUnsavedText)
   useEffect(() => {
     if (hasUnsavedText) setResume({ kind: 'compare', patientId })
@@ -116,6 +119,7 @@ export function MobileFollowUp({
     clearResume()
     setDrafts([])
     setSaving(false)
+    setDidSave(true)
     setSaved(true)
   }
 

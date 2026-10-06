@@ -24,6 +24,7 @@ import {
   Heartbeat,
   Handshake,
   Check,
+  Prohibit,
 } from '@phosphor-icons/react'
 import { useClinic, selPrescriptionsFor, selDosesFor, CASE_RETAKE_APPT_MARKER } from '../core/store'
 import type { Appointment, Patient, Invoice, InvoiceLineItem, PaymentMode, ReferralSource, CaseVisit } from '../core/types'
@@ -40,6 +41,10 @@ import { WhatsAppIcon } from '../design-system/BrandIcons'
 import { shareViaWhatsApp } from '../core/share'
 import { getSections, type CaseTemplateName } from '../core/caseTemplate'
 import { PatientQuickView } from './PatientQuickView'
+import { AttachmentList } from '../components/FollowUpAttachments'
+import { GuardedMotionDiv } from '../design-system/presence'
+import { useShallow } from 'zustand/react/shallow'
+import { usePatientLookup, findPatientMatches } from '../core/duplicates'
 
 const REFERRAL_SOURCES: ReferralSource[] = ['Offline', 'Instagram', 'References', 'Referral']
 
@@ -116,7 +121,7 @@ export function PatientSearchSheet({
   return (
     <AnimatePresence>
       {open && (
-        <motion.div
+        <GuardedMotionDiv
           ref={sheetTransformRef}
           className="absolute inset-0 z-50 flex flex-col bg-screen"
           variants={pushVariants}
@@ -131,7 +136,7 @@ export function PatientSearchSheet({
         >
           {/* header + search */}
           <div className="flex items-center gap-2 px-[18px] pb-2 pt-[var(--app-top)]">
-            <Pressable ariaLabel="back" hap="tick" onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
+            <Pressable ariaLabel="back" hap="tick" onClick={onClose} className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
               <CaretLeft size={18} className="text-body" />
             </Pressable>
             <div className="flex flex-1 items-center gap-2 rounded-pill border border-border bg-surface px-3.5 py-2">
@@ -141,16 +146,16 @@ export function PatientSearchSheet({
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Name, WS code, complaint, remedy..."
-                className="w-full bg-transparent text-[13px] outline-none placeholder:text-faint"
+                className="-my-2 w-full bg-transparent py-2 text-[13px] outline-none placeholder:text-faint"
                 data-selectable="true"
               />
               {query && (
-                <Pressable ariaLabel="clear" hap="tick" onClick={() => setQuery('')} className="text-faint">
+                <Pressable ariaLabel="clear" hap="tick" onClick={() => setQuery('')} className="relative tap-pad-lg text-faint">
                   <X size={14} />
                 </Pressable>
               )}
             </div>
-            <Pressable ariaLabel="add patient" hap="tick" onClick={onAddPatient} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-brand">
+            <Pressable ariaLabel="add patient" hap="tick" onClick={onAddPatient} className="relative tap-pad-sm flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-brand">
               <Plus size={18} weight="bold" />
             </Pressable>
           </div>
@@ -204,7 +209,7 @@ export function PatientSearchSheet({
               onViewProfile={(id) => { onSelect(id); onClose() }}
             />
           )}
-        </motion.div>
+        </GuardedMotionDiv>
       )}
     </AnimatePresence>
   )
@@ -232,30 +237,34 @@ export function PatientDetailScreen({
   onOrderInvestigations: () => void
 }) {
   const patient = useClinic((s) => s.patients.find((p) => p.id === patientId))
-  const appointments = useClinic((s) => s.appointments.filter((a) => a.patientId === patientId))
+  const appointments = useClinic(useShallow((s) => s.appointments.filter((a) => a.patientId === patientId)))
   const allAppointments = useClinic((s) => s.appointments)
-  const invoices = useClinic((s) => s.invoices.filter((i) => i.patientId === patientId))
+  const invoices = useClinic(useShallow((s) => s.invoices.filter((i) => i.patientId === patientId)))
   const prescriptions = useClinic(selPrescriptionsFor(patientId))
   const doses = useClinic(selDosesFor(patientId))
-  const outcomes = useClinic((s) => s.outcomes.filter((o) => o.patientId === patientId))
-  const investigationOrders = useClinic((s) => s.investigationOrders.filter((o) => o.patientId === patientId))
-  const checkIns = useClinic((s) => s.checkIns.filter((c) => c.patientId === patientId))
+  const outcomes = useClinic(useShallow((s) => s.outcomes.filter((o) => o.patientId === patientId)))
+  const investigationOrders = useClinic(useShallow((s) => s.investigationOrders.filter((o) => o.patientId === patientId)))
+  const checkIns = useClinic(useShallow((s) => s.checkIns.filter((c) => c.patientId === patientId)))
   const archivePatient = useClinic((s) => s.archivePatient)
   const restorePatient = useClinic((s) => s.restorePatient)
+  const cancelPrescription = useClinic((s) => s.cancelPrescription)
   const toast = useToast()
 
   const ME = useClinic((s) => s.currentPractitionerId)
   const practitioners = useClinic((s) => s.practitioners)
   const assignPatient = useClinic((s) => s.assignPatient)
   const createHandoff = useClinic((s) => s.createHandoff)
-  const handoffs = useClinic((s) => s.handoffs.filter((h) => h.patientId === patientId))
-  const caseVisits = useClinic((s) => s.caseVisits.filter((v) => v.patientId === patientId))
+  const handoffs = useClinic(useShallow((s) => s.handoffs.filter((h) => h.patientId === patientId)))
+  const caseVisits = useClinic(useShallow((s) => s.caseVisits.filter((v) => v.patientId === patientId)))
   const startCaseRetake = useClinic((s) => s.startCaseRetake)
   const caseRetakeActive = useClinic((s) => !!s.caseRetakeIntent[patientId])
   const customCaseTemplates = useClinic((s) => s.caseTemplates)
 
   const scheduleFollowUpAction = useClinic((s) => s.scheduleFollowUp)
   const [tab, setTab] = useState<DetailTab>('overview')
+  // The id stays after the sheet closes so its text doesn't change mid-exit.
+  const [cancelRx, setCancelRx] = useState<{ id: string; open: boolean }>({ id: '', open: false })
+  const rxToCancel = prescriptions.find((r) => r.id === cancelRx.id)
   const [followUpOpen, setFollowUpOpen] = useState(false)
   const [billing, setBilling] = useState<{ appointmentId?: string; existingInvoice?: Invoice } | null>(null)
   // null = showing the preset list; a date string = the "Custom" picker is open
@@ -282,7 +291,7 @@ export function PatientDetailScreen({
     return (
       <div className="flex h-full flex-col bg-screen">
         <div className="px-[18px] pb-3 pt-[var(--app-top)]">
-          <Pressable ariaLabel="back" hap="tick" onClick={onBack} className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
+          <Pressable ariaLabel="back" hap="tick" onClick={onBack} className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
             <CaretLeft size={18} className="text-body" />
           </Pressable>
         </div>
@@ -354,11 +363,11 @@ export function PatientDetailScreen({
       {/* header */}
       <div className="px-[18px] pb-3 pt-[var(--app-top)]">
         <div className="flex items-center gap-2">
-          <Pressable ariaLabel="back" hap="tick" onClick={onBack} className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
+          <Pressable ariaLabel="back" hap="tick" onClick={onBack} className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
             <CaretLeft size={18} className="text-body" />
           </Pressable>
           <div className="flex-1" />
-          <Pressable ariaLabel="more actions" hap="tick" onClick={() => setActionsOpen(true)} className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
+          <Pressable ariaLabel="more actions" hap="tick" onClick={() => setActionsOpen(true)} className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
             <DotsThreeVertical size={18} weight="bold" className="text-body" />
           </Pressable>
         </div>
@@ -376,7 +385,7 @@ export function PatientDetailScreen({
               <a
                 href={`tel:${patient.phone}`}
                 onClick={() => haptic('tick')}
-                className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface text-body"
+                className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface text-body"
               >
                 <Phone size={15} />
               </a>
@@ -387,7 +396,7 @@ export function PatientDetailScreen({
                   const ok = shareViaWhatsApp(patient.phone, `Hi ${patient.name.split(' ')[0]}, this is Sneham Digital Clinic.`)
                   if (!ok) toast({ title: 'No phone number on file', message: 'Add a phone number for this patient first.' })
                 }}
-                className="flex h-9 w-9 items-center justify-center rounded-full bg-[#25D366] text-white"
+                className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full bg-[#25D366] text-white"
               >
                 <WhatsAppIcon size={18} color="#fff" />
               </Pressable>
@@ -621,7 +630,7 @@ export function PatientDetailScreen({
                   </div>
                   <div className="font-display text-[14px] font-semibold text-ink">Billing</div>
                 </div>
-                <Pressable hap="tick" onClick={() => setBilling({})} className="text-[12px] font-semibold text-brand">Quick bill</Pressable>
+                <Pressable hap="tick" onClick={() => setBilling({})} className="relative tap-pad-lg text-[12px] font-semibold text-brand">Quick bill</Pressable>
               </div>
               {invoices.length === 0 ? (
                 <p className="py-3 text-center text-[12.5px] text-faint">No invoices yet.</p>
@@ -674,6 +683,7 @@ export function PatientDetailScreen({
                         <span className="text-[13px] font-semibold text-ink">{o.remedy}</span>
                       </div>
                       {o.note && <div className="mt-1 text-[12px] text-muted">{o.note}</div>}
+                      <AttachmentList attachments={o.attachments} />
                     </Card>
                   </motion.div>
                 ))}
@@ -690,18 +700,30 @@ export function PatientDetailScreen({
               <motion.div variants={listContainer} initial="hidden" animate="show" className="space-y-2.5">
                 {prescriptions.map((rx) => (
                   <motion.div key={rx.id} variants={listItem}>
-                    <Card className="px-4 py-3">
+                    <Card className={`px-4 py-3 ${rx.status === 'cancelled' ? 'opacity-60' : ''}`}>
                       <div className="flex items-center justify-between">
-                        <div className="font-display text-[14px] font-semibold text-ink">{rx.remedy}</div>
-                        <Badge tone="green">{rx.potency}</Badge>
+                        <div className={`font-display text-[14px] font-semibold text-ink ${rx.status === 'cancelled' ? 'line-through' : ''}`}>{rx.remedy}</div>
+                        <Badge tone={rx.status === 'cancelled' ? 'danger' : 'green'}>{rx.potency}</Badge>
                       </div>
                       <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[12px] text-muted">
                         <span>{rx.repetition}</span>
                         <span>&middot;</span>
                         <span>{rx.durationDays ? `${rx.durationDays} days` : 'Until settled'}</span>
                       </div>
-                      <div className="mt-1.5 text-[11px] text-faint">
-                        {rx.status === 'published' ? 'Published' : rx.status === 'cancelled' ? 'Cancelled' : 'Saved (not yet published)'} {new Date(rx.publishedAt ?? rx.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      <div className="mt-1.5 flex items-center justify-between gap-3">
+                        <div className="text-[11px] text-faint">
+                          {rx.status === 'published' ? 'Published' : rx.status === 'cancelled' ? 'Cancelled' : 'Saved (not yet published)'} {new Date(rx.publishedAt ?? rx.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        </div>
+                        {rx.status !== 'cancelled' && (
+                          <Pressable
+                            hap="tick"
+                            ariaLabel={rx.status === 'draft' ? 'discard draft' : 'cancel prescription'}
+                            onClick={() => setCancelRx({ id: rx.id, open: true })}
+                            className="relative tap-pad-text flex shrink-0 items-center gap-1 text-[11px] font-medium text-danger/70"
+                          >
+                            <Prohibit size={12} /> {rx.status === 'draft' ? 'Discard' : 'Cancel'}
+                          </Pressable>
+                        )}
                       </div>
                     </Card>
                   </motion.div>
@@ -773,6 +795,34 @@ export function PatientDetailScreen({
             </div>
           </>
         )}
+      </BottomSheet>
+
+      <BottomSheet open={cancelRx.open} onClose={() => setCancelRx((c) => ({ ...c, open: false }))}>
+        <div className="flex flex-col items-center py-2 text-center">
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-danger/10 text-danger"><Prohibit size={28} weight="bold" /></div>
+          <div className="mt-3 font-display text-[17px] font-bold text-ink">{rxToCancel?.status === 'draft' ? 'Discard this draft?' : 'Cancel this prescription?'}</div>
+          <div className="mt-1 text-[13px] text-muted">{rxToCancel ? `${rxToCancel.remedy} ${rxToCancel.potency}` : ''}</div>
+          <div className="mt-2 text-[12.5px] leading-relaxed text-muted">
+            {rxToCancel?.status === 'draft'
+              ? 'It was never sent to the patient.'
+              : `It disappears from ${patient.name.split(' ')[0]}'s app and its dose reminders stop. It stays in your records, marked cancelled.`}
+          </div>
+          <div className="mt-4 flex w-full gap-2">
+            <Pressable hap="tick" onClick={() => setCancelRx((c) => ({ ...c, open: false }))} className="flex-1 rounded-pill border border-border bg-surface py-2.5 text-center text-[14px] font-semibold text-body">Keep it</Pressable>
+            <Pressable
+              hap="impact"
+              onClick={() => {
+                const wasDraft = rxToCancel?.status === 'draft'
+                if (cancelRx.id) cancelPrescription(cancelRx.id)
+                setCancelRx((c) => ({ ...c, open: false }))
+                toast({ title: wasDraft ? 'Draft discarded' : 'Prescription cancelled' })
+              }}
+              className="flex-1 rounded-pill bg-danger py-2.5 text-center text-[14px] font-semibold text-white"
+            >
+              {rxToCancel?.status === 'draft' ? 'Discard' : 'Cancel it'}
+            </Pressable>
+          </div>
+        </div>
       </BottomSheet>
 
       <InvoiceSheet
@@ -1469,12 +1519,15 @@ export function AddPatientSheet({
   open,
   onClose,
   onAdded,
+  onOpenExisting,
 }: {
   open: boolean
   onClose: () => void
   onAdded: (patientId: string) => void
+  onOpenExisting?: (patientId: string) => void
 }) {
   const addPatient = useClinic((s) => s.addPatient)
+  const allPatients = useClinic((s) => s.patients)
   const toast = useToast()
 
   const [name, setName] = useState('')
@@ -1486,6 +1539,11 @@ export function AddPatientSheet({
   const [referralSource, setReferralSource] = useState<ReferralSource | undefined>(undefined)
   const [nameError, setNameError] = useState('')
   const [ageError, setAgeError] = useState('')
+  const [nameConfirmed, setNameConfirmed] = useState(false)
+
+  // Checked as the name/number is typed, against what's already on the device.
+  const lookup = usePatientLookup(allPatients)
+  const matches = findPatientMatches(lookup, name, phone)
 
   const reset = () => {
     setName('')
@@ -1497,6 +1555,13 @@ export function AddPatientSheet({
     setReferralSource(undefined)
     setNameError('')
     setAgeError('')
+    setNameConfirmed(false)
+  }
+
+  const openExisting = (id: string) => {
+    haptic('tick')
+    onClose()
+    onOpenExisting?.(id)
   }
 
   const onRegister = () => {
@@ -1505,6 +1570,8 @@ export function AddPatientSheet({
     setNameError(nameOk ? '' : 'Name is required')
     setAgeError(ageOk ? '' : 'Age is required')
     if (!nameOk || !ageOk) { haptic('warn'); return }
+    // Same name as someone already registered: confirm it's a different person.
+    if (matches.sameName.length > 0 && !nameConfirmed) { setNameError('Tick the box below if this is a different person'); haptic('warn'); return }
     const patient = addPatient({
       name: name.trim(),
       age: parseInt(age, 10) || 0,
@@ -1532,12 +1599,41 @@ export function AddPatientSheet({
           <Label>Name</Label>
           <input
             value={name}
-            onChange={(e) => { setName(e.target.value); if (nameError) setNameError('') }}
+            onChange={(e) => { setName(e.target.value); setNameConfirmed(false); if (nameError) setNameError('') }}
             placeholder="Full name"
             className={`mt-1.5 ${inputCls} ${nameError ? 'border-danger' : ''}`}
             data-selectable="true"
           />
           {nameError && <p className="mt-1 text-[12px] text-danger">{nameError}</p>}
+          {matches.sameName.length > 0 && (
+            <div className="mt-2 rounded-[14px] border border-amber-border bg-amber-tint px-3.5 py-3">
+              <div className="text-[12.5px] font-semibold text-amber-text">
+                {matches.sameName.length === 1 ? 'A patient with this name already exists' : `${matches.sameName.length} patients with this name already exist`}
+              </div>
+              <div className="mt-1.5 space-y-0.5">
+                {matches.sameName.slice(0, 3).map((p) => (
+                  <Pressable
+                    key={p.id}
+                    hap="tick"
+                    onClick={() => openExisting(p.id)}
+                    className="relative tap-pad-y4 block w-full truncate text-left text-[12.5px] text-amber-text underline decoration-amber-text/40 decoration-1 underline-offset-2"
+                  >
+                    {p.name} · {p.age} {p.sex[0]} · {p.wsCode}
+                  </Pressable>
+                ))}
+              </div>
+              <Pressable
+                hap="select"
+                onClick={() => { setNameConfirmed((v) => !v); setNameError('') }}
+                className="relative tap-pad-y mt-2.5 flex w-full items-center gap-2 text-left text-[12.5px] font-medium text-amber-text"
+              >
+                <span className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] border border-amber-text/60 ${nameConfirmed ? 'bg-amber-text text-white' : 'bg-transparent'}`}>
+                  {nameConfirmed && <Check size={12} weight="bold" />}
+                </span>
+                This is a different person — register as new
+              </Pressable>
+            </div>
+          )}
         </div>
 
         <div className="flex gap-3">
@@ -1566,6 +1662,24 @@ export function AddPatientSheet({
         <div>
           <Label>Phone</Label>
           <input value={phone} onChange={(e) => setPhone(e.target.value)} type="tel" placeholder="+91 98765 43210" className={`mt-1.5 ${inputCls}`} data-selectable="true" />
+          {matches.samePhone.length > 0 && (
+            <div className="mt-2 rounded-[14px] border border-amber-border bg-amber-tint px-3.5 py-2.5">
+              <div className="text-[12.5px] font-semibold text-amber-text">This number is already on file</div>
+              <div className="mt-1 space-y-0.5">
+                {matches.samePhone.slice(0, 3).map((p) => (
+                  <Pressable
+                    key={p.id}
+                    hap="tick"
+                    onClick={() => openExisting(p.id)}
+                    className="relative tap-pad-y4 block w-full truncate text-left text-[12.5px] text-amber-text underline decoration-amber-text/40 decoration-1 underline-offset-2"
+                  >
+                    {p.name} · {p.age} {p.sex[0]} · {p.wsCode}
+                  </Pressable>
+                ))}
+              </div>
+              <div className="mt-1 text-[11.5px] text-amber-text/80">Family members can share a number — carry on if this is someone new.</div>
+            </div>
+          )}
         </div>
 
         <div>

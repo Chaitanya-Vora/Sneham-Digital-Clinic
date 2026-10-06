@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { useClinic } from '../core/store'
 import { type CaseField, type CaseTemplateName, getSections } from '../core/caseTemplate'
 import { Chip, Label } from '../design-system/ui'
@@ -56,9 +57,13 @@ export function CaseFieldEditor({
 // the currently selected template's own section list, not a fixed count —
 // templates differ in how many sections they have (acute has 4, chronic has 6).
 export function useCaseProgress(patientId: string, template: CaseTemplateName) {
-  return useClinic((s) => {
-    const c = s.caseData[patientId]
-    const templateSections = getSections(template, s.caseTemplates)
+  // Select the raw (stable) inputs and derive here — the old version built a
+  // brand-new object inside the selector, so every store change anywhere
+  // re-rendered the case sheet.
+  const c = useClinic((s) => s.caseData[patientId])
+  const caseTemplates = useClinic((s) => s.caseTemplates)
+  return useMemo(() => {
+    const templateSections = getSections(template, caseTemplates)
     const total = templateSections.length
     let done = 0
     const doneIds: Record<string, boolean> = {}
@@ -68,7 +73,7 @@ export function useCaseProgress(patientId: string, template: CaseTemplateName) {
       if (isDone) done++
     }
     return { done, total, doneIds }
-  })
+  }, [c, caseTemplates, template])
 }
 
 // autosave status for a patient's case — reflects the debounced write to the

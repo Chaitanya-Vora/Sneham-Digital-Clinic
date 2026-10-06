@@ -6,8 +6,13 @@ import { supabase } from './supabase'
 // kind, not the in-app toast/inbox kind) and saves the resulting token so
 // the server knows where to send one. Native-only — there's no web
 // equivalent, and this is never called on the web build anyway.
+let registeredFor: string | null = null
+
 export async function registerForPushNotifications(userId: string, surface: 'practitioner' | 'patient') {
   if (!Capacitor.isNativePlatform()) return
+  // Each call stacks another listener and asks the OS again — once per user is enough.
+  if (registeredFor === userId + surface) return
+  registeredFor = userId + surface
 
   try {
     const perm = await PushNotifications.requestPermissions()

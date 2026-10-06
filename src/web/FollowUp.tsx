@@ -1,12 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { TrendUp, TrendDown, Minus, Handshake, FloppyDisk, X, CheckCircle } from '@phosphor-icons/react'
 import { useClinic } from '../core/store'
-import type { OutcomeKind } from '../core/types'
+import type { OutcomeAttachment, OutcomeKind } from '../core/types'
 import { Avatar, Badge, Button, Card, Chip, Label, PatientNotFound } from '../design-system/ui'
 import { useToast } from '../design-system/toast'
 import { addDaysISO, todayISO, formatDayLabel, followUpPresetDate, firstAvailableMorningSlot, type FollowUpPreset } from '../core/day'
 import { FollowUpPresetMenu } from './FollowUpPresetMenu'
+import { AttachmentComposer, AttachmentList } from '../components/FollowUpAttachments'
+import { uploadOutcomeAttachments, type AttachmentDraft } from '../core/db'
+import { readDraft, clearDraft, useDraftWriter } from '../core/drafts'
+import { useShallow } from 'zustand/react/shallow'
 
 const OUTCOMES: OutcomeKind[] = ['Clear improvement', 'Partial', 'No change', 'Aggravation', 'Changed remedy']
 
@@ -23,18 +27,31 @@ export function FollowUp({ patientId, onBack }: { patientId: string; onBack: () 
   const doctorId = useClinic((s) => s.currentPractitionerId)
   const practitioners = useClinic((s) => s.practitioners)
   const checkIn = useClinic((s) => s.checkIns.find((c) => c.patientId === patientId))
-  const pastOutcomes = useClinic((s) => s.outcomes.filter((o) => o.patientId === patientId))
+  const pastOutcomes = useClinic(useShallow((s) => s.outcomes.filter((o) => o.patientId === patientId)))
   const saveOutcome = useClinic((s) => s.saveOutcome)
   const createHandoff = useClinic((s) => s.createHandoff)
   const scheduleFollowUp = useClinic((s) => s.scheduleFollowUp)
   const appts = useClinic((s) => s.appointments)
   const toast = useToast()
 
-  const [outcome, setOutcome] = useState<OutcomeKind>('Partial')
-  const [note, setNote] = useState('')
+  const draftKey = `followup:${patientId}`
+  const restoredDraft = useMemo(() => readDraft<{ outcome: OutcomeKind; note: string }>(draftKey), [draftKey])
+  const [outcome, setOutcome] = useState<OutcomeKind>(restoredDraft?.outcome ?? 'Partial')
+  const [note, setNote] = useState(restoredDraft?.note ?? '')
   const [handoffOpen, setHandoffOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const draftValue = useMemo(() => ({ outcome, note }), [outcome, note])
+  useDraftWriter(draftKey, draftValue, !saved && (outcome !== 'Partial' || note.trim() !== ''))
+  const announcedRestore = useRef(false)
+  useEffect(() => {
+    if (restoredDraft && !announcedRestore.current) {
+      announcedRestore.current = true
+      toast({ title: 'Restored your unsaved follow-up', message: 'Picked up exactly where you left off.' })
+    }
+  }, [restoredDraft, toast])
   const [followUpOpen, setFollowUpOpen] = useState(false)
+  const [drafts, setDrafts] = useState<AttachmentDraft[]>([])
 
   const ciTone = checkIn?.marked === 'worse' ? 'amber' as const : checkIn?.marked === 'better' ? 'green' as const : undefined
   const ciLabel = checkIn?.marked === 'worse' ? 'Needs attention' : checkIn?.marked === 'better' ? 'Feeling better' : 'No change'
@@ -44,10 +61,26 @@ export function FollowUp({ patientId, onBack }: { patientId: string; onBack: () 
 
   if (!patient) return <PatientNotFound onBack={onBack} />
 
-  function onSave() {
-    if (!patient || saving) return
+  async function onSave() {
+    if (!patient || saving || saved) return
     setSaving(true)
-    saveOutcome({ patientId, practitionerId: doctorId, remedy: patient.currentRemedy ?? '—', outcome, note })
+    // Files go up first, all together — if any fail nothing is saved and
+    // everything stays on screen so she can simply tap Save again.
+    let attachments: OutcomeAttachment[] = []
+    if (drafts.length > 0) {
+      const uploaded = await uploadOutcomeAttachments(patientId, drafts)
+      if (!uploaded) {
+        setSaving(false)
+        toast({ title: 'Couldn’t upload the attachments', message: 'Nothing was saved yet — check your connection and tap Save again.' })
+        return
+      }
+      attachments = uploaded
+    }
+    saveOutcome({ patientId, practitionerId: doctorId, remedy: patient.currentRemedy ?? '—', outcome, note, attachments })
+    clearDraft(draftKey)
+    setDrafts([])
+    setSaving(false)
+    setSaved(true)
     toast({ title: 'Outcome saved', message: `${outcome} recorded for ${patient.name}.` })
     setFollowUpOpen(true)
   }
@@ -73,8 +106,8 @@ export function FollowUp({ patientId, onBack }: { patientId: string; onBack: () 
             <Handshake size={15} /> Hand off this follow-up
           </Button>
           <div className="relative">
-            <Button variant="primary" size="sm" onClick={onSave} disabled={saving}>
-              <FloppyDisk size={15} /> Save outcome
+            <Button variant="primary" size="sm" onClick={onSave} disabled={saving || saved}>
+              <FloppyDisk size={15} /> {saving ? 'Saving…' : saved ? 'Saved' : 'Save outcome'}
             </Button>
             <FollowUpPresetMenu open={followUpOpen} onClose={onBack} onSelect={handleScheduleFollowUp} />
           </div>
@@ -119,6 +152,9 @@ export function FollowUp({ patientId, onBack }: { patientId: string; onBack: () 
                 className="mt-2 w-full resize-y rounded-[14px] border border-border bg-surface px-3.5 py-2.5 text-[14px] leading-relaxed text-body outline-none focus:border-green-border"
               />
             </div>
+            <div className="mt-4">
+              <AttachmentComposer drafts={drafts} onChange={setDrafts} disabled={saving} />
+            </div>
           </Card>
         </div>
 
@@ -149,6 +185,7 @@ export function FollowUp({ patientId, onBack }: { patientId: string; onBack: () 
                   <div>
                     <div className="text-[13px] font-semibold text-ink">{o.remedy} · {o.outcome}</div>
                     <div className="text-[12px] text-muted">{new Date(o.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })} — {o.note}</div>
+                    <AttachmentList attachments={o.attachments} />
                   </div>
                 </div>
               ))}

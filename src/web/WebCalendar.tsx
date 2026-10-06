@@ -17,6 +17,7 @@ import { Pressable } from '../design-system/Pressable'
 import { easeCalm } from '../design-system/motion'
 import { useToast } from '../design-system/toast'
 import { AppointmentModal, type AppointmentModalRequest } from './AppointmentModal'
+import { useShallow } from 'zustand/react/shallow'
 
 type CalView = 'day' | 'week' | 'month'
 
@@ -86,9 +87,9 @@ export function WebCalendar({ onOpenPatient, focusPractitionerId }: { onOpenPati
   // comment on the same convention) — just excluded from the Calendar too,
   // to match Today/Follow-ups instead of showing "ghost" slots that look
   // occupied but aren't.
-  const seedAppts = useClinic((s) => s.appointments.filter((a) => a.status !== 'Cancelled'))
+  const seedAppts = useClinic(useShallow((s) => s.appointments.filter((a) => a.status !== 'Cancelled')))
   const patients = useClinic((s) => s.patients)
-  const practitioners = useClinic((s) => s.practitioners.filter((p) => p.status === 'active'))
+  const practitioners = useClinic(useShallow((s) => s.practitioners.filter((p) => p.status === 'active')))
   const timeBlocks = useClinic((s) => s.timeBlocks)
   const toast = useToast()
 

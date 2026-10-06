@@ -12,6 +12,7 @@ import type {
   SecondOpinion,
   Invoice,
   Outcome,
+  OutcomeAttachment,
   Patient,
   Practitioner,
   Prescription,
@@ -902,6 +903,7 @@ function toAppOutcome(r: any): Outcome {
     remedy: r.remedy,
     outcome: r.outcome,
     note: r.note,
+    attachments: Array.isArray(r.attachments) ? r.attachments : [],
   }
 }
 
@@ -914,6 +916,9 @@ function toDbOutcome(o: Outcome) {
     remedy: o.remedy,
     outcome: o.outcome,
     note: o.note,
+    // Only sent when there is something to send, so a plain follow-up keeps
+    // saving exactly as before even on a database that predates the column.
+    ...(o.attachments?.length ? { attachments: o.attachments } : {}),
   }
 }
 
@@ -927,6 +932,54 @@ export async function insertOutcome(o: Outcome): Promise<boolean> {
   const { error } = await supabase.from('outcomes').insert(toDbOutcome(o))
   if (error) { console.error('insertOutcome:', error.message); return false }
   return true
+}
+
+// ── Follow-up attachments (photos / voice notes) ─────────────
+// Private, staff-only bucket — separate from clinic-documents on purpose.
+const ATTACHMENT_BUCKET = 'followup-attachments'
+
+export interface AttachmentDraft {
+  id: string
+  kind: 'image' | 'audio'
+  blob: Blob
+  name: string
+  mime: string
+  seconds?: number
+}
+
+const EXT_FOR_MIME: Record<string, string> = {
+  'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp',
+  'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/mp4': 'm4a', 'audio/mpeg': 'mp3', 'audio/wav': 'wav',
+}
+
+// Uploads every draft or none: a clinical note shouldn't quietly lose half
+// its photos, so one failure rolls back the ones that already went up and
+// the caller keeps everything on screen for a retry.
+export async function uploadOutcomeAttachments(patientId: string, drafts: AttachmentDraft[]): Promise<OutcomeAttachment[] | null> {
+  const done: OutcomeAttachment[] = []
+  const results = await Promise.all(drafts.map(async (d) => {
+    const mime = d.mime.split(';')[0] || (d.kind === 'image' ? 'image/jpeg' : 'audio/webm')
+    const path = `${patientId}/${newId()}.${EXT_FOR_MIME[mime] ?? (d.kind === 'image' ? 'jpg' : 'webm')}`
+    const { error } = await supabase.storage.from(ATTACHMENT_BUCKET).upload(path, d.blob, { contentType: mime })
+    if (error) { console.error('uploadOutcomeAttachment:', error.message); return null }
+    const att: OutcomeAttachment = { id: d.id, kind: d.kind, path, name: d.name, mime, sizeBytes: d.blob.size, ...(d.seconds != null ? { seconds: d.seconds } : {}) }
+    done.push(att)
+    return att
+  }))
+  if (results.some((r) => r === null)) {
+    if (done.length) void supabase.storage.from(ATTACHMENT_BUCKET).remove(done.map((a) => a.path))
+    return null
+  }
+  return results as OutcomeAttachment[]
+}
+
+export async function getOutcomeAttachmentUrls(paths: string[]): Promise<Record<string, string>> {
+  if (paths.length === 0) return {}
+  const { data, error } = await supabase.storage.from(ATTACHMENT_BUCKET).createSignedUrls(paths, 3600)
+  if (error) { console.error('getOutcomeAttachmentUrls:', error.message); return {} }
+  const out: Record<string, string> = {}
+  for (const row of data ?? []) if (row.path && row.signedUrl) out[row.path] = row.signedUrl
+  return out
 }
 
 

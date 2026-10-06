@@ -12,6 +12,7 @@ import { haptic } from '../design-system/haptics'
 import { CaseFieldEditor, useCaseProgress, useCaseSaveStatus } from '../components/CaseFields'
 import { CaseTemplateEditorModal } from '../web/CaseTemplateEditor'
 import { FollowUpSheet } from './TodayGrid'
+import { useShallow } from 'zustand/react/shallow'
 
 export function MobileCaseSheet({
   patientId,
@@ -26,9 +27,9 @@ export function MobileCaseSheet({
   const ensureCase = useClinic((s) => s.ensureCase)
   const markDone = useClinic((s) => s.markSectionDone)
   const addDocument = useClinic((s) => s.addDocument)
-  const voiceNotes = useClinic((s) => s.documents.filter((d) => d.patientId === patientId && d.format === 'WEBM'))
+  const voiceNotes = useClinic(useShallow((s) => s.documents.filter((d) => d.patientId === patientId && d.format === 'WEBM')))
   const caseState = useClinic((s) => s.caseData[patientId])
-  const caseVisits = useClinic((s) => s.caseVisits.filter((v) => v.patientId === patientId))
+  const caseVisits = useClinic(useShallow((s) => s.caseVisits.filter((v) => v.patientId === patientId)))
   const customTemplates = useClinic((s) => s.caseTemplates)
   const templates = allTemplates(customTemplates)
   const startCaseRetake = useClinic((s) => s.startCaseRetake)
@@ -79,7 +80,7 @@ export function MobileCaseSheet({
     <div className="flex h-full flex-col bg-screen">
       <div className="px-[18px] pb-2 pt-[var(--app-top)]">
         <div className="flex items-center justify-between">
-          <Pressable ariaLabel="back" hap="tick" onClick={onBack} className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
+          <Pressable ariaLabel="back" hap="tick" onClick={onBack} className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
             <CaretLeft size={18} className="text-body" />
           </Pressable>
           {saveStatus === 'saving' && (
@@ -109,7 +110,7 @@ export function MobileCaseSheet({
             <button
               key={t.name}
               onClick={() => { setTemplate(t.name); setActiveId(getSections(t.name, customTemplates)[0].id) }}
-              className={`rounded-pill px-3 py-1 text-[12px] font-semibold transition ${
+              className={`relative tap-pad-y4 rounded-pill px-3 py-1 text-[12px] font-semibold transition ${
                 template === t.name ? 'bg-brand text-white' : 'bg-tint text-body'
               }`}
             >
@@ -118,7 +119,7 @@ export function MobileCaseSheet({
           ))}
           <button
             onClick={() => setEditingTemplate(true)}
-            className="flex items-center gap-1 rounded-pill border border-dashed border-border-dash px-2.5 py-1 text-[11.5px] font-semibold text-muted"
+            className="relative tap-pad-y4 flex items-center gap-1 rounded-pill border border-dashed border-border-dash px-2.5 py-1 text-[11.5px] font-semibold text-muted"
           >
             <PencilSimpleLine size={12} /> {customTemplates.some((c) => c.id === template) ? 'Edit' : 'New'}
           </button>

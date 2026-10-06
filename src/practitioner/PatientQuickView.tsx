@@ -4,10 +4,11 @@ import { Pressable } from '../design-system/Pressable'
 import { haptic } from '../design-system/haptics'
 import { useToast } from '../design-system/toast'
 import { shareViaWhatsApp } from '../core/share'
-import { ownerLabel, ownerTone, activeCoveringHandoff } from '../core/assignment'
+import { ownerLabel, ownerLabelShort, ownerTone, activeCoveringHandoff } from '../core/assignment'
 import { todayISO } from '../core/day'
 import { Phone, Prescription as RxIcon, NotePencil } from '@phosphor-icons/react'
 import { WhatsAppIcon } from '../design-system/BrandIcons'
+import { useShallow } from 'zustand/react/shallow'
 
 // A quick "peek" at a patient — tapping a name on Today or Follow-ups opens
 // this instead of committing straight to the full case sheet. Deliberately
@@ -26,10 +27,10 @@ export function PatientQuickView({
   onViewProfile?: (id: string) => void
 }) {
   const patient = useClinic((s) => s.patients.find((p) => p.id === patientId))
-  const rxCount = useClinic((s) => (patientId ? s.prescriptions.filter((r) => r.patientId === patientId && r.status !== 'draft').length : 0))
+  const rxCount = useClinic(useShallow((s) => (patientId ? s.prescriptions.filter((r) => r.patientId === patientId && r.status !== 'draft').length : 0)))
   const ME = useClinic((s) => s.currentPractitionerId)
   const practitioners = useClinic((s) => s.practitioners)
-  const handoffs = useClinic((s) => (patientId ? s.handoffs.filter((h) => h.patientId === patientId) : []))
+  const handoffs = useClinic(useShallow((s) => (patientId ? s.handoffs.filter((h) => h.patientId === patientId) : [])))
   const covering = patientId ? activeCoveringHandoff(patientId, handoffs, todayISO()) : undefined
   const toast = useToast()
 
@@ -40,7 +41,7 @@ export function PatientQuickView({
           <div className="flex items-center gap-3">
             <Avatar initials={patient.initials} size={48} />
             <div className="min-w-0 flex-1">
-              <div className="truncate font-display text-[17px] font-bold text-ink">{patient.name}</div>
+              <div className="line-clamp-2 break-words font-display text-[17px] font-bold leading-tight text-ink">{patient.name}</div>
               <div className="truncate text-[12.5px] text-muted">{patient.age}y · {patient.sex} · {patient.wsCode}</div>
               {covering && (
                 <div className="mt-1 truncate text-[11.5px] font-semibold text-purple">
@@ -48,13 +49,13 @@ export function PatientQuickView({
                 </div>
               )}
             </div>
-            <Badge tone={ownerTone(patient, ME)}>{ownerLabel(patient, ME, practitioners)}</Badge>
+            <Badge tone={ownerTone(patient, ME)} className="shrink-0">{ownerLabelShort(patient, ME, practitioners)}</Badge>
             {patient.phone && (
               <div className="flex shrink-0 items-center gap-1.5">
                 <a
                   href={`tel:${patient.phone}`}
                   onClick={(e) => { e.stopPropagation(); haptic('tick') }}
-                  className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface text-body"
+                  className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface text-body"
                 >
                   <Phone size={16} />
                 </a>
@@ -66,7 +67,7 @@ export function PatientQuickView({
                     const ok = shareViaWhatsApp(patient.phone, `Hi ${patient.name.split(' ')[0]}, this is Sneham Digital Clinic.`)
                     if (!ok) toast({ title: 'No phone number on file', message: 'Add a phone number for this patient first.' })
                   }}
-                  className="flex h-9 w-9 items-center justify-center rounded-full bg-[#25D366] text-white"
+                  className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full bg-[#25D366] text-white"
                 >
                   <WhatsAppIcon size={18} color="#fff" />
                 </Pressable>
@@ -114,7 +115,7 @@ export function PatientQuickView({
             <Pressable
               hap="tick"
               onClick={() => { onClose(); onViewProfile(patient.id) }}
-              className="mt-3 w-full text-center text-[13px] font-semibold text-brand"
+              className="relative tap-pad-y12 mt-3 w-full text-center text-[13px] font-semibold text-brand"
             >
               View full profile &rsaquo;
             </Pressable>

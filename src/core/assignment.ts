@@ -12,6 +12,16 @@ export function ownerLabel(patient: Patient, viewerPractitionerId: string | null
   return practitioners.find((p) => p.id === patient.owningPractitionerId)?.name ?? 'Assigned out'
 }
 
+// Compact owner label for tight rows next to a patient's name: "Mine",
+// "Unassigned", or just the doctor's first name ("Dr. Neha") — the full name
+// belongs in a profile header, not squeezing the patient's own name.
+export function ownerLabelShort(patient: Patient, viewerPractitionerId: string | null, practitioners: Practitioner[]): string {
+  const full = ownerLabel(patient, viewerPractitionerId, practitioners)
+  if (full === 'Mine' || full === 'Unassigned' || full === 'Assigned out') return full
+  const parts = full.replace(/^dr\.?\s+/i, '').trim().split(/\s+/)
+  return `Dr. ${parts[0]}`
+}
+
 export function ownerTone(patient: Patient, viewerPractitionerId: string | null): 'green' | 'amber' | 'neutral' {
   if (!patient.owningPractitionerId) return 'amber'
   if (patient.owningPractitionerId === viewerPractitionerId) return 'green'

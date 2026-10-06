@@ -54,6 +54,11 @@ import { haptic } from '../design-system/haptics'
 import { spring, springSoft, tabVariants, pushVariants, listContainer, listItem } from '../design-system/motion'
 import { CountUp } from '../design-system/feedback'
 import { PullToRefresh, useHorizontalSwipe, EdgeSwipeBack, useNativeBackButton } from '../design-system/gestures'
+import { GuardedMotionDiv, useGhostSweep } from '../design-system/presence'
+import { readResume, clearResume } from '../core/drafts'
+import { ToastHost } from '../design-system/toast'
+import { AppInfoRow } from '../components/AppInfo'
+import { diag } from '../core/diagnostics'
 import { App as CapApp } from '@capacitor/app'
 import { useToast } from '../design-system/toast'
 import { shareViaWhatsApp, shareViaSms, shareViaEmail, shareTextViaWhatsApp } from '../core/share'
@@ -77,6 +82,7 @@ function VideoConsultFallback() {
   )
 }
 import { ChatThread } from '../components/ChatThread'
+import { useShallow } from 'zustand/react/shallow'
 
 // ME is resolved from store inside the component
 type Tab = 'today' | 'calendar' | 'followups' | 'rx' | 'inbox'
@@ -103,6 +109,7 @@ function headerDisplayName(name: string) {
 
 export function PractitionerApp() {
   const [tab, setTab] = useState<Tab>('today')
+  useEffect(() => { diag('tab', tab) }, [tab])
   const [dir, setDir] = useState(1)
   // Overlay navigation as one atomic value — current screen, what's
   // stacked underneath it (so Patient detail -> Case sheet -> Back returns
@@ -118,6 +125,8 @@ export function PractitionerApp() {
   // fix + explanation on BottomSheet in design-system/ui.tsx.
   const overlayTransformRef = useRef<HTMLDivElement>(null)
   const overlay = overlayNav.current
+  const overlayEpoch = useGhostSweep(!!overlayNav.current)
+  useEffect(() => { diag('overlay', overlayNav.current?.kind ?? 'none') }, [overlayNav.current?.kind])
   const overlayDir = overlayNav.dir
   const [switchOpen, setSwitchOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -194,6 +203,19 @@ export function PractitionerApp() {
       return { current: s.history[s.history.length - 1], history: s.history.slice(0, -1), dir: -1 }
     })
   }
+  // The app was killed while a follow-up held unsaved text (the screen sets a
+  // resume pointer only in that case and clears it on any normal exit) —
+  // reopen straight to it so the restored text is right there.
+  useEffect(() => {
+    const r = readResume()
+    clearResume()
+    if (r?.kind === 'compare' && useClinic.getState().patients.some((p) => p.id === r.patientId)) {
+      openOverlay({ kind: 'compare', patientId: r.patientId })
+    }
+    // run once, on app start
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // Prescribing exits the whole patient-detail flow into a different tab —
   // the overlay history no longer applies once we've left it.
   const exitOverlayToRx = (patientId: string) => {
@@ -252,7 +274,8 @@ export function PractitionerApp() {
   }
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-screen">
+    <div className="relative h-full w-full overflow-clip bg-screen">
+      <ToastHost placement="mobile" />
       {/* base app */}
       <div className="flex h-full flex-col">
         {/* pinned top bar */}
@@ -264,10 +287,10 @@ export function PractitionerApp() {
             <div className="truncate font-display text-[15px] font-bold text-ink">{headerDisplayName(doctor.name)}</div>
             <div className="truncate text-[11px] text-faint">{new Date().toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })} · Chiplun clinic</div>
           </div>
-          <Pressable ariaLabel="search patients" hap="tick" onClick={() => setSearchOpen(true)} className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
+          <Pressable ariaLabel="search patients" hap="tick" onClick={() => setSearchOpen(true)} className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
             <MagnifyingGlass size={17} className="text-body" />
           </Pressable>
-          <Pressable ariaLabel="notifications" hap="tick" onClick={() => goTab('inbox')} className="relative flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
+          <Pressable ariaLabel="notifications" hap="tick" onClick={() => goTab('inbox')} className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
             <Bell size={18} className="text-body" />
             {unread > 0 && (
               <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-white">{unread}</span>
@@ -275,9 +298,9 @@ export function PractitionerApp() {
           </Pressable>
         </div>
 
-        <div className="relative flex-1 overflow-hidden">
+        <div className="relative flex-1 overflow-clip">
           <AnimatePresence custom={dir} initial={false}>
-            <motion.div key={tab} className="absolute inset-0" custom={dir} variants={tabVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.15 }} {...swipe}>
+            <GuardedMotionDiv key={tab} className="absolute inset-0" custom={dir} variants={tabVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.15 }} {...swipe}>
               {tab === 'calendar' ? (
                 <CalendarScreen
                   onOpenPatient={(id) => openOverlay({ kind: 'patient-detail', patientId: id })}
@@ -292,7 +315,7 @@ export function PractitionerApp() {
                   {tab === 'inbox' && <InboxScreen onOpenPatient={(id) => openOverlay({ kind: 'patient-detail', patientId: id })} onOpenChat={(id, name) => openOverlay({ kind: 'chat', patientId: id, patientName: name })} />}
                 </PullToRefresh>
               )}
-            </motion.div>
+            </GuardedMotionDiv>
           </AnimatePresence>
         </div>
       </div>
@@ -301,9 +324,9 @@ export function PractitionerApp() {
 
       {/* overlays: case sheet / compare / video — dir flips to -1 on Back so
           the slide direction matches native forward/back conventions */}
-      <AnimatePresence custom={overlayDir}>
+      <AnimatePresence key={overlayEpoch} custom={overlayDir}>
         {overlay && (
-          <motion.div
+          <GuardedMotionDiv
             key={overlay.kind + ('patientId' in overlay ? overlay.patientId : overlay.appointmentId)}
             className="absolute inset-0 z-40 bg-screen"
             custom={overlayDir}
@@ -339,7 +362,7 @@ export function PractitionerApp() {
                 />
               )}
             </EdgeSwipeBack>
-          </motion.div>
+          </GuardedMotionDiv>
         )}
       </AnimatePresence>
 
@@ -358,6 +381,7 @@ export function PractitionerApp() {
         open={addPatientOpen}
         onClose={() => setAddPatientOpen(false)}
         onAdded={(id) => { setAddPatientOpen(false); openOverlay({ kind: 'case', patientId: id }) }}
+        onOpenExisting={(id) => { setAddPatientOpen(false); openOverlay({ kind: 'patient-detail', patientId: id }) }}
       />
       <PatientSearchSheet
         open={billSearchOpen}
@@ -436,7 +460,7 @@ function ProfileSheet({ open, onClose }: { open: boolean; onClose: () => void })
           <div key={s.label} className="rounded-[14px] border border-border bg-surface px-2 py-3 text-center">
             <s.icon size={18} weight="fill" className="mx-auto text-brand" />
             <div className="mt-1 font-display text-[16px] font-bold text-ink">{s.value}</div>
-            <div className="text-[10px] text-faint">{s.label}</div>
+            <div className="text-[11px] text-faint">{s.label}</div>
           </div>
         ))}
       </div>
@@ -446,6 +470,10 @@ function ProfileSheet({ open, onClose }: { open: boolean; onClose: () => void })
           <div className="text-[12px] font-semibold uppercase tracking-label text-muted">Remedy list</div>
           <div className="mt-1 text-[13px] text-body">{doctor.remedyList.length} remedies configured</div>
         </div>
+      </div>
+
+      <div className="mt-2">
+        <AppInfoRow />
       </div>
 
       <Pressable
@@ -655,7 +683,7 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
         </div>
         <div className="flex items-center gap-2 rounded-pill border border-border bg-surface px-3.5 py-2">
           <MagnifyingGlass size={16} className="text-faint" />
-          <input value={pickerQuery} onChange={(e) => setPickerQuery(e.target.value)} placeholder="Search patients" className="w-full bg-transparent text-[13px] outline-none placeholder:text-faint" data-selectable="true" />
+          <input value={pickerQuery} onChange={(e) => setPickerQuery(e.target.value)} placeholder="Search patients" className="-my-2 w-full bg-transparent py-2 text-[13px] outline-none placeholder:text-faint" data-selectable="true" />
         </div>
         <div className="space-y-2">
           {matches.map((p) => (
@@ -695,7 +723,7 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
         <Label>Remedy</Label>
         <div className="mt-2 flex items-center gap-2 rounded-pill border border-border bg-surface px-3.5 py-2">
           <MagnifyingGlass size={16} className="text-faint" />
-          <input value={remedy} onChange={(e) => setRemedy(e.target.value)} placeholder="Type or select a remedy" className="w-full bg-transparent text-[13px] outline-none placeholder:text-faint" data-selectable="true" />
+          <input value={remedy} onChange={(e) => setRemedy(e.target.value)} placeholder="Type or select a remedy" className="-my-2 w-full bg-transparent py-2 text-[13px] outline-none placeholder:text-faint" data-selectable="true" />
         </div>
         <div className="mt-2.5 flex flex-wrap gap-2">
           {(remedy || showAllRemedies ? list : list.slice(0, 8)).map((r) => (
@@ -1010,7 +1038,7 @@ function ChatOverlay({ patientId, patientName, onBack }: { patientId: string; pa
 function InboxScreen({ onOpenPatient, onOpenChat }: { onOpenPatient: (id: string) => void; onOpenChat: (id: string, name: string) => void }) {
   const messages = useClinic((s) => s.messages)
   const patients = useClinic((s) => s.patients)
-  const notifs = useClinic((s) => s.notifications.filter((n) => n.surface === 'web' || n.surface === 'practitioner'))
+  const notifs = useClinic(useShallow((s) => s.notifications.filter((n) => n.surface === 'web' || n.surface === 'practitioner')))
   const accept = useClinic((s) => s.acceptHandoff)
   const markRead = useClinic((s) => s.markNotificationRead)
   const handoffs = useClinic((s) => s.handoffs)
@@ -1319,7 +1347,7 @@ function TabBar({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
               {on && <motion.span layoutId="prac-tab" className="absolute inset-0 rounded-pill bg-tint-pale" transition={spring} />}
               <span className={`relative ${on ? 'text-brand' : 'text-faint'}`}><it.icon size={21} weight={on ? 'fill' : 'regular'} /></span>
             </span>
-            <span className={`text-[10px] font-medium ${on ? 'text-brand' : 'text-faint'}`}>{it.label}</span>
+            <span className={`text-[11px] font-medium ${on ? 'text-brand' : 'text-faint'}`}>{it.label}</span>
           </Pressable>
         )
       })}

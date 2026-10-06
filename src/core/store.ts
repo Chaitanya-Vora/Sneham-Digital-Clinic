@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import { todayISO, formatDayLabel } from './day'
 import { persist } from 'zustand/middleware'
+import { replaceEqualDeep } from './structuralShare'
+import { diag } from './diagnostics'
 import { supabase } from './supabase'
 import type {
   Appointment,
@@ -18,6 +20,7 @@ import type {
   AppNotification,
   MessageSender,
   Outcome,
+  OutcomeAttachment,
   OutcomeKind,
   Patient,
   PaymentMode,
@@ -242,7 +245,7 @@ interface ClinicState {
   setCaseField: (patientId: string, sectionId: string, key: string, value: string) => void
   toggleCaseChip: (patientId: string, sectionId: string, key: string, value: string, multi: boolean) => void
   markSectionDone: (patientId: string, sectionId: string, done: boolean) => void
-  saveOutcome: (input: { patientId: string; practitionerId: string; remedy: string; outcome: OutcomeKind; note: string }) => void
+  saveOutcome: (input: { patientId: string; practitionerId: string; remedy: string; outcome: OutcomeKind; note: string; attachments?: OutcomeAttachment[] }) => void
   createHandoff: (input: { patientId: string; fromId: string; toId: string; coveringUntil: string; coveringUntilDate: string; note: Handoff['note'] }) => void
   addPatient: (input: { name: string; age: number; sex: Patient['sex']; location: string; chiefComplaint: string; phone: string; referralSource?: Patient['referralSource'] }) => Patient
   linkPatientIdentity: (patientId: string, userId: string) => void
@@ -359,6 +362,11 @@ const emptyState = () => ({
   lastDoseResetDate: '',
 })
 
+// When the last successful full refresh finished — lets "the app just came back"
+// decide whether a refresh is actually worth doing (see App.tsx).
+let lastHydrateAt = 0
+export function getLastHydrateAt(): number { return lastHydrateAt }
+
 export const useClinic = create<ClinicState>()(
   persist(
     (set, get) => ({
@@ -367,6 +375,7 @@ export const useClinic = create<ClinicState>()(
       hydrate: async (userId, userName, userEmail) => {
         if (get().hydrating) return
         set({ hydrating: true })
+        const hydrateStart = performance.now()
         try {
           resetHydrateErrors()
           const isPatientSurface = (import.meta.env.VITE_DEFAULT_SURFACE as string | undefined) === 'patient'
@@ -377,6 +386,7 @@ export const useClinic = create<ClinicState>()(
             // One or more tables failed to load — keep whatever is already
             // in the store rather than replacing real clinic data with a
             // partial or empty fetch. Just surface the warning banner.
+            diag('hydrate', `FAILED partially (${fetchErrors} table errors) after ${Math.round(performance.now() - hydrateStart)}ms`)
             set({ hydrated: true, hydrating: false, userId, dbError: true })
             return
           }
@@ -401,12 +411,24 @@ export const useClinic = create<ClinicState>()(
               caseData[patientId] = priorCaseData[patientId]
             }
           }
-          set({
+          // Keep the identity of everything that did not actually change, and
+          // only write the tables that did — so a refresh that found nothing
+          // new re-renders nothing, instead of replacing every array.
+          const incoming: Record<string, unknown> = {
             ...data,
             caseData,
             doseReminders: needsReset
               ? data.doseReminders.map((d) => ({ ...d, loggedToday: false }))
               : data.doseReminders,
+          }
+          const current = get() as unknown as Record<string, unknown>
+          const changed: Record<string, unknown> = {}
+          for (const [k, v] of Object.entries(incoming)) {
+            const shared = v !== null && typeof v === 'object' ? replaceEqualDeep(current[k], v) : v
+            if (shared !== current[k]) changed[k] = shared
+          }
+          set({
+            ...(changed as Partial<ClinicState>),
             hydrated: true,
             hydrating: false,
             userId,
@@ -418,6 +440,8 @@ export const useClinic = create<ClinicState>()(
             dbError: false,
             lastDoseResetDate: today,
           })
+          lastHydrateAt = Date.now()
+          diag('hydrate', `ok ${Math.round(performance.now() - hydrateStart)}ms`)
           if (needsReset) {
             for (const d of data.doseReminders.filter((r) => r.loggedToday)) {
               void updateDoseReminderDb(d.id, { logged_today: false })
@@ -448,11 +472,15 @@ export const useClinic = create<ClinicState>()(
           fetcher: () => Promise<ClinicState[K]>,
         ) => {
           try {
+            const errorsBefore = getHydrateErrors()
             const next = await fetcher()
+            // The fetchers swallow errors and hand back [] — applying that
+            // would blank the list on screen until the next good refresh.
+            // A failed refresh must never replace real data.
+            if (getHydrateErrors() > errorsBefore) return
             const prev = get()[key]
-            if (JSON.stringify(prev) !== JSON.stringify(next)) {
-              set({ [key]: next } as Pick<ClinicState, K>)
-            }
+            const shared = replaceEqualDeep(prev, next)
+            if (shared !== prev) set({ [key]: shared } as Pick<ClinicState, K>)
           } catch (e) {
             console.error(`Realtime sync of ${key} failed:`, e)
           }
@@ -1061,6 +1089,7 @@ export const useClinic = create<ClinicState>()(
           remedy: input.remedy,
           outcome: input.outcome,
           note: input.note,
+          attachments: input.attachments ?? [],
         }
         set((s) => ({
           outcomes: [outcome, ...s.outcomes],

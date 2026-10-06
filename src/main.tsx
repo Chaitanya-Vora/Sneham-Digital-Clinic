@@ -5,12 +5,14 @@ import { Capacitor } from '@capacitor/core'
 import { SplashScreen } from '@capacitor/splash-screen'
 import { ErrorBoundary } from './design-system/ErrorBoundary'
 import { initErrorMonitoring } from './core/errorMonitoring'
+import { initDiagnostics } from './core/diagnostics'
 import { AuthProvider } from './auth/AuthProvider'
 import { AuthGate } from './auth/AuthGate'
 import App from './App'
 import './index.css'
 
 initErrorMonitoring()
+initDiagnostics()
 
 if (Capacitor.isNativePlatform()) {
   SplashScreen.hide({ fadeOutDuration: 300 }).catch(() => {})

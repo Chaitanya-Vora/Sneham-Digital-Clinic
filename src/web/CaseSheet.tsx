@@ -9,6 +9,7 @@ import { useToast } from '../design-system/toast'
 import { CaseFieldEditor, sectionHasContent, useCaseProgress, useCaseSaveStatus } from '../components/CaseFields'
 import { CaseTemplateEditorModal } from './CaseTemplateEditor'
 import { FollowUpPresetMenu } from './FollowUpPresetMenu'
+import { useShallow } from 'zustand/react/shallow'
 
 function VisitHistoryPanel({
   sections,
@@ -148,7 +149,7 @@ export function CaseSheet({
   const retakeReason = useClinic((s) => s.caseRetakeIntent[patientId] ?? '')
   const retakeActive = !!retakeReason
   const caseState = useClinic((s) => s.caseData[patientId])
-  const caseVisits = useClinic((s) => s.caseVisits.filter((v) => v.patientId === patientId))
+  const caseVisits = useClinic(useShallow((s) => s.caseVisits.filter((v) => v.patientId === patientId)))
   const practitioners = useClinic((s) => s.practitioners)
   const customTemplates = useClinic((s) => s.caseTemplates)
   const templates = allTemplates(customTemplates)

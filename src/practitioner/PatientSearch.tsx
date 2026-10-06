@@ -44,6 +44,7 @@ import { PatientQuickView } from './PatientQuickView'
 import { AttachmentList } from '../components/FollowUpAttachments'
 import { GuardedMotionDiv } from '../design-system/presence'
 import { useShallow } from 'zustand/react/shallow'
+import { usePatientLookup, findPatientMatches } from '../core/duplicates'
 
 const REFERRAL_SOURCES: ReferralSource[] = ['Offline', 'Instagram', 'References', 'Referral']
 
@@ -1518,12 +1519,15 @@ export function AddPatientSheet({
   open,
   onClose,
   onAdded,
+  onOpenExisting,
 }: {
   open: boolean
   onClose: () => void
   onAdded: (patientId: string) => void
+  onOpenExisting?: (patientId: string) => void
 }) {
   const addPatient = useClinic((s) => s.addPatient)
+  const allPatients = useClinic((s) => s.patients)
   const toast = useToast()
 
   const [name, setName] = useState('')
@@ -1535,6 +1539,11 @@ export function AddPatientSheet({
   const [referralSource, setReferralSource] = useState<ReferralSource | undefined>(undefined)
   const [nameError, setNameError] = useState('')
   const [ageError, setAgeError] = useState('')
+  const [nameConfirmed, setNameConfirmed] = useState(false)
+
+  // Checked as the name/number is typed, against what's already on the device.
+  const lookup = usePatientLookup(allPatients)
+  const matches = findPatientMatches(lookup, name, phone)
 
   const reset = () => {
     setName('')
@@ -1546,6 +1555,13 @@ export function AddPatientSheet({
     setReferralSource(undefined)
     setNameError('')
     setAgeError('')
+    setNameConfirmed(false)
+  }
+
+  const openExisting = (id: string) => {
+    haptic('tick')
+    onClose()
+    onOpenExisting?.(id)
   }
 
   const onRegister = () => {
@@ -1554,6 +1570,8 @@ export function AddPatientSheet({
     setNameError(nameOk ? '' : 'Name is required')
     setAgeError(ageOk ? '' : 'Age is required')
     if (!nameOk || !ageOk) { haptic('warn'); return }
+    // Same name as someone already registered: confirm it's a different person.
+    if (matches.sameName.length > 0 && !nameConfirmed) { setNameError('Tick the box below if this is a different person'); haptic('warn'); return }
     const patient = addPatient({
       name: name.trim(),
       age: parseInt(age, 10) || 0,
@@ -1581,12 +1599,41 @@ export function AddPatientSheet({
           <Label>Name</Label>
           <input
             value={name}
-            onChange={(e) => { setName(e.target.value); if (nameError) setNameError('') }}
+            onChange={(e) => { setName(e.target.value); setNameConfirmed(false); if (nameError) setNameError('') }}
             placeholder="Full name"
             className={`mt-1.5 ${inputCls} ${nameError ? 'border-danger' : ''}`}
             data-selectable="true"
           />
           {nameError && <p className="mt-1 text-[12px] text-danger">{nameError}</p>}
+          {matches.sameName.length > 0 && (
+            <div className="mt-2 rounded-[14px] border border-amber-border bg-amber-tint px-3.5 py-3">
+              <div className="text-[12.5px] font-semibold text-amber-text">
+                {matches.sameName.length === 1 ? 'A patient with this name already exists' : `${matches.sameName.length} patients with this name already exist`}
+              </div>
+              <div className="mt-1.5 space-y-0.5">
+                {matches.sameName.slice(0, 3).map((p) => (
+                  <Pressable
+                    key={p.id}
+                    hap="tick"
+                    onClick={() => openExisting(p.id)}
+                    className="relative tap-pad-y4 block w-full truncate text-left text-[12.5px] text-amber-text underline decoration-amber-text/40 decoration-1 underline-offset-2"
+                  >
+                    {p.name} · {p.age} {p.sex[0]} · {p.wsCode}
+                  </Pressable>
+                ))}
+              </div>
+              <Pressable
+                hap="select"
+                onClick={() => { setNameConfirmed((v) => !v); setNameError('') }}
+                className="relative tap-pad-y mt-2.5 flex w-full items-center gap-2 text-left text-[12.5px] font-medium text-amber-text"
+              >
+                <span className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] border border-amber-text/60 ${nameConfirmed ? 'bg-amber-text text-white' : 'bg-transparent'}`}>
+                  {nameConfirmed && <Check size={12} weight="bold" />}
+                </span>
+                This is a different person — register as new
+              </Pressable>
+            </div>
+          )}
         </div>
 
         <div className="flex gap-3">
@@ -1615,6 +1662,24 @@ export function AddPatientSheet({
         <div>
           <Label>Phone</Label>
           <input value={phone} onChange={(e) => setPhone(e.target.value)} type="tel" placeholder="+91 98765 43210" className={`mt-1.5 ${inputCls}`} data-selectable="true" />
+          {matches.samePhone.length > 0 && (
+            <div className="mt-2 rounded-[14px] border border-amber-border bg-amber-tint px-3.5 py-2.5">
+              <div className="text-[12.5px] font-semibold text-amber-text">This number is already on file</div>
+              <div className="mt-1 space-y-0.5">
+                {matches.samePhone.slice(0, 3).map((p) => (
+                  <Pressable
+                    key={p.id}
+                    hap="tick"
+                    onClick={() => openExisting(p.id)}
+                    className="relative tap-pad-y4 block w-full truncate text-left text-[12.5px] text-amber-text underline decoration-amber-text/40 decoration-1 underline-offset-2"
+                  >
+                    {p.name} · {p.age} {p.sex[0]} · {p.wsCode}
+                  </Pressable>
+                ))}
+              </div>
+              <div className="mt-1 text-[11.5px] text-amber-text/80">Family members can share a number — carry on if this is someone new.</div>
+            </div>
+          )}
         </div>
 
         <div>

@@ -70,6 +70,7 @@ import { DEFAULT_CONSULT_FEE, invoiceTotal, invoiceBalance } from '../core/billi
 import { toCsv, downloadCsv } from '../core/csvExport'
 import { STANDARD_MEDICINE_INSTRUCTIONS } from '../core/rxInstructions'
 import { shareViaWhatsApp, shareViaSms, shareViaEmail, shareTextViaWhatsApp } from '../core/share'
+import { usePatientLookup, findPatientMatches } from '../core/duplicates'
 import { uploadDocument, getDocumentUrl, fetchPatientDeletionImpact, newId } from '../core/db'
 import { Avatar, Badge, Button, Card, Chip, Label, Stepper, Toggle, PatientNotFound } from '../design-system/ui'
 import { PendingApproval, AccessRemoved } from '../design-system/PendingApproval'
@@ -4715,14 +4716,6 @@ function InstantMeetingModal({ onClose, onStart }: { onClose: () => void; onStar
 }
 
 // ── NEW PATIENT MODAL ──
-// Same name, ignoring case/spacing and a leading title — "Dr Ritu Shah" and
-// "dr.  ritu   shah" should be caught as the same possible match, since
-// those are exactly the kind of near-identical spellings a practitioner
-// re-typing a name from memory would produce.
-function normalisePatientName(name: string): string {
-  return name.trim().toLowerCase().replace(/^(dr|mr|mrs|ms|miss)\.?\s+/, '').replace(/\s+/g, ' ')
-}
-
 function NewPatientModal({ onClose, onOpenPatient }: { onClose: () => void; onOpenPatient: (id: string) => void }) {
   const addPatient = useClinic((s) => s.addPatient)
   const allPatients = useClinic((s) => s.patients)
@@ -4734,11 +4727,11 @@ function NewPatientModal({ onClose, onOpenPatient }: { onClose: () => void; onOp
     if (key === 'name') setNameConfirmed(false)
   }
 
-  const possibleDuplicates = useMemo(() => {
-    const needle = normalisePatientName(form.name)
-    if (!needle) return []
-    return allPatients.filter((p) => !p.archivedAt && normalisePatientName(p.name) === needle)
-  }, [allPatients, form.name])
+  // Same name (blocks until confirmed) or same phone number (just a heads-up:
+  // family members often share one).
+  const lookup = usePatientLookup(allPatients)
+  const matches = findPatientMatches(lookup, form.name, form.phone)
+  const possibleDuplicates = matches.sameName
 
   const onSubmit = () => {
     if (!form.name.trim() || !form.chiefComplaint.trim()) return
@@ -4825,6 +4818,23 @@ function NewPatientModal({ onClose, onOpenPatient }: { onClose: () => void; onOp
                 placeholder={f.placeholder}
                 className="mt-1.5 w-full rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-[13px] text-body outline-none placeholder:text-faint focus:border-green-border"
               />
+              {f.key === 'phone' && matches.samePhone.length > 0 && (
+                <div className="mt-2 rounded-[12px] border border-amber-border bg-amber-tint px-3.5 py-2.5">
+                  <div className="text-[12px] font-semibold text-amber-text">This number is already on file</div>
+                  <div className="mt-1 space-y-1">
+                    {matches.samePhone.slice(0, 3).map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => { onClose(); onOpenPatient(p.id) }}
+                        className="block w-full truncate text-left text-[12px] text-amber-text underline decoration-amber-text/40 decoration-1 underline-offset-2 hover:decoration-amber-text"
+                      >
+                        {p.name} · {p.age} {p.sex} · {p.wsCode}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mt-1 text-[11.5px] text-amber-text/80">Family members can share a number — carry on if this is someone new.</div>
+                </div>
+              )}
             </div>
           ))}
           <div>

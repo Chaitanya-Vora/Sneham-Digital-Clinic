@@ -381,6 +381,7 @@ export function PractitionerApp() {
         open={addPatientOpen}
         onClose={() => setAddPatientOpen(false)}
         onAdded={(id) => { setAddPatientOpen(false); openOverlay({ kind: 'case', patientId: id }) }}
+        onOpenExisting={(id) => { setAddPatientOpen(false); openOverlay({ kind: 'patient-detail', patientId: id }) }}
       />
       <PatientSearchSheet
         open={billSearchOpen}

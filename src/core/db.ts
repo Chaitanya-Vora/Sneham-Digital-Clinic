@@ -1,3 +1,4 @@
+import { HIDDEN_OUTCOME_IDS } from './hiddenRecords'
 import { supabase } from './supabase'
 import type {
   Appointment,
@@ -925,7 +926,7 @@ function toDbOutcome(o: Outcome) {
 export async function fetchOutcomes(): Promise<Outcome[]> {
   const { data, error } = await supabase.from('outcomes').select('*').order('date', { ascending: false })
   if (error) { console.error('fetchOutcomes:', error.message); _hydrateErrors++; return [] }
-  return (data ?? []).map(toAppOutcome)
+  return (data ?? []).filter((o) => !HIDDEN_OUTCOME_IDS.has(o.id)).map(toAppOutcome)
 }
 
 export async function insertOutcome(o: Outcome): Promise<boolean> {

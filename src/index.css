@@ -61,6 +61,8 @@
 @layer utilities {
   /* Grows a control's touch area without changing how it looks — the pseudo
      element is invisible but catches taps. Parent must be positioned. */
+  /* Diagonal hatching for "planned, not done yet" — drawn in the text colour. */
+  .hatch { background-image: repeating-linear-gradient(-45deg, color-mix(in srgb, currentColor 60%, transparent) 0 1.2px, transparent 1.2px 4px); }
   .tap-pad-text::after { content: ''; position: absolute; inset: -8px -4px; }
   .tap-pad-sm::after { content: ''; position: absolute; inset: -4px; }
   .tap-pad::after { content: ''; position: absolute; inset: -8px; }

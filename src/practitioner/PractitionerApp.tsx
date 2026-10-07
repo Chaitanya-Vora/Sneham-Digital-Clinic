@@ -51,8 +51,8 @@ import { Avatar, Badge, BottomSheet, Card, Chip, Label, Stepper, Toggle } from '
 import { PendingApproval, AccessRemoved } from '../design-system/PendingApproval'
 import { Pressable } from '../design-system/Pressable'
 import { haptic } from '../design-system/haptics'
-import { spring, springSoft, tabVariants, pushVariants, listContainer, listItem } from '../design-system/motion'
-import { CountUp } from '../design-system/feedback'
+import { spring, springSoft, springSnappy, tabVariants, pushVariants, listContainer, listItem } from '../design-system/motion'
+import { CountUp, TickNumber } from '../design-system/feedback'
 import { PullToRefresh, useHorizontalSwipe, EdgeSwipeBack, useNativeBackButton } from '../design-system/gestures'
 import { GuardedMotionDiv, useGhostSweep } from '../design-system/presence'
 import { readResume, clearResume } from '../core/drafts'
@@ -165,6 +165,10 @@ export function PractitionerApp() {
   const ME = useClinic((s) => s.currentPractitionerId)
   const doctor = useClinic((s) => s.practitioners.find((p) => p.id === s.currentPractitionerId))
   const unread = useClinic((s) => s.notifications.filter((n) => (n.surface === 'web' || n.surface === 'practitioner') && !n.read).length)
+  // Patient chat messages never raise a bell notification, so without this a
+  // new message is invisible until the Inbox is opened. Messages + alerts =
+  // what's waiting in the Inbox tab.
+  const unreadMessages = useClinic((s) => s.messages.reduce((n, m) => n + (m.sender === 'patient' && !m.read ? 1 : 0), 0))
 
   const goTab = (next: Tab) => {
     if (next === tab) return
@@ -320,7 +324,7 @@ export function PractitionerApp() {
         </div>
       </div>
 
-      <TabBar tab={tab} onChange={(t) => (t === 'rx' ? goToRx(null) : goTab(t))} />
+      <TabBar tab={tab} onChange={(t) => (t === 'rx' ? goToRx(null) : goTab(t))} inboxCount={unreadMessages + unread} />
 
       {/* overlays: case sheet / compare / video — dir flips to -1 on Back so
           the slide direction matches native forward/back conventions */}
@@ -1329,7 +1333,7 @@ function InstantMeetingSheet({ open, onClose, onStart }: { open: boolean; onClos
 }
 
 // ── TAB BAR (animated indicator) ──
-function TabBar({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
+function TabBar({ tab, onChange, inboxCount }: { tab: Tab; onChange: (t: Tab) => void; inboxCount: number }) {
   const items: { id: Tab; icon: any; label: string }[] = [
     { id: 'today', icon: SunHorizon, label: 'Today' },
     { id: 'calendar', icon: CalendarBlank, label: 'Schedule' },
@@ -1341,11 +1345,26 @@ function TabBar({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
     <div className="absolute inset-x-0 bottom-0 z-30 flex border-t border-border bg-surface/85 px-3 pt-2 backdrop-blur-xl" style={{ paddingBottom: 'var(--app-bottom)' }}>
       {items.map((it) => {
         const on = tab === it.id
+        const badge = it.id === 'inbox' ? inboxCount : 0
         return (
-          <Pressable key={it.id} as="div" hap="tick" scale={0.9} onClick={() => onChange(it.id)} className="flex flex-1 cursor-pointer flex-col items-center gap-1 py-1">
+          <Pressable key={it.id} as="div" hap="tick" scale={0.9} onClick={() => onChange(it.id)} ariaLabel={badge > 0 ? `${it.label}, ${badge} unread` : undefined} className="flex flex-1 cursor-pointer flex-col items-center gap-1 py-1">
             <span className="relative flex h-9 w-14 items-center justify-center">
               {on && <motion.span layoutId="prac-tab" className="absolute inset-0 rounded-pill bg-tint-pale" transition={spring} />}
               <span className={`relative ${on ? 'text-brand' : 'text-faint'}`}><it.icon size={21} weight={on ? 'fill' : 'regular'} /></span>
+              <AnimatePresence>
+                {badge > 0 && (
+                  <motion.span
+                    key="badge"
+                    initial={{ opacity: 0, scale: 0.5 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.5 }}
+                    transition={springSnappy}
+                    className="absolute right-1.5 top-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold leading-none text-white ring-2 ring-surface"
+                  >
+                    <TickNumber value={Math.min(badge, 99)} />{badge > 99 ? '+' : ''}
+                  </motion.span>
+                )}
+              </AnimatePresence>
             </span>
             <span className={`text-[11px] font-medium ${on ? 'text-brand' : 'text-faint'}`}>{it.label}</span>
           </Pressable>

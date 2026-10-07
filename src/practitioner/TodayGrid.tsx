@@ -31,6 +31,9 @@ import { Avatar, Badge, BottomSheet, Card, Chip, Label } from '../design-system/
 import { Pressable } from '../design-system/Pressable'
 import { haptic } from '../design-system/haptics'
 import { springSoft, listContainer, listItem } from '../design-system/motion'
+import { TickNumber } from '../design-system/feedback'
+import { DayProgress } from '../design-system/DayProgress'
+import { useConsultElapsed, formatElapsed } from '../core/consultClock'
 import { useToast } from '../design-system/toast'
 import { PatientQuickView } from './PatientQuickView'
 import { BlockTimeSheet, blockColorStyle } from './BlockTimeSheet'
@@ -156,38 +159,8 @@ export function TodayGrid({
   const waiting = myFutureAppts.filter((a) => a.status === 'Waiting' || a.status === 'New').length
   const upcoming = myFutureAppts.filter((a) => a.status === 'Upcoming').length
 
-  // consult timer
-  const [elapsed, setElapsed] = useState(0)
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const timerStart = useRef(Date.now())
-  const startTimer = useCallback(() => {
-    timerStart.current = Date.now()
-    timerRef.current = setInterval(() => setElapsed(Math.floor((Date.now() - timerStart.current) / 1000)), 1000)
-  }, [])
-  const stopTimer = useCallback(() => {
-    if (timerRef.current) clearInterval(timerRef.current)
-    timerRef.current = null
-    setElapsed(0)
-  }, [])
-  const timerStr = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}`
-
-  // if active consult, start timer
-  useMemo(() => {
-    if (activeAppt && !timerRef.current) startTimer()
-    if (!activeAppt && timerRef.current) stopTimer()
-  }, [!!activeAppt])
-
-  // stop the interval if this view unmounts mid-consult, so it doesn't keep
-  // ticking (and updating state) against a component that's gone
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current)
-    }
-  }, [])
-
   function handleEndConsult(apptId: string) {
     endConsult(apptId)
-    stopTimer()
     haptic('success')
     toast({ title: 'Consult ended' })
     setEndConsultSheet(null)
@@ -307,7 +280,15 @@ export function TodayGrid({
           lines at phone width); Mine/Everyone is Owner only, mirrors the
           web console exactly */}
       <div className="flex items-center justify-between">
-        <Label>Today's schedule</Label>
+        <div className="flex min-w-0 items-center gap-2">
+          <Label className="whitespace-nowrap">Today's schedule</Label>
+          {todayOnlyAppts.length > 0 && (
+            <span className="flex shrink-0 items-center gap-1.5 text-[11px] font-semibold text-muted max-[339px]:hidden">
+              <DayProgress done={todayOnlyAppts.filter((a) => a.status === 'Seen').length} total={todayOnlyAppts.length} className="hidden w-9 min-[390px]:inline-block" />
+              <span className="tabular-nums">{todayOnlyAppts.filter((a) => a.status === 'Seen').length}/{todayOnlyAppts.length}</span>
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           {role === 'Owner' && (
             <div className="inline-flex rounded-pill border border-border bg-surface p-0.5">
@@ -366,7 +347,7 @@ export function TodayGrid({
         <div className="grid flex-1 grid-cols-3 gap-2">
           {stats.map(([l, v, tone]) => (
             <div key={l} className={`rounded-[14px] border border-border bg-surface px-2.5 py-2 text-center ${tone === 'amber' && v > 0 ? 'border-amber/40 bg-amber-tint/30' : ''}`}>
-              <div className={`font-display text-[18px] font-bold ${tone === 'amber' && v > 0 ? 'text-amber-text' : 'text-ink'}`}>{v}</div>
+              <div className={`font-display text-[18px] font-bold ${tone === 'amber' && v > 0 ? 'text-amber-text' : 'text-ink'}`}><TickNumber value={v} /></div>
               <div className="text-[11px] font-medium uppercase tracking-wider text-faint">{l}</div>
             </div>
           ))}
@@ -458,7 +439,7 @@ export function TodayGrid({
               <span className="h-2 w-2 animate-breathe rounded-full bg-white" /> In consult now
             </div>
             <div className="flex items-center gap-1.5 rounded-pill bg-white/20 px-2.5 py-1 text-[12px] font-semibold">
-              <Timer size={13} weight="bold" /> {timerStr}
+              <Timer size={13} weight="bold" /> <LiveElapsed apptId={activeAppt.id} />
             </div>
           </div>
           <div className="mt-2 font-display text-[18px] font-bold">{activePatient.name}</div>
@@ -503,7 +484,7 @@ export function TodayGrid({
           activeAppt={activeAppt ?? null}
           selectedAppt={selectedAppt}
           dragTarget={dragTarget}
-          onStartConsult={(id) => { startConsult(id); startTimer(); haptic('success'); const a = appts.find((x) => x.id === id); toast({ title: `Consult started · ${pFind(a?.patientId ?? '')?.name}` }); if (a?.type === 'Video' && startVideo) startVideo(id) }}
+          onStartConsult={(id) => { startConsult(id); haptic('success'); const a = appts.find((x) => x.id === id); toast({ title: `Consult started · ${pFind(a?.patientId ?? '')?.name}` }); if (a?.type === 'Video' && startVideo) startVideo(id) }}
           onEndConsult={(id) => setEndConsultSheet(id)}
           onNoShow={(id) => setNoShowSheet(id)}
           onOpenCase={openCase}
@@ -519,7 +500,7 @@ export function TodayGrid({
           practitioners={practitioners}
           myId={ME}
           activeAppt={activeAppt ?? null}
-          onStartConsult={(id) => { startConsult(id); startTimer(); haptic('success'); const a = appts.find((x) => x.id === id); toast({ title: `Consult started · ${pFind(a?.patientId ?? '')?.name}` }); if (a?.type === 'Video' && startVideo) startVideo(id) }}
+          onStartConsult={(id) => { startConsult(id); haptic('success'); const a = appts.find((x) => x.id === id); toast({ title: `Consult started · ${pFind(a?.patientId ?? '')?.name}` }); if (a?.type === 'Video' && startVideo) startVideo(id) }}
           onNoShow={(id) => setNoShowSheet(id)}
           onPeekPatient={setPeekPatientId}
           onOpenCase={openCase}
@@ -537,7 +518,7 @@ export function TodayGrid({
       </Pressable>
 
       {/* bottom sheets */}
-      <EndConsultSheet open={endConsultSheet !== null} timerStr={timerStr} onClose={() => setEndConsultSheet(null)} onConfirm={() => endConsultSheet && handleEndConsult(endConsultSheet)} />
+      <EndConsultSheet open={endConsultSheet !== null} apptId={endConsultSheet} onClose={() => setEndConsultSheet(null)} onConfirm={() => endConsultSheet && handleEndConsult(endConsultSheet)} />
       <FollowUpSheet open={followUpSheet !== null} patientName={followUpSheet ? pFind(followUpSheet)?.name ?? 'patient' : ''} onClose={() => setFollowUpSheet(null)} onSelect={(p) => followUpSheet && handleScheduleFollowUp(followUpSheet, p)} />
       <NoShowSheet open={noShowSheet !== null} appts={allAppts} pFind={pFind} noShowId={noShowSheet} onClose={() => setNoShowSheet(null)} onConfirm={() => noShowSheet && handleNoShow(noShowSheet)} />
       <BlockTimeSheet
@@ -694,8 +675,9 @@ function DayGridView({ appts, timeBlocks, patients, practitioners, myId, activeA
                             </Pressable>
                           )}
                           {isActive && isMine && (
-                            <Pressable hap="tick" onClick={() => onEndConsult(a.id)} className="relative tap-pad-y flex items-center gap-0.5 rounded-pill bg-danger/10 px-2 py-1 text-[11px] font-semibold text-danger">
-                              <Stop size={9} weight="fill" /> End
+                            <Pressable hap="tick" onClick={() => onEndConsult(a.id)} className="relative tap-pad-y flex items-center gap-1 rounded-pill bg-danger px-2 py-1 text-[11px] font-semibold text-white">
+                              <span className="h-1.5 w-1.5 animate-breathe rounded-full bg-white" />
+                              End · <span className="tabular-nums"><LiveElapsed apptId={a.id} /></span>
                             </Pressable>
                           )}
                           {!isSeen && !isActive && isMine && (
@@ -809,14 +791,20 @@ function ListView({
   )
 }
 
+// The running time of a consult. The ticking lives in this tiny component, so
+// only these few characters redraw each second rather than the whole screen.
+function LiveElapsed({ apptId }: { apptId: string | undefined }) {
+  return <>{formatElapsed(useConsultElapsed(apptId))}</>
+}
+
 // ── BOTTOM SHEETS ──
-function EndConsultSheet({ open, timerStr, onClose, onConfirm }: { open: boolean; timerStr: string; onClose: () => void; onConfirm: () => void }) {
+function EndConsultSheet({ open, apptId, onClose, onConfirm }: { open: boolean; apptId: string | null; onClose: () => void; onConfirm: () => void }) {
   return (
     <BottomSheet open={open} onClose={onClose}>
       <div className="flex flex-col items-center py-2 text-center">
         <div className="flex h-14 w-14 items-center justify-center rounded-full bg-tint text-brand"><Check size={28} weight="bold" /></div>
         <div className="mt-3 font-display text-[17px] font-bold text-ink">End consult?</div>
-        <div className="mt-1 text-[13px] text-muted">Duration: {timerStr}</div>
+        <div className="mt-1 text-[13px] text-muted">Duration: <LiveElapsed apptId={apptId ?? undefined} /></div>
         <div className="mt-4 flex w-full gap-2">
           <Pressable hap="tick" onClick={onClose} className="flex-1 rounded-pill border border-border bg-surface py-2.5 text-center text-[14px] font-semibold text-body">Cancel</Pressable>
           <Pressable hap="success" onClick={onConfirm} className="flex-1 rounded-pill bg-brand py-2.5 text-center text-[14px] font-semibold text-screen">End &amp; follow-up</Pressable>

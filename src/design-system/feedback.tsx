@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { animate } from 'framer-motion'
-import { easeCalm } from './motion'
+import { animate, motion, useReducedMotion } from 'framer-motion'
+import { easeCalm, springSnappy } from './motion'
 
 // ── CountUp ──────────────────────────────────────────────────
 export function CountUp({
@@ -26,6 +26,41 @@ export function CountUp({
     return () => controls.stop()
   }, [value, duration])
   return <span className={className}>{format(display)}</span>
+}
+
+// ── TickNumber ───────────────────────────────────────────────
+// A count that is shown as-is when its screen opens (no count-up from 0 every
+// time a tab is revisited) and only moves when the value actually changes:
+// it rolls to the new number and gives one small pop, so a change somewhere
+// else is noticed. Respects reduced motion.
+export function TickNumber({ value, className = '' }: { value: number; className?: string }) {
+  const reduce = useReducedMotion()
+  const [display, setDisplay] = useState(value)
+  const shown = useRef(value)
+  const mounted = useRef(false)
+  useEffect(() => { mounted.current = true }, [])
+  useEffect(() => {
+    if (shown.current === value) return
+    if (reduce) { shown.current = value; setDisplay(value); return }
+    const controls = animate(shown.current, value, {
+      duration: 0.45,
+      ease: easeCalm,
+      onUpdate: (v) => { shown.current = v; setDisplay(v) },
+      onComplete: () => { shown.current = value; setDisplay(value) },
+    })
+    return () => controls.stop()
+  }, [value, reduce])
+  return (
+    <motion.span
+      key={value}
+      className={`inline-block ${className}`}
+      initial={mounted.current && !reduce ? { scale: 1.18 } : false}
+      animate={{ scale: 1 }}
+      transition={springSnappy}
+    >
+      {Math.round(display)}
+    </motion.span>
+  )
 }
 
 // ── Animated progress ring ───────────────────────────────────

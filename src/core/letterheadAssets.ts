@@ -7,26 +7,24 @@
 // file bytes and encodes them to a base64 data URI — no hand-transcribed
 // base64 string that could get silently corrupted in the process.
 import logoUrl from '../assets/sneham-logo.png?inline'
-import signatureUrl from '../assets/neha-signature.jpeg?inline'
-// jsPDF's base14 "helvetica" has no ₹ (Rupee) glyph — it silently prints a
-// tofu substitute instead of erroring, which is how the invoice PDF's ₹
-// signs came out as stray superscript digits. Roboto (Apache-2.0, Google's
-// own font) does have it. Subset down to just the glyphs the invoice PDF
-// actually uses — printable ASCII plus ₹ · — via fonttools, so this stays a
-// few KB instead of a full ~170KB family.
-// `?inline` only base64-inlines image types in this Vite version, not fonts
-// (confirmed: it still emits a separate asset + a URL reference even in a
-// production build) — so these are plain `?url` references, fetched and
-// base64-encoded at runtime in pdfExport.ts, same as the prescription
-// letterhead PDF template already is.
-import robotoRegularUrl from '../assets/roboto-regular.ttf?url'
-import robotoBoldUrl from '../assets/roboto-bold.ttf?url'
+import signatureUrl from '../assets/neha-signature.png?inline'
+// The clinic's printed documents use Outfit + Source Sans 3 (the same pair the
+// app uses), trimmed to Latin so each is ~40 KB. `?inline` only base64-inlines
+// image types in this Vite version, not fonts — so these are plain `?url`
+// references, fetched and base64-encoded at runtime in pdfDesign.ts.
+import outfitSemiboldUrl from '../assets/outfit-semibold.ttf?url'
+import outfitBoldUrl from '../assets/outfit-bold.ttf?url'
+import sourceSansRegularUrl from '../assets/sourcesans3-regular.ttf?url'
+import sourceSansSemiboldUrl from '../assets/sourcesans3-semibold.ttf?url'
+import sourceSansBoldUrl from '../assets/sourcesans3-bold.ttf?url'
 
 export const CLINIC_DETAILS = {
   doctorName: 'Dr. Neha Bharadwajan Tripathi',
-  credentials: 'M.D (Homoeopathy)',
-  registrationNo: 'Reg: 64691',
-  address: 'Flat No 1, Siddhakala apartment, Opp. Kotak Mahindra Bank, Kaviltali, Chiplun- 415605',
+  credentials: 'M.D. (Homoeopathy)',
+  registrationNo: 'Reg. 64691',
+  address: 'Flat No. 1, Siddhakala Apartment, Opp. Kotak Mahindra Bank, Kaviltali, Chiplun – 415605',
+  // The masthead prints the address on two lines, split as in the clinic's own design.
+  addressLines: ['Flat No. 1, Siddhakala Apartment, Opp. Kotak Mahindra Bank,', 'Kaviltali, Chiplun – 415605 · www.snehamclinic.com'] as [string, string],
   website: 'www.snehamclinic.com',
   clinicName: 'Sneham Digital Clinic',
   tagline: 'Healing with compassion',
@@ -43,5 +41,12 @@ export const CLINIC_DETAILS = {
 
 export const SNEHAM_LOGO_BASE64 = logoUrl
 export const NEHA_SIGNATURE_BASE64 = signatureUrl
-export const ROBOTO_REGULAR_URL = robotoRegularUrl
-export const ROBOTO_BOLD_URL = robotoBoldUrl
+// The two typefaces of the clinic's printed documents (Design.pdf): Outfit for
+// headings, Source Sans 3 for everything else — the same pair the app uses.
+export const DESIGN_FONT_URLS = {
+  outfitSemibold: outfitSemiboldUrl,
+  outfitBold: outfitBoldUrl,
+  sourceSansRegular: sourceSansRegularUrl,
+  sourceSansSemibold: sourceSansSemiboldUrl,
+  sourceSansBold: sourceSansBoldUrl,
+}

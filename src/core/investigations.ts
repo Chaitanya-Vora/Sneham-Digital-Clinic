@@ -27,6 +27,12 @@ export const matchesAllWords = (queryWords: string[], targetWords: string[]) =>
 
 export const INVESTIGATION_CATALOG: InvestigationCategory[] = [
   {
+    // The whole-panel orders she writes most often — one tap each. They are also
+    // the boxes on the printed investigation request.
+    category: 'Common panels',
+    tests: ['Thyroid Profile (T3, T4, TSH)', 'Liver Function Test (LFT)', 'Kidney Function Test (KFT)', 'Lipid Profile'],
+  },
+  {
     category: 'Haematology',
     tests: ['CBC', 'ESR', 'P.S. for M.P. – Peripheral Smear for Malaria Parasite', 'M.P. Rapid Antigen', 'Absolute Eosinophil Count', 'Platelet Count', 'Blood Group', 'G6PD'],
   },

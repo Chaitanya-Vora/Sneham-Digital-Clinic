@@ -10,3 +10,9 @@ dist-apk/
 .audit-tmp/
 tsconfig.tsbuildinfo
 supabase/.temp/
+
+# Live updates: built bundles + any private signing key must never be committed
+# (the public keys in ota/keys/*.pub.pem are meant to be)
+ota-out/
+*.pem
+!ota/keys/*.pub.pem

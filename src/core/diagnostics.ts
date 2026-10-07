@@ -1,7 +1,7 @@
 import { Capacitor } from '@capacitor/core'
 import { App as CapApp } from '@capacitor/app'
 
-declare const __APP_BUILD__: { version: string; sha: string; date: string }
+declare const __APP_BUILD__: { version: string; sha: string; date: string; number: number }
 
 // A small black-box recorder. It keeps the last ~160 events — app start, going
 // to the background and coming back, "restarted after being closed by the

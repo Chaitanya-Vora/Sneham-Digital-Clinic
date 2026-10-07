@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { todayISO, formatDayLabel } from './day'
 import { persist } from 'zustand/middleware'
+import { noteConsultStart, clearConsultStart } from './consultClock'
 import { replaceEqualDeep } from './structuralShare'
 import { diag } from './diagnostics'
 import { supabase } from './supabase'
@@ -1247,6 +1248,9 @@ export const useClinic = create<ClinicState>()(
       },
 
       startConsult: (appointmentId) => {
+        // Remember when it began, so the on-screen timer survives the app
+        // being closed mid-consult (see core/consultClock).
+        noteConsultStart(appointmentId)
         set((s) => ({
           appointments: s.appointments.map((a) =>
             a.id === appointmentId ? { ...a, status: 'In consult' as const } : a,
@@ -1256,6 +1260,7 @@ export const useClinic = create<ClinicState>()(
       },
 
       endConsult: (appointmentId) => {
+        clearConsultStart(appointmentId)
         const appt = get().appointments.find((a) => a.id === appointmentId)
         // lastSeen used to be set once, at patient creation, and never
         // touched again — every real patient just said "Today" forever,
@@ -1276,6 +1281,7 @@ export const useClinic = create<ClinicState>()(
       },
 
       markNoShow: (appointmentId) => {
+        clearConsultStart(appointmentId)
         const appt = get().appointments.find((a) => a.id === appointmentId)
         const notif: AppNotification = {
           id: newId(),
@@ -1332,6 +1338,7 @@ export const useClinic = create<ClinicState>()(
       },
 
       updateAppointmentStatus: (id, status) => {
+        if (status !== 'In consult') clearConsultStart(id)
         set((s) => ({
           appointments: s.appointments.map((a) => (a.id === id ? { ...a, status } : a)),
         }))

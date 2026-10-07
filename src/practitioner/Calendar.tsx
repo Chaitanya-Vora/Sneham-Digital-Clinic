@@ -20,6 +20,7 @@ import { Pressable } from '../design-system/Pressable'
 import { haptic } from '../design-system/haptics'
 import { spring, springSoft, listContainer, listItem } from '../design-system/motion'
 import { PullToRefresh } from '../design-system/gestures'
+import { DayProgress } from '../design-system/DayProgress'
 import { useToast } from '../design-system/toast'
 import { PatientQuickView } from './PatientQuickView'
 import { BlockTimeSheet, blockColorStyle } from './BlockTimeSheet'
@@ -439,10 +440,13 @@ export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatien
                         <span className={`font-display text-[16px] font-bold ${selected ? 'text-white' : isToday ? 'text-brand' : 'text-ink'}`}>
                           {d.getDate()}
                         </span>
-                        {/* dot for appointments */}
-                        {!selected && (weekSchedule.get(toISO(d))?.length ?? 0) > 0 && (
-                          <span className="h-[5px] w-[5px] rounded-full bg-brand" />
-                        )}
+                        {/* the day's load: solid = seen, hatched = still to come */}
+                        {(() => {
+                          const day = (weekSchedule.get(toISO(d)) ?? []).filter((a) => a.status !== 'Cancelled')
+                          return day.length > 0 ? (
+                            <DayProgress done={day.filter((a) => a.status === 'Seen').length} total={day.length} onDark={selected} className="w-5" />
+                          ) : null
+                        })()}
                         {selected && (
                           <motion.span layoutId="day-pill" className="absolute inset-0 rounded-[14px] bg-brand" style={{ zIndex: -1 }} transition={spring} />
                         )}

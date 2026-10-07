@@ -3,6 +3,7 @@ import { Capacitor } from '@capacitor/core'
 import { App as CapApp } from '@capacitor/app'
 import { supabase } from './supabase'
 import { diag } from './diagnostics'
+import { parseManifest, decideUpdate } from './liveUpdateRules'
 
 // Live updates: fixes to the app's screens reach the phones without a new APK.
 //
@@ -31,13 +32,6 @@ const CHECK_EVERY_MS = 15 * 60 * 1000 // at most this often when coming back to 
 const APPLY_AFTER_AWAY_MS = 5 * 60 * 1000 // applied on return only if you were away this long (a new "session")
 const FIRST_CHECK_DELAY_MS = 6000 // let the app load its data first
 
-interface Manifest {
-  build: number // always higher than the build it replaces
-  bundleId: string
-  file: string
-  signature: string
-  minNativeVersionCode: number
-}
 
 export type UpdateStatus =
   | { kind: 'idle' }
@@ -57,20 +51,6 @@ export const liveUpdatesEnabled = () =>
 
 const baseUrl = () => `${SUPABASE_URL}/storage/v1/object/public/ota/${SURFACE}`
 
-// Reject anything that isn't exactly the expected shape — the manifest is
-// fetched over the network, so it is treated as untrusted input.
-function parseManifest(raw: unknown): Manifest | null {
-  if (!raw || typeof raw !== 'object') return null
-  const m = raw as Record<string, unknown>
-  const ok =
-    Number.isInteger(m.build) && (m.build as number) > 0 &&
-    typeof m.bundleId === 'string' && /^b[0-9]{1,9}$/.test(m.bundleId) &&
-    typeof m.file === 'string' && /^[A-Za-z0-9._-]{1,80}\.zip$/.test(m.file) &&
-    typeof m.signature === 'string' && /^[A-Za-z0-9+/=]{300,700}$/.test(m.signature) &&
-    Number.isInteger(m.minNativeVersionCode) && (m.minNativeVersionCode as number) >= 1
-  return ok ? (m as unknown as Manifest) : null
-}
-
 let checking = false
 let lastCheckAt = 0
 
@@ -85,23 +65,16 @@ export async function checkForLiveUpdate(): Promise<void> {
     const manifest = parseManifest(await res.json())
     if (!manifest) { diag('update', 'manifest ignored (unexpected shape)'); return }
 
-    // Never replace newer code with older: a phone that got a fresh APK has a
-    // higher build number than any bundle published before that APK was made.
-    if (manifest.build <= __APP_BUILD__.number) return
-
     const { LiveUpdate } = await import('@capawesome/capacitor-live-update')
-    const { versionCode } = await LiveUpdate.getVersionCode()
-    if (Number(versionCode) < manifest.minNativeVersionCode) {
-      diag('update', `build ${manifest.build} needs app version ${manifest.minNativeVersionCode}, have ${versionCode}`)
-      setStatus({ kind: 'needs-new-app' })
-      return
-    }
-    const { bundleIds: blocked } = await LiveUpdate.getBlockedBundles()
-    if (blocked.includes(manifest.bundleId)) { diag('update', `build ${manifest.build} was rolled back before — skipped`); return }
+    const [{ versionCode }, { bundleIds: blocked }, { bundleIds: have }] = await Promise.all([
+      LiveUpdate.getVersionCode(), LiveUpdate.getBlockedBundles(), LiveUpdate.getDownloadedBundles(),
+    ])
+    const decision = decideUpdate({ manifest, runningBuild: __APP_BUILD__.number, appVersionCode: Number(versionCode), blockedBundleIds: blocked, downloadedBundleIds: have })
+    if (decision.action === 'ignore') { if (decision.reason !== 'not newer') diag('update', `build ${manifest.build} skipped: ${decision.reason}`); return }
+    if (decision.action === 'needs-new-app') { diag('update', `build ${manifest.build} ${decision.reason}`); setStatus({ kind: 'needs-new-app' }); return }
 
     setStatus({ kind: 'downloading' })
-    const { bundleIds: have } = await LiveUpdate.getDownloadedBundles()
-    if (!have.includes(manifest.bundleId)) {
+    if (decision.needsDownload) {
       const started = Date.now()
       await LiveUpdate.downloadBundle({ url: `${baseUrl()}/${manifest.file}`, bundleId: manifest.bundleId, signature: manifest.signature })
       diag('update', `downloaded build ${manifest.build} in ${Date.now() - started}ms`)

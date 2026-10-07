@@ -1,34 +1,27 @@
-import { jsPDF } from 'jspdf'
+import type { jsPDF } from 'jspdf'
 import QRCode from 'qrcode'
 import { Capacitor } from '@capacitor/core'
 import type { Prescription, Patient, InvestigationOrder, Invoice, Outcome } from './types'
-import { CLINIC_DETAILS, SNEHAM_LOGO_BASE64, NEHA_SIGNATURE_BASE64, ROBOTO_REGULAR_URL, ROBOTO_BOLD_URL } from './letterheadAssets'
-import { INVESTIGATION_CATALOG } from './investigations'
+import { CLINIC_DETAILS } from './letterheadAssets'
 import { invoiceTotal, invoiceBalance, numberToWordsIndian, buildUpiLink } from './billing'
+import {
+  COLOR, LEFT, RIGHT, CONTENT_W, PAGE_W, PAGE_H, RX_LAYOUT, FORM_LAYOUT, type Layout,
+  createDesignDoc, drawRxSign, setFace, put, textWidth, hline, box, drawMasthead, drawTitle, drawDate, drawField, drawFooter,
+  contentBottom, parseParagraphs, layoutParagraphs, flowHeight, drawFlow, type FlowStyle,
+} from './pdfDesign'
 
-const BRAND = '#41603C'
-const INK = '#0F172A'
-const MUTED = '#64748B'
-const BORDER = '#d4d4d4'
+export { toPrintable } from './pdfDesign'
+
+// All four documents are drawn with the kit in pdfDesign.ts, to the formats the
+// doctor supplied (Design.pdf). This file decides what goes on each one.
 
 // ₹ amounts: whole rupees stay plain ("₹ 950"), anything with paise always
 // shows two decimals ("₹ 950.50", never "₹ 950.5").
-const inrFmt = (amount: number) => {
+const numFmt = (amount: number) => {
   const n = Math.round(amount * 100) / 100 // kills float noise like 1050.0000000000002
-  return `₹ ${Number.isInteger(n) ? n.toLocaleString('en-IN') : n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  return Number.isInteger(n) ? n.toLocaleString('en-IN') : n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
-
-// Colors for the prescription/investigation-request design (distinct from
-// the invoice's own green masthead — this is its own print identity,
-// matched to the reference design, not the app's web UI palette). First-
-// pass values reasoned from the reference design, not pixel-sampled —
-// expect to nudge these once real printed output is next to it.
-const RX2_NAVY = '#2E4A6B'
-const RX2_ROSE = '#B23A5A'
-const RX2_LABEL = '#8A8F98'
-const RX2_BOX_BG = '#F4F6F8'
-const RX2_AVOID_BG = '#FBEBEC'
-const RX2_AVOID_BORDER = '#F0C9CE'
+const inrFmt = (amount: number) => `₹ ${numFmt(amount)}`
 
 /** Saves (web) or writes-to-cache-and-opens-native-share (native) a
  *  generated PDF. Shared by every export function in this file. */
@@ -71,896 +64,471 @@ async function previewPdf(doc: jsPDF, fileName: string) {
   }
 }
 
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = ''
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
-  return btoa(binary)
-}
-
-// Fetched once per session and reused — every invoice after the first
-// registers the font from this cache instead of re-fetching it.
-let robotoBase64Cache: { regular: string; bold: string } | null = null
-async function loadRobotoBase64() {
-  if (robotoBase64Cache) return robotoBase64Cache
-  const [regularBytes, boldBytes] = await Promise.all([
-    fetch(ROBOTO_REGULAR_URL).then((r) => r.arrayBuffer()),
-    fetch(ROBOTO_BOLD_URL).then((r) => r.arrayBuffer()),
-  ])
-  robotoBase64Cache = {
-    regular: bytesToBase64(new Uint8Array(regularBytes)),
-    bold: bytesToBase64(new Uint8Array(boldBytes)),
-  }
-  return robotoBase64Cache
-}
-
-// What the embedded Roboto subset can draw: printable ASCII, Latin-1 and
-// Latin Extended-A (accents, °, ½, ×, µ …), typographic quotes/dashes/bullet/
-// ellipsis, ₹ € ™ − . jsPDF silently DROPS any other character, which on a
-// prescription turns "½ tab" into " tab" — so anything outside this set is
-// printed as a visible "?" instead of vanishing.
-const EXTRA_GLYPHS = new Set([0x2013, 0x2014, 0x2018, 0x2019, 0x201a, 0x201c, 0x201d, 0x201e, 0x2020, 0x2022, 0x2026, 0x2032, 0x2033, 0x2039, 0x203a, 0x20ac, 0x20b9, 0x2122, 0x2212])
-const isDrawable = (cp: number) => (cp >= 0x20 && cp <= 0x7e) || (cp >= 0xa0 && cp <= 0x17f) || EXTRA_GLYPHS.has(cp)
-export function toPrintable(text: string): string {
-  let out = ''
-  for (const ch of text.normalize('NFC')) {
-    const cp = ch.codePointAt(0)!
-    if (ch === '\n' || isDrawable(cp)) out += ch
-    else if (cp === 0x09) out += ' '
-    else if (cp === 0xad || (cp >= 0x200b && cp <= 0x200f) || cp === 0xfe0f || cp === 0xfeff || cp < 0x20) continue // invisible
-    else if (cp >= 0x1f000) continue // emoji — no clinical meaning, drop quietly
-    else out += '?'
-  }
-  return out
-}
-const printable = (t: unknown): unknown => (Array.isArray(t) ? t.map(printable) : typeof t === 'string' ? toPrintable(t) : t)
-
-/** Registers the Roboto subset (see letterheadAssets.ts) as this jsPDF
- *  instance's default font, in place of the base14 "helvetica" — which has
- *  no ₹ glyph and silently substitutes a stray character for it. Font
- *  registration is per-instance, so this must run once per `new jsPDF()`. */
-async function registerInvoiceFont(doc: jsPDF) {
-  const { regular, bold } = await loadRobotoBase64()
-  doc.addFileToVFS('Roboto-Regular.ttf', regular)
-  doc.addFont('Roboto-Regular.ttf', 'Roboto', 'normal')
-  doc.addFileToVFS('Roboto-Bold.ttf', bold)
-  doc.addFont('Roboto-Bold.ttf', 'Roboto', 'bold')
-  doc.setFont('Roboto', 'normal')
-  // Every string passed to this document — names, diagnoses, instructions,
-  // invoice lines — goes through toPrintable, for drawing and measuring alike.
-  const d = doc as unknown as Record<string, (...a: unknown[]) => unknown>
-  for (const fn of ['text', 'splitTextToSize', 'getTextWidth']) {
-    const orig = d[fn].bind(doc)
-    d[fn] = (t: unknown, ...rest: unknown[]) => orig(printable(t), ...rest)
-  }
-}
-
-/** Draws the real clinic letterhead (logo, name, address, website) at the
- *  top of a page and returns the y position to continue drawing from. */
-function drawLetterhead(doc: jsPDF, pw: number, margin: number): number {
-  let y = 10
-  doc.setFillColor(BRAND)
-  doc.rect(0, 0, pw, 2.5, 'F')
-
-  const logoW = 26
-  const logoH = logoW * (626 / 1042)
-  doc.addImage(SNEHAM_LOGO_BASE64, 'PNG', margin, y, logoW, logoH, undefined, 'FAST')
-
-  const textX = margin + logoW + 4
-  let ty = y + 4
-  doc.setFontSize(13)
-  doc.setTextColor(BRAND)
-  doc.text(CLINIC_DETAILS.clinicName, textX, ty)
-  ty += 4.5
-  doc.setFontSize(7.5)
-  doc.setTextColor(MUTED)
-  doc.text(CLINIC_DETAILS.tagline, textX, ty)
-  y += logoH + 3
-
-  doc.setFontSize(8.5)
-  doc.setTextColor(INK)
-  doc.text(CLINIC_DETAILS.doctorName, textX, ty + 3)
-
-  y += 3
-  doc.setFontSize(7)
-  doc.setTextColor(MUTED)
-  const addrLines = doc.splitTextToSize(
-    `${CLINIC_DETAILS.credentials}, ${CLINIC_DETAILS.registrationNo}  ·  ${CLINIC_DETAILS.address}`,
-    pw - margin * 2,
-  )
-  doc.text(addrLines, margin, y)
-  y += addrLines.length * 3
-  doc.text(`${CLINIC_DETAILS.website}  ·  Phone: ${CLINIC_DETAILS.phone}  ·  ${CLINIC_DETAILS.email}`, margin, y)
-  y += 4
-
-  doc.setDrawColor(BRAND)
-  doc.setLineWidth(0.4)
-  doc.line(margin, y, pw - margin, y)
-  return y + 6
-}
-
-/** Draws the signature + doctor sign-off block, replacing the old
- *  "Signature: ____" placeholder line, and returns the y position after it. */
-// Every official document is signed under Dr. Neha Tripathi, the clinic's
-// registered principal practitioner — regardless of which practitioner
-// (owner or assistant) actually published it in the app. The signature
-// image is hers, so the printed name next to it always has to match.
-function drawSignatureFooter(doc: jsPDF, pw: number, margin: number, y: number): number {
-  const sigW = 22
-  const sigH = sigW * (90 / 219)
-  doc.addImage(NEHA_SIGNATURE_BASE64, 'JPEG', pw - margin - sigW, y - sigH + 2, sigW, sigH)
-
-  doc.setFontSize(9)
-  doc.setTextColor(INK)
-  doc.text(CLINIC_DETAILS.doctorName, margin, y)
-  let ty = y + 4
-  doc.setFontSize(7.5)
-  doc.setTextColor(MUTED)
-  doc.text(`${CLINIC_DETAILS.credentials}, ${CLINIC_DETAILS.registrationNo}`, margin, ty)
-  ty += 5
-  doc.text(CLINIC_DETAILS.clinicName, margin, ty)
-  doc.setFontSize(7)
-  doc.text('Signature', pw - margin - sigW / 2, y + 3, { align: 'center' })
-  return ty
-}
-
 const rxDateFormat = (iso: string) =>
   new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
 
-// ── Prescription (redesigned) — fully code-drawn, like the invoice, rather
-// than text overlaid on a static template image. See pdfExport's own
-// history for why: a free-length instructions block with no page-break or
-// overflow handling is exactly the kind of thing that silently breaks on
-// the one patient whose case notes run long. Every section's height here
-// is computed from its own content, and a genuine overflow starts a new
-// page instead of running off the printable area.
+const ageText = (p: Patient) => (Number.isFinite(p.age) ? String(p.age) : '')
 
-/** A *bold*-marked word, tokenized for mixed-weight word-wrapping. The
- *  doctor's own instructions text already uses single asterisks as an
- *  informal "make this bold" marker (see rxInstructions.ts) — this is the
- *  first place that's actually honored instead of printed as literal
- *  asterisk characters. */
-function tokenizeRich(text: string): { word: string; bold: boolean }[] {
-  const tokens: { word: string; bold: boolean }[] = []
-  text.split('*').forEach((part, i) => {
-    const bold = i % 2 === 1
-    for (const word of part.split(/\s+/).filter(Boolean)) tokens.push({ word, bold })
-  })
-  return tokens
-}
-
-/** Word-wraps mixed bold/normal text (paragraphs separated by '\n', blank
- *  lines get half a line of extra space), drawing as it goes and starting a
- *  new page whenever the next line would run past `pageBottom`. Returns
- *  {y, pageBroke} — pageBroke lets the caller know the signature footer
- *  needs to land on a fresh page rather than colliding with this block. */
-function drawRichParagraphs(
-  doc: jsPDF,
-  text: string,
-  x: number,
-  startY: number,
-  maxWidth: number,
-  fontSize: number,
-  lineHeight: number,
-  color: string,
-  pageBottom: number,
-  topMargin: number,
-  onNewPage?: () => void,
-): { y: number; pageBroke: boolean } {
-  let y = startY
-  let pageBroke = false
-  doc.setFont('Roboto', 'normal')
-  doc.setFontSize(fontSize)
-  const spaceWidth = doc.getTextWidth(' ')
-
-  const newPageIfNeeded = () => {
-    if (y + lineHeight > pageBottom) {
-      doc.addPage()
-      onNewPage?.()
-      y = topMargin
-      pageBroke = true
-    }
+/** "Page 2 of 3" at the foot of each page — only when there's more than one. */
+function drawPageNumbers(doc: jsPDF) {
+  const pages = doc.getNumberOfPages()
+  if (pages < 2) return
+  for (let i = 1; i <= pages; i++) {
+    doc.setPage(i)
+    setFace(doc, 'body', 6.7, COLOR.faint)
+    put(doc, `Page ${i} of ${pages}`, PAGE_W / 2, PAGE_H - 14, { align: 'center' })
   }
+}
 
-  for (const paragraph of text.split('\n')) {
-    if (paragraph.trim() === '') { y += lineHeight * 0.5; continue }
-    const tokens = tokenizeRich(paragraph)
-    let line: { word: string; bold: boolean }[] = []
-    let lineWidth = 0
-    const flush = () => {
-      newPageIfNeeded()
-      let cx = x
-      for (const tok of line) {
-        doc.setFont('Roboto', tok.bold ? 'bold' : 'normal')
-        doc.setTextColor(color)
-        doc.text(tok.word, cx, y)
-        cx += doc.getTextWidth(tok.word) + spaceWidth
-      }
-      y += lineHeight
-      line = []
-      lineWidth = 0
-    }
-    for (const tok of tokens) {
-      doc.setFont('Roboto', tok.bold ? 'bold' : 'normal')
-      doc.setFontSize(fontSize)
-      const w = doc.getTextWidth(tok.word)
-      const prospective = lineWidth + (line.length > 0 ? spaceWidth : 0) + w
-      if (prospective > maxWidth && line.length > 0) {
-        flush()
-        line.push(tok)
-        lineWidth = w
-      } else {
-        line.push(tok)
-        lineWidth = prospective
-      }
-    }
-    if (line.length > 0) flush()
+/** The footers (and signature, on the last page) go on once every page exists. */
+function finishDocument(doc: jsPDF, L: Layout, footer: { note: string; signerName?: string; signerRole?: string }) {
+  const pages = doc.getNumberOfPages()
+  for (let i = 1; i <= pages; i++) {
+    doc.setPage(i)
+    drawFooter(doc, L, { ...footer, signed: i === pages })
   }
-  return { y, pageBroke }
+  drawPageNumbers(doc)
 }
 
-/** Shrinks a single-line value (down to `minSize`) until it fits `maxW`, and
- *  only then cuts it with an ellipsis — so a long name or remedy never runs
- *  into the next column. Leaves the font size set to what it used. */
-function fitSingleLine(doc: jsPDF, text: string, maxW: number, size: number, minSize: number): string {
-  let s = size
-  doc.setFontSize(s)
-  while (s > minSize && doc.getTextWidth(text) > maxW) { s -= 0.5; doc.setFontSize(s) }
-  if (doc.getTextWidth(text) <= maxW) return text
-  let cut = text
-  while (cut.length > 1 && doc.getTextWidth(cut + '…') > maxW) cut = cut.slice(0, -1)
-  return cut.trimEnd() + '…'
-}
+// ── Prescription ─────────────────────────────────────────────────────────
 
-/** Top of every page after the first, so a prescription that runs onto a
- *  second sheet is never an unlabelled page. */
-function drawContinuationHeader(doc: jsPDF, pw: number, margin: number, patientName: string, dateStr: string, title = 'Prescription') {
-  doc.setFont('Roboto', 'bold')
-  doc.setFontSize(8.5)
-  doc.setTextColor(INK)
-  doc.text(`${title} · ${patientName}`, margin, margin)
-  doc.setFont('Roboto', 'normal')
-  doc.setFontSize(8)
-  doc.setTextColor(MUTED)
-  doc.text(`${dateStr} · continued`, pw - margin, margin, { align: 'right' })
-  doc.setDrawColor(RX2_NAVY)
-  doc.setLineWidth(0.3)
-  doc.line(margin, margin + 3, pw - margin, margin + 3)
-}
+/** The boxed ℞ area: remedy + potency as their own labelled fields. Returns
+ *  the y of the box's bottom edge. */
+function drawRemedyBox(doc: jsPDF, top: number, remedy: string, potency: string): number {
+  // A long remedy wraps (and the box grows) instead of running into the potency.
+  setFace(doc, 'semi', 10.5, COLOR.ink)
+  const lines = (doc.splitTextToSize(remedy || '', 252) as string[]).slice(0, 4)
+  const extra = Math.max(0, lines.length - 1) * 12.5
+  const h = 46.5 + extra
+  box(doc, LEFT, top, CONTENT_W, h, COLOR.rxFill, COLOR.rxBorder, 8)
 
-/** Two-column masthead matching the reference design exactly: brand
- *  block top-left, doctor identity + address right-aligned, a rule below
- *  both. Distinct from the invoice's own drawLetterhead — a different
- *  reference document with its own composition, not a shared web-UI
- *  header. */
-function drawPrescriptionMasthead(doc: jsPDF, pw: number, margin: number): number {
-  let y = 14
-  // sneham-logo.png is a complete lockup — mark, "Sneham Digital Clinic"
-  // wordmark, and tagline are all already baked into the image. Drawing
-  // clinic name/tagline as separate text next to it duplicated what the
-  // logo already says — sized wide enough here for its own wordmark to
-  // read on its own, nothing else drawn beside it.
-  const logoW = 42
-  const logoH = logoW * (626 / 1042)
-  doc.addImage(SNEHAM_LOGO_BASE64, 'PNG', margin, y, logoW, logoH, undefined, 'FAST')
+  drawRxSign(doc, 57.6, top + 29.4, COLOR.blue)
 
-  const rightX = pw - margin
-  doc.setFont('Roboto', 'bold')
-  doc.setFontSize(11)
-  doc.setTextColor(INK)
-  doc.text(CLINIC_DETAILS.doctorName, rightX, y + 3, { align: 'right' })
-  doc.setFont('Roboto', 'normal')
-  doc.setFontSize(7.5)
-  doc.setTextColor(MUTED)
-  doc.text(`${CLINIC_DETAILS.credentials} · ${CLINIC_DETAILS.registrationNo}`, rightX, y + 8, { align: 'right' })
-  const addrLines = doc.splitTextToSize(`${CLINIC_DETAILS.address} · ${CLINIC_DETAILS.website}`, 90)
-  doc.text(addrLines, rightX, y + 12.5, { align: 'right' })
+  setFace(doc, 'semi', 7, COLOR.label)
+  put(doc, 'REMEDY PRESCRIBED', 84, top + 15, { track: 0.3 })
+  put(doc, 'POTENCY', 353.5, top + 15, { track: 0.3 })
 
-  y += Math.max(logoH, 12.5 + addrLines.length * 3.4) + 5
-  doc.setDrawColor(RX2_NAVY)
-  doc.setLineWidth(0.5)
-  doc.line(margin, y, pw - margin, y)
-  return y + 8
-}
-
-/** "• Prescription" title + Date, then Patient Name / Age / Sex, then
- *  Diagnosis — each a label above a ruled line, value sitting just above
- *  the rule. Returns the y position to continue drawing from. */
-function drawPrescriptionFields(doc: jsPDF, pw: number, margin: number, contentW: number, y: number, patient: Patient, dateStr: string, diagnosisText: string, title = 'Prescription'): number {
-  doc.setFillColor(RX2_ROSE)
-  doc.circle(margin + 1, y - 1.3, 1, 'F')
-  doc.setFont('Roboto', 'bold')
-  doc.setFontSize(15)
-  doc.setTextColor(INK)
-  doc.text(title, margin + 5, y)
-  doc.setFont('Roboto', 'normal')
-  doc.setFontSize(8)
-  doc.setTextColor(RX2_LABEL)
-  doc.text('Date', pw - margin - 45, y - 3)
-  doc.setDrawColor(BORDER)
-  doc.setLineWidth(0.2)
-  doc.line(pw - margin - 32, y - 3, pw - margin, y - 3)
-  doc.setFont('Roboto', 'normal')
-  doc.setFontSize(9)
-  doc.setTextColor(INK)
-  doc.text(dateStr, pw - margin - 30, y - 4)
-  y += 8
-
-  const col = [margin, margin + contentW * 0.55, margin + contentW * 0.8]
-  const colW = [contentW * 0.5, contentW * 0.2, contentW * 0.2]
-  const fieldRow = (labels: string[], values: string[]) => {
-    labels.forEach((label, i) => {
-      doc.setFont('Roboto', 'normal')
-      doc.setFontSize(7)
-      doc.setTextColor(RX2_LABEL)
-      doc.text(label, col[i], y)
-      doc.setFont('Roboto', 'normal')
-      doc.setTextColor(INK)
-      doc.text(fitSingleLine(doc, values[i], colW[i] - 5, 9.5, 7), col[i], y + 5)
-      doc.setDrawColor(BORDER)
-      doc.setLineWidth(0.2)
-      doc.line(col[i], y + 6.5, col[i] + colW[i] - 4, y + 6.5)
-    })
-    y += 12
-  }
-  fieldRow(['PATIENT NAME', 'AGE', 'SEX'], [patient.name, String(patient.age), patient.sex])
-  doc.setFont('Roboto', 'normal')
-  doc.setFontSize(7)
-  doc.setTextColor(RX2_LABEL)
-  doc.text('DIAGNOSIS / CASE', margin, y)
-  doc.setFont('Roboto', 'normal')
-  doc.setFontSize(9.5)
-  doc.setTextColor(INK)
-  const diagLines = doc.splitTextToSize(diagnosisText, contentW)
-  doc.text(diagLines, margin, y + 5)
-  y += 5 + diagLines.length * 4.5 + 3
-  doc.setDrawColor(BORDER)
-  doc.setLineWidth(0.2)
-  doc.line(margin, y, pw - margin, y)
-  return y + 8
-}
-
-/** The boxed ℞ area: remedy + potency as their own labeled fields, not
- *  buried in the instructions paragraph. */
-function drawRemedyBox(doc: jsPDF, pw: number, margin: number, contentW: number, y: number, remedy: string, potency: string): number {
-  const fieldX = margin + 26
-  const potencyX = margin + contentW * 0.62
-  // A long remedy name wraps (and the box grows) instead of running into the potency.
-  doc.setFont('Roboto', 'bold')
-  doc.setFontSize(11)
-  const remedyLines: string[] = doc.splitTextToSize(remedy || '—', potencyX - fieldX - 6)
-  const boxH = 20 + (remedyLines.length - 1) * 5
-  doc.setFillColor(RX2_BOX_BG)
-  doc.roundedRect(margin, y, contentW, boxH, 2, 2, 'F')
-  // The Roboto subset embedded for this doc doesn't carry the real ℞
-  // (U+211E) glyph — it prints as tofu/blank. Drawing it by hand instead:
-  // a bold R plus the diagonal tail-stroke through its leg that makes it
-  // read as the prescription symbol rather than a plain letter.
-  const rxX = margin + 8
-  const rxBaseline = y + boxH / 2 + 4
-  doc.setFont('Roboto', 'bold')
-  doc.setFontSize(20)
-  doc.setTextColor(RX2_NAVY)
-  doc.text('R', rxX, rxBaseline)
-  doc.setDrawColor(RX2_NAVY)
-  doc.setLineWidth(0.9)
-  doc.line(rxX + 3.5, rxBaseline - 2.5, rxX + 8, rxBaseline + 4.5)
-  doc.setFont('Roboto', 'normal')
-  doc.setFontSize(7)
-  doc.setTextColor(RX2_LABEL)
-  doc.text('REMEDY PRESCRIBED', fieldX, y + 7)
-  doc.text('POTENCY', potencyX, y + 7)
-  doc.setFont('Roboto', 'bold')
-  doc.setFontSize(11)
-  doc.setTextColor(INK)
-  doc.text(remedyLines, fieldX, y + 15)
-  doc.text(fitSingleLine(doc, potency || '—', margin + contentW - potencyX - 4, 11, 8), potencyX, y + 15)
-  return y + boxH + 10
+  setFace(doc, 'semi', 10.5, COLOR.ink)
+  lines.forEach((ln, i) => put(doc, ln, 84.5, top + 31.5 + i * 12.5))
+  const potencyText = potency ? String(potency) : ''
+  if (potencyText) put(doc, potencyText, 353.5, top + 31.5)
+  const lineY = top + 36.25 + extra
+  hline(doc, 84, 341, lineY)
+  hline(doc, 353, 536.5, lineY)
+  return top + h
 }
 
 /** Splits the free-text instructions on the doctor's own "TO AVOID" marker
- *  (already present verbatim in her standard boilerplate) so it can be
- *  drawn in its own callout box instead of running into the same paragraph
- *  as everything else. Absent in a prescription with no avoid-list — the
- *  box simply doesn't appear. */
+ *  (present verbatim in her standard text) so it can be drawn in its own pink
+ *  box. Absent in a prescription with no avoid-list — the box simply doesn't appear. */
 function splitToAvoid(text: string): { main: string; avoid: string | null } {
   const idx = text.search(/TO AVOID/i)
   if (idx === -1) return { main: text, avoid: null }
-  return { main: text.slice(0, idx).trim(), avoid: text.slice(idx).trim() }
+  const avoid = text.slice(idx).replace(/^TO AVOID\s*[-–—:]*\s*/i, '').trim()
+  return { main: text.slice(0, idx).trim(), avoid: avoid || null }
 }
 
-/** This design's own footer: a muted disclaimer bottom-left, and — bottom-
- *  right only, no repeated clinic name — the real signature image over a
- *  rule over doctor name/credentials. A different composition from the
- *  invoice's drawSignatureFooter (which puts doctor identity on the left),
- *  so it gets its own function rather than a forced reuse. `bottomY` is
- *  where the LAST line of this block should land. */
-function drawPrescriptionSignature(doc: jsPDF, pw: number, margin: number, bottomY: number, disclaimer: string) {
-  doc.setFont('Roboto', 'normal')
-  doc.setFontSize(7.5)
-  doc.setTextColor(MUTED)
-  if (disclaimer) doc.text(disclaimer, margin, bottomY)
-
-  const sigW = 26
-  const sigH = sigW * (90 / 219)
-  const blockRight = pw - margin
-  const ruleY = bottomY - 9
-  doc.addImage(NEHA_SIGNATURE_BASE64, 'JPEG', blockRight - sigW, ruleY - sigH - 1, sigW, sigH)
-  doc.setDrawColor(BORDER)
-  doc.setLineWidth(0.2)
-  doc.line(blockRight - sigW, ruleY, blockRight, ruleY)
-  doc.setFont('Roboto', 'bold')
-  doc.setFontSize(8.5)
-  doc.setTextColor(INK)
-  doc.text(CLINIC_DETAILS.doctorName, blockRight, ruleY + 4, { align: 'right' })
-  doc.setFont('Roboto', 'normal')
-  doc.setFontSize(7)
-  doc.setTextColor(MUTED)
-  doc.text(`${CLINIC_DETAILS.credentials} · ${CLINIC_DETAILS.registrationNo}`, blockRight, ruleY + 8, { align: 'right' })
-}
+const INSTRUCTION_FLOW: FlowStyle = { size: 8.2, lineH: 12, gap: 7, headingExtra: 3.5, tight: 1.6, color: COLOR.body, boldColor: COLOR.rose }
+const AVOID_FLOW: FlowStyle = { size: 7.87, lineH: 12, gap: 6, headingExtra: 0, tight: 0, color: COLOR.pinkText, boldColor: COLOR.pinkHead }
+const AVOID_X = 57
+const AVOID_W = 480.5
 
 export async function exportPrescriptionPdf(rx: Prescription, patient: Patient, opts?: { shareText?: string }) {
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' })
-  await registerInvoiceFont(doc)
-  const pw = doc.internal.pageSize.getWidth()
-  const ph = doc.internal.pageSize.getHeight()
-  const margin = 16
-  const contentW = pw - margin * 2
-  const footerReserve = 26
-  const pageBottom = ph - margin - footerReserve
+  const doc = await createDesignDoc()
+  const L = RX_LAYOUT
   const dateStr = rxDateFormat(rx.publishedAt ?? rx.createdAt)
+  const bottom = contentBottom(L)
 
-  let y = drawPrescriptionMasthead(doc, pw, margin)
-  y = drawPrescriptionFields(doc, pw, margin, contentW, y, patient, dateStr, patient.chiefComplaint || '—')
-  y = drawRemedyBox(doc, pw, margin, contentW, y, rx.remedy, rx.potency)
+  const startPage = (continued: boolean) => {
+    drawMasthead(doc, L)
+    drawTitle(doc, L, 'Prescription', continued ? 'continued' : undefined)
+    drawDate(doc, L, dateStr)
+  }
+  startPage(false)
 
-  doc.setFont('Roboto', 'bold')
-  doc.setFontSize(10)
-  doc.setTextColor(RX2_NAVY)
-  doc.text('•  MEDICINE INSTRUCTIONS  •', pw / 2, y, { align: 'center' })
-  y += 8
+  drawField(doc, { label: 'PATIENT NAME', value: patient.name, x1: 45, x2: 287, labelBase: 145, lineY: 164.5, track: L.labelTrack })
+  drawField(doc, { label: 'AGE', value: ageText(patient), x1: 297.5, x2: 418.5, labelBase: 145, lineY: 164.5, track: L.labelTrack })
+  drawField(doc, { label: 'SEX', value: patient.sex, x1: 429, x2: RIGHT, labelBase: 145, lineY: 164.5, track: L.labelTrack })
+  const diagLine = drawField(doc, { label: 'DIAGNOSIS / CASE', value: patient.chiefComplaint || '', x1: 45, x2: RIGHT, labelBase: 179.4, lineY: 199, track: L.labelTrack })
+
+  const boxBottom = drawRemedyBox(doc, diagLine + 12.5, rx.remedy, String(rx.potency ?? ''))
+
+  setFace(doc, 'head', 9.2, COLOR.blue)
+  const headBase = boxBottom + 20.5
+  put(doc, '• MEDICINE INSTRUCTIONS •', (LEFT + RIGHT) / 2 - 0.5, headBase, { align: 'center', track: 0.78 })
 
   // Falls back to the structured dose fields only when there's no written
-  // instructions — the remedy/potency already have their own box above, so
-  // the fallback here shouldn't repeat them a second time.
+  // instructions — the remedy/potency already have their own box above.
   const bodyText = (rx.bodyText && rx.bodyText.trim())
     || `${rx.doseGlobules} globules, ${rx.repetition}${rx.durationDays ? ` for ${rx.durationDays} days` : ''}`
   const { main, avoid } = splitToAvoid(bodyText)
 
-  // Pages after the first carry a slim identifying header (see below).
-  const continuation = () => drawContinuationHeader(doc, pw, margin, patient.name, dateStr)
-  const topOfNewPage = margin + 10
-
-  const mainResult = drawRichParagraphs(doc, main, margin, y, contentW, 9.5, 5, INK, pageBottom, topOfNewPage, continuation)
-  y = mainResult.y + 4
+  const newPage = () => {
+    doc.addPage()
+    startPage(true)
+    return 172
+  }
+  const laidMain = layoutParagraphs(doc, parseParagraphs(main), CONTENT_W, INSTRUCTION_FLOW)
+  const y = laidMain.length ? drawFlow(doc, laidMain, LEFT, headBase + 19, INSTRUCTION_FLOW, bottom, newPage) : headBase
 
   if (avoid) {
-    // Measure the avoid box's own height first (a dry run at the same
-    // width/size, off-page) so the page-break decision below is exact
-    // rather than a guess — a light-pink box that gets cut mid-sentence at
-    // a page boundary would look worse than the plain text it's replacing.
-    const probe = new jsPDF({ unit: 'mm', format: 'a4' })
-    await registerInvoiceFont(probe)
-    const dry = drawRichParagraphs(probe, avoid, 0, 0, contentW - 10, 8.5, 4.3, INK, 10000, 0)
-    const avoidH = dry.y + 6
-
-    if (y + avoidH > pageBottom) {
-      doc.addPage()
-      continuation()
-      y = topOfNewPage
-    }
-    doc.setFillColor(RX2_AVOID_BG)
-    doc.setDrawColor(RX2_AVOID_BORDER)
-    doc.setLineWidth(0.3)
-    doc.roundedRect(margin, y, contentW, avoidH, 2, 2, 'FD')
-    const avoidResult = drawRichParagraphs(doc, avoid, margin + 5, y + 6, contentW - 10, 8.5, 4.3, INK, pageBottom, topOfNewPage, continuation)
-    y = Math.max(avoidResult.y, y + avoidH) + 8
-  }
-
-  if (y + footerReserve > ph - margin) {
-    doc.addPage()
-    continuation()
-  }
-  drawPrescriptionSignature(doc, pw, margin, ph - margin - 2, 'Follow-up as advised. Do not repeat the remedy without consulting the clinic.')
-
-  // "Page 2 of 3" only when there's more than one page.
-  const pages = doc.getNumberOfPages()
-  if (pages > 1) {
-    for (let i = 1; i <= pages; i++) {
-      doc.setPage(i)
-      doc.setFont('Roboto', 'normal')
-      doc.setFontSize(7.5)
-      doc.setTextColor(MUTED)
-      doc.text(`Page ${i} of ${pages}`, pw / 2, ph - 8, { align: 'center' })
+    const laidAvoid = layoutParagraphs(doc, parseParagraphs(avoid), AVOID_W, AVOID_FLOW)
+    const boxH = 31.7 + flowHeight(laidAvoid, AVOID_FLOW) + 14.3
+    if (boxH > bottom - 190) {
+      // Longer than a page could hold in a box: it runs on like the rest of the instructions.
+      const laid = layoutParagraphs(doc, parseParagraphs(`*TO AVOID –*\n${avoid}`), CONTENT_W, INSTRUCTION_FLOW)
+      drawFlow(doc, laid, LEFT, y + INSTRUCTION_FLOW.lineH + INSTRUCTION_FLOW.gap + INSTRUCTION_FLOW.headingExtra, INSTRUCTION_FLOW, bottom, newPage)
+    } else {
+      let top = y + 14.7
+      if (top + boxH > bottom) { top = newPage() - 12 }
+      box(doc, LEFT, top, CONTENT_W, boxH, COLOR.pinkFill, COLOR.pinkBorder, 8)
+      setFace(doc, 'head', 8.3, COLOR.pinkHead)
+      put(doc, 'TO AVOID', AVOID_X, top + 17.5)
+      drawFlow(doc, laidAvoid, AVOID_X, top + 31.7, AVOID_FLOW, Infinity, () => 0)
     }
   }
+
+  finishDocument(doc, L, { note: 'Follow-up as advised. Do not repeat the remedy without consulting the clinic.' })
 
   const fileName = `Rx_${patient.name.replace(/\s/g, '_')}_${dateStr.replace(/\s/g, '')}.pdf`
   await savePdf(doc, fileName, opts?.shareText)
 }
 
-// Investigation orders print on the same real letterhead as prescriptions
-// (the practice has no separate format for these) — same placeholders,
-// with the selected tests, grouped by category, filling the body instead
-// of a remedy.
+// ── Investigation request ────────────────────────────────────────────────
+// The request is a printed form: twelve common tests as tick-boxes in two
+// columns, then an "Other / specify" area ruled for writing. The tests the
+// doctor selected in the app arrive ticked; anything that isn't one of the
+// twelve is written out under "Other / specify".
+
+interface FormSlot { label: string; keys: string[]; useTestName?: boolean }
+const FORM_COLUMNS: [FormSlot[], FormSlot[]] = [
+  [
+    { label: 'Complete Blood Count (CBC)', keys: ['cbc', 'completebloodcount'] },
+    { label: 'Serum Vitamin D3', keys: ['vitamind', 'vitamind3', 'serumvitamind3', 'serumvitamind'] },
+    { label: 'Thyroid Profile (T3, T4, TSH)', keys: ['t3t4tsh', 'thyroidprofile', 'thyroidprofilet3t4tsh'] },
+    { label: 'Kidney Function Test (KFT)', keys: ['kft', 'kidneyfunctiontest', 'kidneyfunctiontestkft', 'renalfunctiontest', 'renalfunctiontests', 'rft'] },
+    { label: 'Lipid Profile', keys: ['lipidprofile'] },
+    { label: 'X-Ray', keys: ['xray'] },
+  ],
+  [
+    { label: 'ESR', keys: ['esr'] },
+    { label: 'Serum Vitamin B12', keys: ['vitaminb12', 'serumvitaminb12'] },
+    { label: 'Liver Function Test (LFT)', keys: ['lft', 'liverfunctiontest', 'liverfunctiontests', 'liverfunctiontestlft'] },
+    { label: 'Urine Routine & Microscopy', keys: ['urineroutinemicroscopy'] },
+    { label: 'HbA1c', keys: ['hba1c'] },
+    // "USG Abdomen & Pelvis" is a different scan from "USG Abdomen" — it keeps its own name.
+    { label: 'USG Abdomen', keys: ['usgabdomen', 'usgabdomenpelvis'], useTestName: true },
+  ],
+]
+// Test names are compared ignoring case, spacing and punctuation ("Urine Routine & Microscopy" ≡ "urine routine microscopy").
+const testKey = (t: string) => t.toLowerCase().replace(/[^a-z0-9]/g, '')
+
+function drawCheckbox(doc: jsPDF, x: number, y: number, size: number, ticked: boolean) {
+  doc.setLineWidth(1)
+  doc.setDrawColor(ticked ? COLOR.blue : COLOR.hair)
+  doc.setFillColor(ticked ? '#EAF2FB' : '#FFFFFF')
+  doc.roundedRect(x + 0.5, y + 0.5, size - 1, size - 1, 2.5, 2.5, 'FD')
+  if (ticked) {
+    doc.setDrawColor(COLOR.blue)
+    doc.setLineWidth(1.5)
+    doc.setLineCap('round')
+    doc.setLineJoin('round')
+    const k = size / 12
+    doc.lines([[2.2 * k, 2.4 * k], [4.6 * k, -5.2 * k]], x + 2.9 * k, y + 6.4 * k, [1, 1], 'S')
+    doc.setLineCap('butt')
+    doc.setLineJoin('miter')
+  }
+}
+
 export async function exportInvestigationOrderPdf(order: InvestigationOrder, patient: Patient) {
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' })
-  await registerInvoiceFont(doc)
-  const pw = doc.internal.pageSize.getWidth()
-  const ph = doc.internal.pageSize.getHeight()
-  const margin = 16
-  const contentW = pw - margin * 2
-  const footerReserve = 26
-  const pageBottom = ph - margin - footerReserve
+  const doc = await createDesignDoc()
+  const L = FORM_LAYOUT
   const dateStr = rxDateFormat(order.createdAt)
-  const TITLE = 'Investigation Request'
+  const bottom = contentBottom(L)
+  const TITLE = 'Investigation request'
 
-  let y = drawPrescriptionMasthead(doc, pw, margin)
-  // The patient's diagnosis/case — NOT the order's note (that has its own box below).
-  y = drawPrescriptionFields(doc, pw, margin, contentW, y, patient, dateStr, patient.chiefComplaint || '—', TITLE)
+  const startPage = (continued: boolean) => {
+    drawMasthead(doc, L)
+    drawTitle(doc, L, TITLE, continued ? 'continued' : undefined)
+    drawDate(doc, L, dateStr)
+  }
+  startPage(false)
 
-  doc.setFont('Roboto', 'bold')
-  doc.setFontSize(10)
-  doc.setTextColor(RX2_NAVY)
-  doc.text('•  TESTS REQUESTED  •', pw / 2, y, { align: 'center' })
-  y += 9
+  drawField(doc, { label: 'PATIENT NAME', value: patient.name, x1: 45, x2: 375, labelBase: 151, lineY: 174.25, track: L.labelTrack })
+  drawField(doc, { label: 'AGE / SEX', value: [ageText(patient), patient.sex].filter(Boolean).join(' / '), x1: 385.5, x2: RIGHT, labelBase: 151, lineY: 174.25, track: L.labelTrack })
 
-  const newPage = () => {
-    doc.addPage()
-    drawContinuationHeader(doc, pw, margin, patient.name, dateStr, TITLE)
-    y = margin + 12
+  setFace(doc, 'head', 8.94, COLOR.blue)
+  put(doc, 'Kindly arrange the following investigations', 45.5, 200.2)
+
+  // Which of the twelve are ticked, and what is left over for "Other".
+  const remaining = order.tests.map((t) => ({ t, key: testKey(t) }))
+  const take = (slot: FormSlot): string | null => {
+    const hit = remaining.findIndex((r) => slot.keys.includes(r.key))
+    if (hit === -1) return null
+    const [{ t }] = remaining.splice(hit, 1)
+    return t
+  }
+  const colX = [45, 306.5]
+  FORM_COLUMNS.forEach((slots, c) => {
+    slots.forEach((slot, r) => {
+      const matched = take(slot)
+      const top = 212 + r * 20.2
+      drawCheckbox(doc, colX[c], top, 12, matched !== null)
+      setFace(doc, 'body', 8.9, COLOR.ink)
+      put(doc, matched !== null && slot.useTestName ? matched : slot.label, colX[c] + 19.3, top + 8.6)
+    })
+  })
+
+  // "Other / specify" — the leftovers, written on the ruled lines.
+  setFace(doc, 'body', 7.44, COLOR.label)
+  put(doc, 'Other / specify:', 45.5, 349.6)
+  // Packed onto the ruled lines, separated by a dot — test names can hold commas themselves.
+  setFace(doc, 'body', 9.2, COLOR.ink)
+  const otherLines: string[] = []
+  for (const r of remaining) {
+    const pieces = doc.splitTextToSize(r.t, CONTENT_W - 2) as string[]
+    const last = otherLines.length - 1
+    if (pieces.length === 1 && last >= 0 && doc.getTextWidth(`${otherLines[last]}  ·  ${r.t}`) <= CONTENT_W - 2) otherLines[last] += `  ·  ${r.t}`
+    else otherLines.push(...pieces)
+  }
+  const ruleCount = Math.max(2, otherLines.length)
+  let rulesEndY = 376
+  let ruleY = 376
+  for (let i = 0; i < ruleCount; i++) {
+    if (ruleY > bottom) { doc.addPage(); startPage(true); ruleY = 190 } // long lists carry on over the page
+    hline(doc, LEFT, RIGHT, ruleY, COLOR.rule)
+    if (otherLines[i]) { setFace(doc, 'body', 9.2, COLOR.ink); put(doc, otherLines[i], LEFT + 0.5, ruleY - 4.5) }
+    rulesEndY = ruleY
+    ruleY += 28
   }
 
-  // Tests grouped by category, in the clinic's own catalogue order: a bold
-  // category label, then the tests as ticked-off lines in two columns.
-  const selected = new Set(order.tests)
-  const groups = INVESTIGATION_CATALOG
-    .map((c) => ({ category: c.category, tests: c.tests.filter((t) => selected.has(t)) }))
-    .filter((c) => c.tests.length > 0)
-  // Anything chosen that isn't in the catalogue (a custom line the doctor typed).
-  const known = new Set(INVESTIGATION_CATALOG.flatMap((c) => c.tests))
-  const custom = order.tests.filter((t) => !known.has(t))
-  if (custom.length > 0) groups.push({ category: 'Other', tests: custom })
-
-  const colGap = 8
-  const colW = (contentW - colGap) / 2
-  const boxSize = 2.8
-  const lineH = 4.4
-  if (groups.length === 0) {
-    doc.setFont('Roboto', 'normal')
-    doc.setFontSize(9.5)
-    doc.setTextColor(INK)
-    doc.text('—', margin, y)
-    y += 8
-  }
-  for (const g of groups) {
-    if (y + 14 > pageBottom) newPage()
-    doc.setFont('Roboto', 'bold')
-    doc.setFontSize(9.5)
-    doc.setTextColor(RX2_NAVY)
-    doc.text(g.category, margin, y)
-    doc.setDrawColor(BORDER)
-    doc.setLineWidth(0.2)
-    doc.line(margin, y + 1.8, margin + contentW, y + 1.8)
-    y += 7
-    doc.setFont('Roboto', 'normal')
-    doc.setFontSize(9)
-    for (let i = 0; i < g.tests.length; i += 2) {
-      const pair = g.tests.slice(i, i + 2).map((t) => doc.splitTextToSize(t, colW - boxSize - 3) as string[])
-      const rowH = Math.max(...pair.map((l) => l.length)) * lineH + 1.6
-      if (y + rowH > pageBottom) { newPage(); doc.setFont('Roboto', 'normal'); doc.setFontSize(9) }
-      pair.forEach((lines, c) => {
-        const x = margin + c * (colW + colGap)
-        doc.setDrawColor(RX2_NAVY)
-        doc.setLineWidth(0.3)
-        doc.rect(x, y - 2.6, boxSize, boxSize)
-        // ticked: these are the tests that were requested
-        doc.setLineWidth(0.4)
-        doc.line(x + 0.6, y - 1.2, x + 1.3, y - 0.3)
-        doc.line(x + 1.3, y - 0.3, x + 2.3, y - 2.2)
-        doc.setTextColor(INK)
-        doc.text(lines, x + boxSize + 3, y)
-      })
-      y += rowH
-    }
-    y += 3
-  }
-
+  // The doctor's own note (fasting sample, urgency …), when there is one.
   const note = order.notes.trim()
   if (note) {
-    const probe = new jsPDF({ unit: 'mm', format: 'a4' })
-    await registerInvoiceFont(probe)
-    const dry = drawRichParagraphs(probe, note, 0, 0, contentW - 10, 9, 4.6, INK, 10000, 0)
-    const boxH = dry.y + 12
-    if (y + boxH > pageBottom) newPage()
-    y += 2
-    doc.setFillColor(RX2_BOX_BG)
-    doc.roundedRect(margin, y, contentW, boxH, 2, 2, 'F')
-    doc.setFont('Roboto', 'normal')
-    doc.setFontSize(7)
-    doc.setTextColor(RX2_LABEL)
-    doc.text('NOTES / INSTRUCTIONS', margin + 5, y + 5.5)
-    drawRichParagraphs(doc, note, margin + 5, y + 11, contentW - 10, 9, 4.6, INK, pageBottom, margin + 12, () => drawContinuationHeader(doc, pw, margin, patient.name, dateStr, TITLE))
-    y += boxH + 6
+    const st: FlowStyle = { size: 8.9, lineH: 12, gap: 6, headingExtra: 0, tight: 0, color: COLOR.body, boldColor: COLOR.rose }
+    const laid = layoutParagraphs(doc, parseParagraphs(note), CONTENT_W - 24, st)
+    const boxH = 15 + 11 + flowHeight(laid, st) + 12
+    let top = rulesEndY + 18
+    if (top + boxH > bottom) { doc.addPage(); startPage(true); top = 172 }
+    box(doc, LEFT, top, CONTENT_W, boxH, COLOR.rxFill, COLOR.rxBorder, 8)
+    setFace(doc, 'semi', 7, COLOR.label)
+    put(doc, 'NOTE', LEFT + 12, top + 15, { track: 0.3 })
+    drawFlow(doc, laid, LEFT + 12, top + 30, st, Infinity, () => 0)
   }
 
-  if (y + footerReserve > ph - margin) newPage()
-  drawPrescriptionSignature(doc, pw, margin, ph - margin - 2, '')
-
-  const pages = doc.getNumberOfPages()
-  if (pages > 1) {
-    for (let i = 1; i <= pages; i++) {
-      doc.setPage(i)
-      doc.setFont('Roboto', 'normal')
-      doc.setFontSize(7.5)
-      doc.setTextColor(MUTED)
-      doc.text(`Page ${i} of ${pages}`, pw / 2, ph - 8, { align: 'center' })
-    }
-  }
+  finishDocument(doc, L, { note: 'Please share reports with the clinic before the next visit.' })
 
   const fileName = `Investigations_${patient.name.replace(/\s/g, '_')}_${dateStr.replace(/\s/g, '')}.pdf`
   await savePdf(doc, fileName)
 }
 
-// Matches the format of the real invoices she already sends (a reference
-// bill from her existing billing software) — itemized lines, totals, real
-// bank/UPI payment details with a genuinely scannable QR code. Same
-// letterhead-drawing helpers as every other PDF here; the bank/UPI/QR block
-// and item table are new.
-export async function exportInvoicePdf(invoice: Invoice, patient: Patient) {
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' })
-  await registerInvoiceFont(doc)
-  const pw = doc.internal.pageSize.getWidth()
-  const margin = 16
-  const contentW = pw - margin * 2
-  let y = drawLetterhead(doc, pw, margin)
+// ── Receipt / invoice ────────────────────────────────────────────────────
+// A paid bill prints as the clinic's "Receipt"; one with something still owed
+// prints as an "Invoice" on the same form, with the amount due and a UPI QR.
+const COL = { num: 45.5, numValue: 46.5, desc: 83.5, descValue: 77.7, qty: 368, rate: 454.5, amount: 542.5 }
+const ROW_H = 27
 
-  const dateStr = new Date(invoice.date).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' })
+function drawReceiptNumberAndDate(doc: jsPDF, L: Layout, label: string, no: string, date: string) {
+  const base = L.dateBase
+  // Built from the right edge inward so a longer number or date still fits.
+  setFace(doc, 'body', 8.6, COLOR.ink)
+  const dateW = Math.max(39, textWidth(doc, date) + 5)
+  const noW = Math.max(31, textWidth(doc, no) + 5)
+  setFace(doc, 'semi', 8, COLOR.muted)
+  const dateLabelW = textWidth(doc, 'Date')
+  const noLabelW = textWidth(doc, label)
+  let x = RIGHT
+  hline(doc, x - dateW, x, base - 0.75)
+  setFace(doc, 'body', 8.6, COLOR.ink)
+  put(doc, date, x - dateW + 3, base - 2.6)
+  x -= dateW + 4
+  setFace(doc, 'semi', 8, COLOR.muted)
+  put(doc, 'Date', x - dateLabelW, base)
+  x -= dateLabelW + 5
+  doc.setFillColor(COLOR.hair)
+  doc.circle(x - 1, base - 3, 0.7, 'F')
+  x -= 6
+  hline(doc, x - noW, x, base - 0.75)
+  setFace(doc, 'body', 8.6, COLOR.ink)
+  put(doc, no, x - noW + 3, base - 2.6)
+  x -= noW + 3
+  setFace(doc, 'semi', 8, COLOR.muted)
+  put(doc, label, x - noLabelW, base)
+}
+
+function drawTableHeader(doc: jsPDF, base: number) {
+  setFace(doc, 'semi', 7, COLOR.label)
+  put(doc, '#', COL.num, base, { track: 0.6 })
+  put(doc, 'DESCRIPTION', COL.desc, base, { track: 0.6 })
+  put(doc, 'QTY', COL.qty, base, { align: 'right', track: 0.6 })
+  put(doc, 'RATE (₹)', COL.rate, base, { align: 'right', track: 0.6 })
+  put(doc, 'AMOUNT (₹)', COL.amount, base, { align: 'right', track: 0.6 })
+  hline(doc, LEFT, RIGHT, base + 8.5, COLOR.blue, 1)
+  return base + 8.5
+}
+
+export async function exportInvoicePdf(invoice: Invoice, patient: Patient) {
+  const doc = await createDesignDoc()
+  const L = FORM_LAYOUT
+  const bottom = contentBottom(L)
+
   const total = invoiceTotal(invoice.items)
   const balance = invoiceBalance(invoice)
-  const statusLabel = invoice.status === 'paid' ? 'Paid' : invoice.status === 'partial' ? 'Partially paid'
-    : invoice.status === 'waived' ? 'Waived' : invoice.status === 'cancelled' ? 'Cancelled' : 'Unpaid'
+  const cancelled = invoice.status === 'cancelled'
+  const waived = invoice.status === 'waived'
+  const amountDue = balance > 0 && !cancelled && !waived
+  const isReceipt = !amountDue && !cancelled
+  const title = isReceipt ? 'Receipt' : 'Invoice'
+  const dateStr = new Date(invoice.date).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' })
 
-  doc.setFont('Roboto', 'bold')
-  doc.setFontSize(17)
-  doc.setTextColor(BRAND)
-  doc.text('Invoice', pw / 2, y + 4, { align: 'center' })
-  y += 14
+  const startPage = (continued: boolean) => {
+    drawMasthead(doc, L)
+    drawTitle(doc, L, title, continued ? 'continued' : undefined)
+    drawReceiptNumberAndDate(doc, L, `${title} no.`, String(invoice.invoiceNo), dateStr)
+  }
+  startPage(false)
 
-  if (invoice.status === 'cancelled') {
-    doc.setFont('Roboto', 'bold')
-    doc.setFontSize(11)
-    doc.setTextColor('#DC2626')
-    doc.text('CANCELLED', pw / 2, y, { align: 'center' })
-    y += 8
+  drawField(doc, { label: isReceipt ? 'RECEIVED FROM' : 'BILLED TO', value: patient.name, x1: 45, x2: 375, labelBase: 154, lineY: 177.25, track: L.labelTrack })
+  drawField(doc, { label: 'PHONE', value: patient.phone ?? '', x1: 385.5, x2: RIGHT, labelBase: 154, lineY: 177.25, track: L.labelTrack })
+  if (cancelled) {
+    setFace(doc, 'head', 9, COLOR.danger)
+    put(doc, 'CANCELLED', RIGHT, 191, { align: 'right', track: 1 })
   }
 
-  // Bill To / Invoice Details
-  doc.setFont('Roboto', 'normal')
-  doc.setFontSize(8.5)
-  doc.setTextColor(MUTED)
-  doc.text('Bill To', margin, y)
-  doc.text('Invoice Details', pw - margin, y, { align: 'right' })
-  y += 5
-  doc.setFont('Roboto', 'bold')
-  doc.setTextColor(INK)
-  doc.text(fitSingleLine(doc, patient.name, contentW * 0.58, 11, 8), margin, y)
-  doc.setFont('Roboto', 'normal')
-  doc.setFontSize(8.5)
-  doc.setTextColor(MUTED)
-  doc.text(`Invoice No.: ${invoice.invoiceNo}`, pw - margin, y, { align: 'right' })
-  y += 5
-  doc.text(`${patient.age}y · ${patient.sex} · ${patient.wsCode}`, margin, y)
-  doc.text(`Date: ${dateStr}`, pw - margin, y, { align: 'right' })
-  y += 10
-
-  // Item table
-  const ph = doc.internal.pageSize.getHeight()
-  const col = { num: margin, item: margin + 10, qty: margin + 92, price: margin + 122, amount: margin + contentW }
-  const itemW = col.qty - col.item - 16
-  const drawTableHeader = () => {
-    doc.setFillColor(BRAND)
-    doc.rect(margin, y - 4.5, contentW, 7, 'F')
-    doc.setFont('Roboto', 'bold')
-    doc.setFontSize(8.5)
-    doc.setTextColor('#FFFFFF')
-    doc.text('#', col.num + 2, y)
-    doc.text('Item name', col.item, y)
-    doc.text('Quantity', col.qty, y, { align: 'right' })
-    doc.text('Price/unit', col.price, y, { align: 'right' })
-    doc.text('Amount', col.amount, y, { align: 'right' })
-    y += 7
+  // Item table: at least four ruled rows, as in the form; more when needed.
+  let lineY = drawTableHeader(doc, 202.5)
+  const rows = Math.max(4, invoice.items.length)
+  for (let i = 0; i < rows; i++) {
+    const item = invoice.items[i]
+    setFace(doc, 'body', 9.2, COLOR.ink)
+    const nameLines = item ? (doc.splitTextToSize(item.name, COL.qty - 22 - COL.descValue) as string[]) : []
+    const rowH = Math.max(ROW_H, 15.5 + Math.max(0, nameLines.length - 1) * 11 + 11.5)
+    if (lineY + rowH > bottom - 30) {
+      doc.addPage()
+      startPage(true)
+      lineY = drawTableHeader(doc, 170)
+    }
+    const base = lineY + 16
+    setFace(doc, 'body', 9.2, COLOR.label)
+    put(doc, String(i + 1), COL.numValue, base)
+    if (item) {
+      setFace(doc, 'body', 9.2, COLOR.ink)
+      nameLines.forEach((ln, k) => put(doc, ln, COL.descValue, base + k * 11))
+      put(doc, String(item.qty), COL.qty, base, { align: 'right' })
+      put(doc, numFmt(item.unitPrice), COL.rate, base, { align: 'right' })
+      put(doc, numFmt(item.qty * item.unitPrice), COL.amount, base, { align: 'right' })
+    }
+    lineY += rowH
+    hline(doc, LEFT, RIGHT, lineY, COLOR.rule)
   }
-  // A new page for anything that would run past the bottom; later pages say
-  // whose invoice they are.
-  const newInvoicePage = () => {
+
+  // Everything below the table has to fit together; start a new page for it if not.
+  const received = Math.min(invoice.amountReceived, total)
+  const showDue = amountDue || (balance > 0 && received > 0)
+  const needed = 24.5 + 19.5 + 27 + 17.75 + (showDue ? 34 : 0) + 21.3 + 25.5 + 14 + (amountDue ? 130 : 0)
+  if (lineY + needed > bottom) {
     doc.addPage()
-    doc.setFont('Roboto', 'bold')
-    doc.setFontSize(8.5)
-    doc.setTextColor(INK)
-    doc.text(`Invoice ${invoice.invoiceNo} · ${patient.name}`, margin, margin)
-    doc.setFont('Roboto', 'normal')
-    doc.setTextColor(MUTED)
-    doc.text('continued', pw - margin, margin, { align: 'right' })
-    doc.setDrawColor(BRAND)
-    doc.setLineWidth(0.3)
-    doc.line(margin, margin + 3, pw - margin, margin + 3)
-    y = margin + 12
+    startPage(true)
+    lineY = 140
   }
-  const ensureRoom = (needed: number) => { if (y + needed > ph - margin) newInvoicePage() }
 
-  drawTableHeader()
-  doc.setFont('Roboto', 'normal')
-  doc.setFontSize(9)
-  doc.setTextColor(INK)
-  invoice.items.forEach((item, i) => {
-    // Long item names wrap inside their column instead of running into Quantity.
-    const nameLines: string[] = doc.splitTextToSize(item.name, itemW)
-    const rowH = Math.max(6, nameLines.length * 4.2 + 1.8)
-    if (y + rowH > ph - margin - 12) { newInvoicePage(); drawTableHeader(); doc.setFont('Roboto', 'normal'); doc.setFontSize(9); doc.setTextColor(INK) }
-    doc.text(String(i + 1), col.num + 2, y)
-    doc.text(nameLines, col.item, y)
-    doc.text(String(item.qty), col.qty, y, { align: 'right' })
-    doc.text(inrFmt(item.unitPrice), col.price, y, { align: 'right' })
-    doc.text(inrFmt(item.qty * item.unitPrice), col.amount, y, { align: 'right' })
-    y += rowH
-    if (i < invoice.items.length - 1) {
-      doc.setDrawColor(BORDER)
-      doc.setLineWidth(0.15)
-      doc.line(margin, y - 4.5, pw - margin, y - 4.5)
-    }
+  // Totals, right-aligned under the table.
+  const TX = 377.5
+  const discount = waived ? total : 0
+  const payable = total - discount
+  let base = lineY + 24.1
+  setFace(doc, 'body', 8.7, COLOR.muted)
+  put(doc, 'Subtotal', TX, base)
+  put(doc, inrFmt(total), RIGHT, base, { align: 'right' })
+  base += 19.5
+  put(doc, 'Discount', TX, base)
+  put(doc, inrFmt(discount), RIGHT, base, { align: 'right' })
+  hline(doc, 377, RIGHT, base + 7.75, COLOR.rule)
+  base += 25.5
+  setFace(doc, 'head', 10.7, COLOR.blue)
+  put(doc, 'Total', TX - 0.5, base)
+  setFace(doc, 'bold', 10.7, COLOR.blue)
+  put(doc, inrFmt(payable), RIGHT, base, { align: 'right' })
+  if (showDue) {
+    base += 17
+    setFace(doc, 'body', 8.7, COLOR.muted)
+    put(doc, 'Received', TX, base)
+    put(doc, inrFmt(received), RIGHT, base, { align: 'right' })
+    base += 17
+    setFace(doc, 'bold', 8.7, COLOR.rose)
+    put(doc, 'Balance due', TX, base)
+    put(doc, inrFmt(balance), RIGHT, base, { align: 'right' })
+  }
+
+  // Amount in words, then the payment mode as three tick-boxes (a fourth
+  // option, "Other"/"Bank transfer", is written out).
+  base += 22
+  setFace(doc, 'body', 7.44, COLOR.label)
+  put(doc, 'Amount in words:', LEFT + 0.5, base)
+  const wordsX = LEFT + 0.5 + textWidth(doc, 'Amount in words:') + 4
+  setFace(doc, 'body', 8.7, COLOR.ink)
+  put(doc, numberToWordsIndian(payable), wordsX, base)
+
+  base += 24.8
+  setFace(doc, 'semi', 7, COLOR.muted)
+  put(doc, 'PAYMENT MODE', LEFT + 0.5, base, { track: 0.6 })
+  const modes: { label: string; at: number }[] = [{ label: 'Cash', at: 118.5 }, { label: 'UPI', at: 170 }, { label: 'Card', at: 216 }]
+  const paidSomething = invoice.amountReceived > 0 && !cancelled
+  const chosen = invoice.paymentMode
+  modes.forEach((m) => {
+    drawCheckbox(doc, m.at, base - 8.3, 11.5, paidSomething && chosen === m.label)
+    setFace(doc, 'body', 8.6, COLOR.ink)
+    put(doc, m.label, m.at + 17, base)
   })
-  ensureRoom(70)
-  y += 1
-  doc.setDrawColor(INK)
-  doc.setLineWidth(0.3)
-  doc.line(margin, y, pw - margin, y)
-  y += 5
-  doc.setFont('Roboto', 'bold')
-  doc.setFontSize(9)
-  const totalQty = invoice.items.reduce((s, i) => s + i.qty, 0)
-  doc.text('Total', col.item, y)
-  doc.text(String(totalQty), col.qty, y, { align: 'right' })
-  doc.text(inrFmt(total), col.amount, y, { align: 'right' })
-  y += 10
-
-  // Two-column summary: words + terms (left) / sub-total..payment mode (right)
-  const leftW = contentW * 0.55
-  const rightX = margin + leftW + 8
-  const rightW = contentW - leftW - 8
-  const summaryTop = y
-
-  doc.setFont('Roboto', 'bold')
-  doc.setFontSize(8.5)
-  doc.setTextColor(MUTED)
-  doc.text('Invoice Amount In Words', margin, y)
-  y += 4.5
-  doc.setFont('Roboto', 'normal')
-  doc.setFontSize(9)
-  doc.setTextColor(INK)
-  const wordsLines = doc.splitTextToSize(numberToWordsIndian(total), leftW)
-  doc.text(wordsLines, margin, y)
-  y += wordsLines.length * 4.2 + 4
-
-  // Payment instructions only while something is still owed.
-  const amountDue = balance > 0 && invoice.status !== 'cancelled' && invoice.status !== 'waived'
-  let leftBottom = y
-  if (amountDue) {
-    doc.setFont('Roboto', 'bold')
-    doc.setFontSize(8.5)
-    doc.setTextColor(MUTED)
-    doc.text('Terms And Conditions', margin, y)
-    y += 4.5
-    doc.setFont('Roboto', 'normal')
-    doc.setFontSize(8)
-    doc.setTextColor(INK)
-    const terms = `Please scan the QR code to pay via UPI, or send to ${CLINIC_DETAILS.phone} on Google Pay / PhonePe. Please mention the patient's name with the payment.`
-    const termsLines = doc.splitTextToSize(terms, leftW)
-    doc.text(termsLines, margin, y)
-    leftBottom = y + termsLines.length * 3.8
+  if (paidSomething && chosen !== 'Cash' && chosen !== 'UPI' && chosen !== 'Card') {
+    setFace(doc, 'body', 8.6, COLOR.ink)
+    put(doc, chosen, 262, base)
   }
 
-  let ry = summaryTop
-  const summaryRow = (label: string, value: string, opts?: { bold?: boolean; highlight?: boolean }) => {
-    if (opts?.highlight) {
-      doc.setFillColor(BRAND)
-      doc.rect(rightX - 2, ry - 3.6, rightW + 2, 5.6, 'F')
-      doc.setTextColor('#FFFFFF')
-    } else {
-      doc.setTextColor(INK)
-    }
-    doc.setFont('Roboto', opts?.bold || opts?.highlight ? 'bold' : 'normal')
-    doc.setFontSize(9)
-    doc.text(label, rightX, ry)
-    doc.text(value, rightX + rightW, ry, { align: 'right' })
-    ry += 6
-  }
-  summaryRow('Sub Total', inrFmt(total))
-  summaryRow('Total', inrFmt(total), { highlight: true })
-  summaryRow('Received', inrFmt(invoice.amountReceived))
-  summaryRow('Balance', inrFmt(balance), { bold: true })
-  summaryRow('Payment Mode', invoice.paymentMode)
-  summaryRow('Status', statusLabel, { bold: true })
-
-  y = Math.max(leftBottom, ry) + 10
-  ensureRoom(46)
-
-  // Bank/UPI (left) + signature (right). Only when something is still owed —
-  // a QR code asking for ₹0 on a settled bill is just confusing.
-  const qrSize = 26
+  // Something still owed: how to pay it. The QR carries the amount due.
   if (amountDue) {
+    const top = base + 22
+    const h = 100
+    box(doc, LEFT, top, CONTENT_W, h, COLOR.rxFill, COLOR.rxBorder, 8)
     try {
-      const qrDataUrl = await QRCode.toDataURL(buildUpiLink(balance, invoice.invoiceNo), { margin: 0, width: 256 })
-      doc.addImage(qrDataUrl, 'PNG', margin, y, qrSize, qrSize, undefined, 'FAST')
+      const qr = await QRCode.toDataURL(buildUpiLink(balance, invoice.invoiceNo), { margin: 1, width: 320 })
+      doc.addImage(qr, 'PNG', LEFT + 12, top + 12, 76, 76, undefined, 'FAST')
     } catch {
-      // If QR generation fails for any reason, the bank details below still
-      // let the patient pay manually — never block the whole invoice on it.
+      // If QR generation fails for any reason, the bank details beside it still
+      // let the patient pay manually — never block the whole bill on it.
     }
-    const bankX = margin + qrSize + 6
-    let by = y + 4
-    doc.setFont('Roboto', 'bold')
-    doc.setFontSize(9)
-    doc.setTextColor(INK)
-    doc.text('Pay To:', bankX, by)
-    by += 5
-    doc.setFont('Roboto', 'normal')
-    doc.setFontSize(8)
-    doc.setTextColor(MUTED)
-    const bankLines = [
-      `Bank Name: ${CLINIC_DETAILS.bankName}`,
-      `Account No.: ${CLINIC_DETAILS.bankAccountNo}`,
-      `IFSC: ${CLINIC_DETAILS.bankIfsc}`,
-      `Account Holder: ${CLINIC_DETAILS.bankAccountHolder}`,
-      `UPI: ${CLINIC_DETAILS.phone}`,
+    const bx = LEFT + 106
+    setFace(doc, 'semi', 7, COLOR.label)
+    put(doc, 'PAY BY UPI OR BANK TRANSFER', bx, top + 20, { track: 0.3 })
+    setFace(doc, 'body', 8.4, COLOR.body)
+    const bank = [
+      `${CLINIC_DETAILS.bankAccountHolder}  ·  ${CLINIC_DETAILS.bankName}`,
+      `A/c ${CLINIC_DETAILS.bankAccountNo}  ·  IFSC ${CLINIC_DETAILS.bankIfsc}`,
+      `UPI / Google Pay / PhonePe: ${CLINIC_DETAILS.phone}`,
     ]
-    for (const line of bankLines) {
-      const wrapped = doc.splitTextToSize(line, contentW * 0.55 - qrSize - 6)
-      doc.text(wrapped, bankX, by)
-      by += wrapped.length * 3.6
-    }
-  } else {
-    doc.setFont('Roboto', 'bold')
-    doc.setFontSize(10)
-    doc.setTextColor(invoice.status === 'cancelled' ? '#DC2626' : BRAND)
-    doc.text(invoice.status === 'cancelled' ? 'This invoice has been cancelled.' : invoice.status === 'waived' ? 'Fees waived — nothing is due.' : 'Payment received in full — thank you.', margin, y + 8)
+    bank.forEach((ln, i) => put(doc, ln, bx, top + 36 + i * 13))
+    setFace(doc, 'body', 7.4, COLOR.label)
+    put(doc, "Scan the code to pay the amount due. Please mention the patient's name with the payment.", bx, top + 82)
   }
 
-  drawSignatureFooter(doc, pw, margin, y + qrSize + 6)
+  finishDocument(doc, L, {
+    note: 'Thank you for choosing homoeopathic care with us.',
+    signerName: `For ${CLINIC_DETAILS.clinicName}`,
+    signerRole: 'Authorised signatory',
+  })
 
-  const fileName = `Invoice_${invoice.invoiceNo}_${patient.name.replace(/\s/g, '_')}.pdf`
+  const fileName = `${title}_${invoice.invoiceNo}_${patient.name.replace(/\s/g, '_')}.pdf`
   await previewPdf(doc, fileName)
 }
 
-// ── PATIENT HISTORY SUMMARY (for a second-opinion / referral export) ──
-// One consolidated document a practitioner can hand to another doctor —
-// real remedy names throughout (this is doctor-to-doctor, not the
-// patient-facing prescription slip's bodyText-only convention). Cancelled
-// prescriptions are included, clearly marked, for a complete clinical
-// picture; drafts are excluded (never finalized). Built on the same
-// general letterhead/font helpers exportInvoicePdf uses, not the
-// prescription-slip-specific helpers, since this is its own multi-page,
-// multi-section document.
+// ── Patient summary (for a second-opinion / referral export) ─────────────
+// One consolidated document a practitioner can hand to another doctor — real
+// remedy names throughout (this is doctor-to-doctor, not the patient-facing
+// prescription's bodyText convention). Cancelled prescriptions are included,
+// clearly marked, for a complete clinical picture; drafts are excluded (never
+// finalized). Same masthead, typefaces and footer as the other documents.
 function historyDateFmt(iso: string) {
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-}
-
-// A section header with a thin brand-colored rule beneath it and a
-// generous gap before — the visual device that gives this document real
-// hierarchy instead of same-weight text stacked top to bottom.
-function drawHistorySectionHeader(doc: jsPDF, margin: number, contentW: number, y: number, label: string): number {
-  doc.setFont('Roboto', 'bold')
-  doc.setFontSize(11.5)
-  doc.setTextColor(BRAND)
-  doc.text(label.toUpperCase(), margin, y)
-  doc.setDrawColor(BRAND)
-  doc.setLineWidth(0.5)
-  doc.line(margin, y + 2, margin + contentW, y + 2)
-  return y + 9
-}
-
-function drawHistoryDivider(doc: jsPDF, margin: number, contentW: number, y: number) {
-  doc.setDrawColor(BORDER)
-  doc.setLineWidth(0.15)
-  doc.line(margin, y, margin + contentW, y)
 }
 
 export async function exportPatientHistoryPdf(
@@ -969,66 +537,47 @@ export async function exportPatientHistoryPdf(
   investigationOrders: InvestigationOrder[],
   outcomes: Outcome[],
 ) {
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' })
-  await registerInvoiceFont(doc)
-  const pw = doc.internal.pageSize.getWidth()
-  const ph = doc.internal.pageSize.getHeight()
-  const margin = 18
-  const contentW = pw - margin * 2
-  const pageBottom = ph - margin - 8
+  const doc = await createDesignDoc()
+  const L = FORM_LAYOUT
+  const bottom = contentBottom(L)
+  const todayStr = rxDateFormat(new Date().toISOString())
+  const TITLE = 'Patient summary'
 
-  const ensureRoom = (needed: number, y: number): number => {
-    if (y + needed <= pageBottom) return y
-    doc.addPage()
-    return drawLetterhead(doc, pw, margin)
+  const startPage = (continued: boolean) => {
+    drawMasthead(doc, L)
+    drawTitle(doc, L, TITLE, continued ? 'continued' : undefined)
+    drawDate(doc, L, todayStr)
+    return continued ? 165 : 160
+  }
+  let y = startPage(false)
+  const ensureRoom = (needed: number) => {
+    if (y + needed > bottom) { doc.addPage(); y = startPage(true) }
   }
 
-  let y = drawLetterhead(doc, pw, margin)
+  // Patient card — the document's anchor.
+  const cardH = 92
+  box(doc, LEFT, y, CONTENT_W, cardH, COLOR.rxFill, COLOR.rxBorder, 8)
+  setFace(doc, 'head', 13, COLOR.ink)
+  put(doc, patient.name, LEFT + 14, y + 25)
+  setFace(doc, 'body', 8.4, COLOR.muted)
+  put(doc, [`${ageText(patient)}y`, patient.sex, patient.wsCode, patient.location].filter(Boolean).join(' · '), LEFT + 14, y + 39)
+  const col2 = LEFT + CONTENT_W * 0.52
+  setFace(doc, 'semi', 7, COLOR.label)
+  put(doc, 'CHIEF COMPLAINT', LEFT + 14, y + 56, { track: 0.3 })
+  put(doc, 'CURRENT REMEDY', col2, y + 56, { track: 0.3 })
+  setFace(doc, 'body', 9, COLOR.ink)
+  const colW = CONTENT_W * 0.48 - 20
+  const complaint = (doc.splitTextToSize(patient.chiefComplaint || '—', colW) as string[]).slice(0, 2)
+  const remedy = (doc.splitTextToSize(patient.currentRemedy || '—', colW) as string[]).slice(0, 2)
+  complaint.forEach((ln, i) => put(doc, ln, LEFT + 14, y + 69 + i * 11))
+  remedy.forEach((ln, i) => put(doc, ln, col2, y + 69 + i * 11))
+  y += cardH + 14
 
-  doc.setFont('Roboto', 'bold')
-  doc.setFontSize(19)
-  doc.setTextColor(BRAND)
-  doc.text('Patient Summary', pw / 2, y + 5, { align: 'center' })
-  doc.setFont('Roboto', 'normal')
-  doc.setFontSize(8.5)
-  doc.setTextColor(MUTED)
-  doc.text('Prepared for professional reference / clinical consultation', pw / 2, y + 11, { align: 'center' })
-  y += 20
-
-  // Patient info block — a real card, not just left-aligned text, so this
-  // reads as the document's anchor rather than one more line of copy.
-  const infoBoxH = 30
-  doc.setFillColor('#F4F6F8')
-  doc.setDrawColor('#E2E5E9')
-  doc.setLineWidth(0.2)
-  doc.roundedRect(margin, y, contentW, infoBoxH, 2.5, 2.5, 'FD')
-  doc.setFont('Roboto', 'bold')
-  doc.setFontSize(13)
-  doc.setTextColor(INK)
-  doc.text(patient.name, margin + 6, y + 8)
-  doc.setFont('Roboto', 'normal')
-  doc.setFontSize(8.5)
-  doc.setTextColor(MUTED)
-  doc.text(`${patient.age}y · ${patient.sex} · ${patient.wsCode} · ${patient.location}`, margin + 6, y + 13.5)
-
-  const col2X = margin + contentW * 0.52
-  doc.setFont('Roboto', 'bold')
-  doc.setFontSize(8.2)
-  doc.setTextColor(RX2_LABEL)
-  doc.text('CHIEF COMPLAINT', margin + 6, y + 20)
-  doc.text('CURRENT REMEDY', col2X, y + 20)
-  doc.setFont('Roboto', 'normal')
-  doc.setFontSize(9)
-  doc.setTextColor(INK)
-  doc.text(patient.chiefComplaint || '—', margin + 6, y + 24.5, { maxWidth: contentW * 0.48 - 8 })
-  doc.text(patient.currentRemedy || '—', col2X, y + 24.5, { maxWidth: contentW * 0.48 - 8 })
-  y += infoBoxH + 5
-
-  doc.setFont('Roboto', 'normal')
-  doc.setFontSize(8.2)
-  doc.setTextColor(MUTED)
-  doc.text(`Allergies: ${patient.allergies || 'None recorded'}   ·   Regular medication: ${patient.regularMedication || 'None recorded'}`, margin, y)
-  y += 10
+  setFace(doc, 'body', 8.2, COLOR.muted)
+  const allergy = `Allergies: ${patient.allergies || 'None recorded'}   ·   Regular medication: ${patient.regularMedication || 'None recorded'}`
+  const allergyLines = doc.splitTextToSize(allergy, CONTENT_W) as string[]
+  allergyLines.forEach((ln, i) => put(doc, ln, LEFT + 0.5, y + i * 11))
+  y += allergyLines.length * 11 + 16
 
   const sortedRx = [...prescriptions]
     .filter((r) => r.status !== 'draft')
@@ -1036,121 +585,72 @@ export async function exportPatientHistoryPdf(
   const sortedInvestigations = [...investigationOrders].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   const sortedOutcomes = [...outcomes].sort((a, b) => b.date.localeCompare(a.date))
 
-  // Prescription history
-  y = ensureRoom(20, y)
-  y = drawHistorySectionHeader(doc, margin, contentW, y, 'Prescription history')
-  if (sortedRx.length === 0) {
-    doc.setFont('Roboto', 'normal')
-    doc.setFontSize(9)
-    doc.setTextColor(MUTED)
-    doc.text('No prescriptions on record.', margin, y)
-    y += 8
-  } else {
-    sortedRx.forEach((r, i) => {
-      y = ensureRoom(13, y)
-      const cancelled = r.status === 'cancelled'
-      doc.setFont('Roboto', 'bold')
-      doc.setFontSize(10)
-      doc.setTextColor(cancelled ? RX2_LABEL : INK)
-      const title = `${r.remedy} ${r.potency}`
-      doc.text(title, margin, y)
-      if (cancelled) {
-        const w = doc.getTextWidth(title)
-        doc.setDrawColor(RX2_LABEL)
-        doc.setLineWidth(0.3)
-        doc.line(margin, y - 1.3, margin + w, y - 1.3)
-      }
-      doc.setFont('Roboto', 'normal')
-      doc.setFontSize(8.5)
-      doc.setTextColor(MUTED)
-      doc.text(historyDateFmt(r.publishedAt ?? r.createdAt), pw - margin, y, { align: 'right' })
-      y += 4.8
-      doc.setTextColor(cancelled ? RX2_LABEL : MUTED)
-      doc.text(
-        `${r.repetition} · ${r.doseGlobules} globules${r.durationDays ? ` · ${r.durationDays} days` : ' · until settled'}${cancelled ? '  ·  Cancelled — not an active prescription' : ''}`,
-        margin, y,
-      )
-      y += 5
-      if (i < sortedRx.length - 1) { drawHistoryDivider(doc, margin, contentW, y); y += 3.5 }
-    })
-    y += 4
+  const sectionHeader = (label: string) => {
+    ensureRoom(56)
+    setFace(doc, 'head', 9.2, COLOR.blue)
+    put(doc, label.toUpperCase(), LEFT + 0.5, y, { track: 0.78 })
+    hline(doc, LEFT, RIGHT, y + 6, COLOR.rule)
+    y += 22
   }
+  const divider = () => { hline(doc, LEFT, RIGHT, y, COLOR.rule); y += 11 }
+  const emptyNote = (text: string) => { setFace(doc, 'body', 9, COLOR.muted); put(doc, text, LEFT + 0.5, y); y += 20 }
+  const wrapped = (text: string, size: number, color: string, lineH: number) => {
+    setFace(doc, 'body', size, color)
+    for (const ln of doc.splitTextToSize(text, CONTENT_W) as string[]) { ensureRoom(lineH + 4); setFace(doc, 'body', size, color); put(doc, ln, LEFT + 0.5, y); y += lineH }
+  }
+
+  // Prescription history
+  sectionHeader('Prescription history')
+  if (sortedRx.length === 0) emptyNote('No prescriptions on record.')
+  else sortedRx.forEach((r, i) => {
+    ensureRoom(36)
+    const cancelled = r.status === 'cancelled'
+    const rxTitle = `${r.remedy} ${r.potency}`
+    setFace(doc, 'bold', 10, cancelled ? COLOR.label : COLOR.ink)
+    put(doc, rxTitle, LEFT + 0.5, y)
+    if (cancelled) hline(doc, LEFT + 0.5, LEFT + 0.5 + textWidth(doc, rxTitle), y - 3, COLOR.label, 0.8)
+    setFace(doc, 'body', 8.4, COLOR.muted)
+    put(doc, historyDateFmt(r.publishedAt ?? r.createdAt), RIGHT, y, { align: 'right' })
+    y += 13
+    setFace(doc, 'body', 8.4, cancelled ? COLOR.label : COLOR.muted)
+    put(doc, `${r.repetition} · ${r.doseGlobules} globules${r.durationDays ? ` · ${r.durationDays} days` : ' · until settled'}${cancelled ? '  ·  Cancelled — not an active prescription' : ''}`, LEFT + 0.5, y)
+    y += 11
+    if (i < sortedRx.length - 1) divider()
+  })
+  y += 18
 
   // Investigation orders
-  y = ensureRoom(20, y)
-  y = drawHistorySectionHeader(doc, margin, contentW, y, 'Investigation orders')
-  if (sortedInvestigations.length === 0) {
-    doc.setFont('Roboto', 'normal')
-    doc.setFontSize(9)
-    doc.setTextColor(MUTED)
-    doc.text('No investigations ordered.', margin, y)
-    y += 8
-  } else {
-    sortedInvestigations.forEach((order, i) => {
-      y = ensureRoom(16, y)
-      doc.setFont('Roboto', 'bold')
-      doc.setFontSize(9.5)
-      doc.setTextColor(INK)
-      doc.text(historyDateFmt(order.createdAt), margin, y)
-      y += 4.8
-      doc.setFont('Roboto', 'normal')
-      doc.setFontSize(9)
-      doc.setTextColor(INK)
-      const testLines = doc.splitTextToSize(order.tests.join(', ') || '—', contentW)
-      doc.text(testLines, margin, y)
-      y += testLines.length * 4.2
-      if (order.notes.trim()) {
-        doc.setTextColor(MUTED)
-        doc.setFontSize(8.5)
-        const noteLines = doc.splitTextToSize(`Note: ${order.notes.trim()}`, contentW)
-        doc.text(noteLines, margin, y)
-        y += noteLines.length * 4
-      }
-      y += 2
-      if (i < sortedInvestigations.length - 1) { drawHistoryDivider(doc, margin, contentW, y); y += 3.5 }
-    })
+  sectionHeader('Investigation orders')
+  if (sortedInvestigations.length === 0) emptyNote('No investigations ordered.')
+  else sortedInvestigations.forEach((order, i) => {
+    ensureRoom(40)
+    setFace(doc, 'bold', 9.5, COLOR.ink)
+    put(doc, historyDateFmt(order.createdAt), LEFT + 0.5, y)
+    y += 13
+    wrapped(order.tests.join(', ') || '—', 9, COLOR.ink, 11.5)
+    if (order.notes.trim()) wrapped(`Note: ${order.notes.trim()}`, 8.4, COLOR.muted, 11)
     y += 4
-  }
+    if (i < sortedInvestigations.length - 1) divider()
+  })
+  y += 18
 
   // Outcomes / clinical assessments
-  y = ensureRoom(20, y)
-  y = drawHistorySectionHeader(doc, margin, contentW, y, 'Clinical outcomes')
-  if (sortedOutcomes.length === 0) {
-    doc.setFont('Roboto', 'normal')
-    doc.setFontSize(9)
-    doc.setTextColor(MUTED)
-    doc.text('No outcomes recorded.', margin, y)
-    y += 8
-  } else {
-    sortedOutcomes.forEach((o, i) => {
-      y = ensureRoom(13, y)
-      doc.setFont('Roboto', 'bold')
-      doc.setFontSize(10)
-      doc.setTextColor(INK)
-      doc.text(`${o.outcome} — ${o.remedy}`, margin, y)
-      doc.setFont('Roboto', 'normal')
-      doc.setFontSize(8.5)
-      doc.setTextColor(MUTED)
-      doc.text(historyDateFmt(o.date), pw - margin, y, { align: 'right' })
-      y += 4.8
-      if (o.note.trim()) {
-        doc.setTextColor(MUTED)
-        const noteLines = doc.splitTextToSize(o.note.trim(), contentW)
-        doc.text(noteLines, margin, y)
-        y += noteLines.length * 4
-      }
-      y += 2
-      if (i < sortedOutcomes.length - 1) { drawHistoryDivider(doc, margin, contentW, y); y += 3.5 }
-    })
-  }
+  sectionHeader('Clinical outcomes')
+  if (sortedOutcomes.length === 0) emptyNote('No outcomes recorded.')
+  else sortedOutcomes.forEach((o, i) => {
+    ensureRoom(32)
+    setFace(doc, 'bold', 10, COLOR.ink)
+    put(doc, `${o.outcome} — ${o.remedy}`, LEFT + 0.5, y)
+    setFace(doc, 'body', 8.4, COLOR.muted)
+    put(doc, historyDateFmt(o.date), RIGHT, y, { align: 'right' })
+    y += 13
+    if (o.note.trim()) wrapped(o.note.trim(), 8.4, COLOR.muted, 11)
+    y += 4
+    if (i < sortedOutcomes.length - 1) divider()
+  })
 
-  y = ensureRoom(20, y)
-  drawSignatureFooter(doc, pw, margin, Math.min(y + 10, ph - margin - 2))
+  finishDocument(doc, L, { note: 'Prepared for professional reference / clinical consultation.' })
 
-  const fileName = `Patient_Summary_${patient.name.replace(/\s/g, '_')}_${todayFileStamp()}.pdf`
+  const fileName = `Patient_Summary_${patient.name.replace(/\s/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`
   await savePdf(doc, fileName)
-}
-
-function todayFileStamp() {
-  return new Date().toISOString().slice(0, 10)
 }

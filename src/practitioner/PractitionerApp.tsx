@@ -15,6 +15,7 @@ import {
   CalendarBlank,
   CalendarCheck,
   CalendarPlus,
+  Plus,
   Warning,
   SquaresFour,
   Monitor,
@@ -922,6 +923,14 @@ function QuickInvestigationScreen({ patientId, onBack }: { patientId: string; on
     setSelected((s) => (s.includes(test) ? s.filter((t) => t !== test) : [...s, test]))
   }
 
+  // A test that isn't in the preset list yet (new investigations come up): she
+  // can add it as her own line, and it prints under "Other / specify" like any other.
+  const trimmedQuery = query.trim()
+  const canAddCustom =
+    trimmedQuery.length > 1 &&
+    !selected.some((s) => s.toLowerCase() === trimmedQuery.toLowerCase()) &&
+    !ALL_INVESTIGATIONS.some(({ test }) => test.toLowerCase() === trimmedQuery.toLowerCase())
+
   if (!patient) return (
     <div className="flex h-full items-center justify-center bg-screen">
       <div className="text-center">
@@ -950,7 +959,7 @@ function QuickInvestigationScreen({ patientId, onBack }: { patientId: string; on
           <CaretLeft size={18} className="text-body" />
         </Pressable>
         <div className="mt-1 font-display text-[18px] font-bold text-ink">Investigations</div>
-        <div className="text-[12px] text-faint">{patient.name} · same letterhead as prescriptions</div>
+        <div className="text-[12px] text-faint">{patient.name} · investigation request</div>
       </div>
 
       <div className="flex-1 space-y-4 overflow-y-auto px-[18px] pb-[120px] pt-2">
@@ -966,7 +975,7 @@ function QuickInvestigationScreen({ patientId, onBack }: { patientId: string; on
               data-selectable="true"
             />
           </div>
-          {matches.length > 0 && (
+          {(matches.length > 0 || canAddCustom) && (
             <div className="mt-2 space-y-1.5">
               {matches.map(({ test, category }) => (
                 <Pressable
@@ -979,6 +988,16 @@ function QuickInvestigationScreen({ patientId, onBack }: { patientId: string; on
                   <span className="shrink-0 text-[11px] text-faint">{category}</span>
                 </Pressable>
               ))}
+              {canAddCustom && (
+                <Pressable
+                  hap="none"
+                  onClick={() => { haptic('select'); setSelected((s) => [...s, trimmedQuery]); setQuery('') }}
+                  className="flex w-full items-center gap-2 rounded-[12px] border border-dashed border-border bg-surface px-3.5 py-2.5 text-left"
+                >
+                  <Plus size={14} className="text-brand" />
+                  <span className="text-[13px] font-semibold text-ink">Add &quot;{trimmedQuery}&quot; as a custom test</span>
+                </Pressable>
+              )}
             </div>
           )}
         </div>
@@ -1002,11 +1021,11 @@ function QuickInvestigationScreen({ patientId, onBack }: { patientId: string; on
         </div>
 
         <div>
-          <Label>What&apos;s this for? (prints as &quot;Diagnosis&quot; on the slip)</Label>
+          <Label>Note on the request</Label>
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            placeholder="Optional — leave blank to use the patient's chief complaint"
+            placeholder="Optional — e.g. fasting sample required"
             rows={2}
             data-selectable="true"
             className="mt-2 w-full resize-none rounded-[14px] border border-border bg-surface px-3.5 py-2.5 text-[13px] leading-relaxed text-body outline-none placeholder:text-faint focus:border-green-border"

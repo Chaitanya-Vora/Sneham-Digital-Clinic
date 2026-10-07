@@ -1,12 +1,10 @@
 import { jsPDF } from 'jspdf'
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 import QRCode from 'qrcode'
 import { Capacitor } from '@capacitor/core'
 import type { Prescription, Patient, InvestigationOrder, Invoice, Outcome } from './types'
 import { CLINIC_DETAILS, SNEHAM_LOGO_BASE64, NEHA_SIGNATURE_BASE64, ROBOTO_REGULAR_URL, ROBOTO_BOLD_URL } from './letterheadAssets'
 import { INVESTIGATION_CATALOG } from './investigations'
 import { invoiceTotal, invoiceBalance, numberToWordsIndian, buildUpiLink } from './billing'
-import prescriptionLetterheadUrl from '../assets/prescription-letterhead.pdf?url'
 
 const BRAND = '#41603C'
 const INK = '#0F172A'
@@ -77,29 +75,6 @@ function bytesToBase64(bytes: Uint8Array): string {
   let binary = ''
   for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
   return btoa(binary)
-}
-
-/** Same save/share behavior as savePdf, for output produced by pdf-lib
- *  (a raw byte array) rather than jsPDF. */
-async function savePdfBytes(bytes: Uint8Array, fileName: string) {
-  if (Capacitor.isNativePlatform()) {
-    const { Filesystem, Directory } = await import('@capacitor/filesystem')
-    const { Share } = await import('@capacitor/share')
-    const written = await Filesystem.writeFile({
-      path: fileName,
-      data: bytesToBase64(bytes),
-      directory: Directory.Cache,
-    })
-    await Share.share({ title: fileName, url: written.uri })
-  } else {
-    const blob = new Blob([bytes.slice().buffer], { type: 'application/pdf' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = fileName
-    a.click()
-    URL.revokeObjectURL(url)
-  }
 }
 
 // Fetched once per session and reused — every invoice after the first
@@ -228,98 +203,6 @@ function drawSignatureFooter(doc: jsPDF, pw: number, margin: number, y: number):
   return ty
 }
 
-// Exact coordinates measured from the real letterhead file (pdftotext -bbox
-// on prescription-letterhead.pdf), in that PDF's own page space (1190x1683pt
-// — the original design at 2x, same proportions as A4). Top-down y, matching
-// how they were measured; convert to pdf-lib's bottom-up y at draw time.
-// The template itself is never redrawn or altered — only these values (and
-// the body text below) get placed on top of it, at its own font size.
-const RX_TEMPLATE_FONT_SIZE = 22.31 // the template's own placeholder-line size, read directly off its embedded font (not a theoretical 2x scale)
-const RX_FIELDS = {
-  // patientName/diagnosis carry a maxWidth: both are free-length text on a
-  // fixed printed blank, so a long value shrinks to fit that blank instead
-  // of running off the end of the line.
-  patientName: { x: 255, yMax: 325.9, maxWidth: 232 },
-  date: { x: 657, yMax: 325.9 },
-  age: { x: 165, yMax: 370.9 },
-  sex: { x: 721, yMax: 370.9 },
-  diagnosis: { x: 220, yMax: 416.9, maxWidth: 187 },
-}
-const RX_FIELD_MIN_FONT_SIZE = 13 // never shrink small enough to look like a footnote
-const RX_BODY_TOP = 470 // below "Diagnosis", well clear of the signature block near the bottom
-const RX_BODY_LEFT = 116 // aligned with the left margin the placeholder labels use
-const RX_BODY_RIGHT = 1074 // page width (1190) minus a matching right margin
-
-// Shared by every document type printed on the real letterhead
-// (prescriptions, investigation orders): load the immutable template and
-// its own font, ready for placeholder text to be drawn on top.
-async function loadLetterheadTemplate() {
-  const templateBytes = await fetch(prescriptionLetterheadUrl).then((r) => r.arrayBuffer())
-  const pdfDoc = await PDFDocument.load(templateBytes)
-  const page = pdfDoc.getPages()[0]
-  const { height } = page.getSize()
-  const font = await pdfDoc.embedFont(StandardFonts.TimesRoman)
-  return { pdfDoc, page, height, font }
-}
-
-// Patient Name / Date / Age / Sex / Diagnosis — the same five placeholders
-// on the letterhead regardless of what kind of document is being printed.
-function drawPatientInfoFields(
-  page: import('pdf-lib').PDFPage,
-  font: import('pdf-lib').PDFFont,
-  height: number,
-  patient: Patient,
-  dateStr: string,
-  diagnosisText: string,
-) {
-  const black = rgb(0, 0, 0)
-  // yMax from pdftotext is the bottom edge of the label's bounding box in
-  // top-down coordinates; nudging up lands on the baseline, sitting just
-  // above the printed rule rather than resting on it.
-  const toBaselineY = (yMax: number) => height - yMax + 8
-
-  const put = (text: string, field: { x: number; yMax: number; maxWidth?: number }) => {
-    let size = RX_TEMPLATE_FONT_SIZE
-    if (field.maxWidth) {
-      while (size > RX_FIELD_MIN_FONT_SIZE && font.widthOfTextAtSize(text, size) > field.maxWidth) {
-        size -= 0.5
-      }
-      size = Math.max(size, RX_FIELD_MIN_FONT_SIZE)
-    }
-    page.drawText(text, { x: field.x, y: toBaselineY(field.yMax), size, font, color: black })
-  }
-  put(patient.name, RX_FIELDS.patientName)
-  put(dateStr, RX_FIELDS.date)
-  put(String(patient.age), RX_FIELDS.age)
-  put(patient.sex, RX_FIELDS.sex)
-  put(diagnosisText, RX_FIELDS.diagnosis)
-}
-
-// The free-form block below Diagnosis — word-wrapped at the template's own
-// font size, one paragraph per '\n'-separated chunk of the input.
-function drawWrappedBody(page: import('pdf-lib').PDFPage, font: import('pdf-lib').PDFFont, height: number, text: string) {
-  const black = rgb(0, 0, 0)
-  const maxWidth = RX_BODY_RIGHT - RX_BODY_LEFT
-  const lineHeight = RX_TEMPLATE_FONT_SIZE * 1.35
-  let by = height - RX_BODY_TOP
-  for (const paragraph of text.split('\n')) {
-    const words = paragraph.split(' ')
-    let line = ''
-    for (const word of words) {
-      const attempt = line ? `${line} ${word}` : word
-      if (font.widthOfTextAtSize(attempt, RX_TEMPLATE_FONT_SIZE) > maxWidth && line) {
-        page.drawText(line, { x: RX_BODY_LEFT, y: by, size: RX_TEMPLATE_FONT_SIZE, font, color: black })
-        by -= lineHeight
-        line = word
-      } else {
-        line = attempt
-      }
-    }
-    page.drawText(line, { x: RX_BODY_LEFT, y: by, size: RX_TEMPLATE_FONT_SIZE, font, color: black })
-    by -= lineHeight
-  }
-}
-
 const rxDateFormat = (iso: string) =>
   new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
 
@@ -430,11 +313,11 @@ function fitSingleLine(doc: jsPDF, text: string, maxW: number, size: number, min
 
 /** Top of every page after the first, so a prescription that runs onto a
  *  second sheet is never an unlabelled page. */
-function drawContinuationHeader(doc: jsPDF, pw: number, margin: number, patientName: string, dateStr: string) {
+function drawContinuationHeader(doc: jsPDF, pw: number, margin: number, patientName: string, dateStr: string, title = 'Prescription') {
   doc.setFont('Roboto', 'bold')
   doc.setFontSize(8.5)
   doc.setTextColor(INK)
-  doc.text(`Prescription · ${patientName}`, margin, margin)
+  doc.text(`${title} · ${patientName}`, margin, margin)
   doc.setFont('Roboto', 'normal')
   doc.setFontSize(8)
   doc.setTextColor(MUTED)
@@ -482,13 +365,13 @@ function drawPrescriptionMasthead(doc: jsPDF, pw: number, margin: number): numbe
 /** "• Prescription" title + Date, then Patient Name / Age / Sex, then
  *  Diagnosis — each a label above a ruled line, value sitting just above
  *  the rule. Returns the y position to continue drawing from. */
-function drawPrescriptionFields(doc: jsPDF, pw: number, margin: number, contentW: number, y: number, patient: Patient, dateStr: string, diagnosisText: string): number {
+function drawPrescriptionFields(doc: jsPDF, pw: number, margin: number, contentW: number, y: number, patient: Patient, dateStr: string, diagnosisText: string, title = 'Prescription'): number {
   doc.setFillColor(RX2_ROSE)
   doc.circle(margin + 1, y - 1.3, 1, 'F')
   doc.setFont('Roboto', 'bold')
   doc.setFontSize(15)
   doc.setTextColor(INK)
-  doc.text('Prescription', margin + 5, y)
+  doc.text(title, margin + 5, y)
   doc.setFont('Roboto', 'normal')
   doc.setFontSize(8)
   doc.setTextColor(RX2_LABEL)
@@ -595,7 +478,7 @@ function drawPrescriptionSignature(doc: jsPDF, pw: number, margin: number, botto
   doc.setFont('Roboto', 'normal')
   doc.setFontSize(7.5)
   doc.setTextColor(MUTED)
-  doc.text(disclaimer, margin, bottomY)
+  if (disclaimer) doc.text(disclaimer, margin, bottomY)
 
   const sigW = 26
   const sigH = sigW * (90 / 219)
@@ -700,20 +583,122 @@ export async function exportPrescriptionPdf(rx: Prescription, patient: Patient, 
 // with the selected tests, grouped by category, filling the body instead
 // of a remedy.
 export async function exportInvestigationOrderPdf(order: InvestigationOrder, patient: Patient) {
-  const { pdfDoc, page, height, font } = await loadLetterheadTemplate()
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' })
+  await registerInvoiceFont(doc)
+  const pw = doc.internal.pageSize.getWidth()
+  const ph = doc.internal.pageSize.getHeight()
+  const margin = 16
+  const contentW = pw - margin * 2
+  const footerReserve = 26
+  const pageBottom = ph - margin - footerReserve
   const dateStr = rxDateFormat(order.createdAt)
-  drawPatientInfoFields(page, font, height, patient, dateStr, order.notes.trim() || patient.chiefComplaint || '—')
+  const TITLE = 'Investigation Request'
 
+  let y = drawPrescriptionMasthead(doc, pw, margin)
+  // The patient's diagnosis/case — NOT the order's note (that has its own box below).
+  y = drawPrescriptionFields(doc, pw, margin, contentW, y, patient, dateStr, patient.chiefComplaint || '—', TITLE)
+
+  doc.setFont('Roboto', 'bold')
+  doc.setFontSize(10)
+  doc.setTextColor(RX2_NAVY)
+  doc.text('•  TESTS REQUESTED  •', pw / 2, y, { align: 'center' })
+  y += 9
+
+  const newPage = () => {
+    doc.addPage()
+    drawContinuationHeader(doc, pw, margin, patient.name, dateStr, TITLE)
+    y = margin + 12
+  }
+
+  // Tests grouped by category, in the clinic's own catalogue order: a bold
+  // category label, then the tests as ticked-off lines in two columns.
   const selected = new Set(order.tests)
-  const lines = INVESTIGATION_CATALOG
+  const groups = INVESTIGATION_CATALOG
     .map((c) => ({ category: c.category, tests: c.tests.filter((t) => selected.has(t)) }))
     .filter((c) => c.tests.length > 0)
-    .map((c) => `${c.category}: ${c.tests.join(', ')}`)
-  drawWrappedBody(page, font, height, lines.join('\n') || '—')
+  // Anything chosen that isn't in the catalogue (a custom line the doctor typed).
+  const known = new Set(INVESTIGATION_CATALOG.flatMap((c) => c.tests))
+  const custom = order.tests.filter((t) => !known.has(t))
+  if (custom.length > 0) groups.push({ category: 'Other', tests: custom })
 
-  const bytes = await pdfDoc.save()
+  const colGap = 8
+  const colW = (contentW - colGap) / 2
+  const boxSize = 2.8
+  const lineH = 4.4
+  if (groups.length === 0) {
+    doc.setFont('Roboto', 'normal')
+    doc.setFontSize(9.5)
+    doc.setTextColor(INK)
+    doc.text('—', margin, y)
+    y += 8
+  }
+  for (const g of groups) {
+    if (y + 14 > pageBottom) newPage()
+    doc.setFont('Roboto', 'bold')
+    doc.setFontSize(9.5)
+    doc.setTextColor(RX2_NAVY)
+    doc.text(g.category, margin, y)
+    doc.setDrawColor(BORDER)
+    doc.setLineWidth(0.2)
+    doc.line(margin, y + 1.8, margin + contentW, y + 1.8)
+    y += 7
+    doc.setFont('Roboto', 'normal')
+    doc.setFontSize(9)
+    for (let i = 0; i < g.tests.length; i += 2) {
+      const pair = g.tests.slice(i, i + 2).map((t) => doc.splitTextToSize(t, colW - boxSize - 3) as string[])
+      const rowH = Math.max(...pair.map((l) => l.length)) * lineH + 1.6
+      if (y + rowH > pageBottom) { newPage(); doc.setFont('Roboto', 'normal'); doc.setFontSize(9) }
+      pair.forEach((lines, c) => {
+        const x = margin + c * (colW + colGap)
+        doc.setDrawColor(RX2_NAVY)
+        doc.setLineWidth(0.3)
+        doc.rect(x, y - 2.6, boxSize, boxSize)
+        // ticked: these are the tests that were requested
+        doc.setLineWidth(0.4)
+        doc.line(x + 0.6, y - 1.2, x + 1.3, y - 0.3)
+        doc.line(x + 1.3, y - 0.3, x + 2.3, y - 2.2)
+        doc.setTextColor(INK)
+        doc.text(lines, x + boxSize + 3, y)
+      })
+      y += rowH
+    }
+    y += 3
+  }
+
+  const note = order.notes.trim()
+  if (note) {
+    const probe = new jsPDF({ unit: 'mm', format: 'a4' })
+    await registerInvoiceFont(probe)
+    const dry = drawRichParagraphs(probe, note, 0, 0, contentW - 10, 9, 4.6, INK, 10000, 0)
+    const boxH = dry.y + 12
+    if (y + boxH > pageBottom) newPage()
+    y += 2
+    doc.setFillColor(RX2_BOX_BG)
+    doc.roundedRect(margin, y, contentW, boxH, 2, 2, 'F')
+    doc.setFont('Roboto', 'normal')
+    doc.setFontSize(7)
+    doc.setTextColor(RX2_LABEL)
+    doc.text('NOTES / INSTRUCTIONS', margin + 5, y + 5.5)
+    drawRichParagraphs(doc, note, margin + 5, y + 11, contentW - 10, 9, 4.6, INK, pageBottom, margin + 12, () => drawContinuationHeader(doc, pw, margin, patient.name, dateStr, TITLE))
+    y += boxH + 6
+  }
+
+  if (y + footerReserve > ph - margin) newPage()
+  drawPrescriptionSignature(doc, pw, margin, ph - margin - 2, '')
+
+  const pages = doc.getNumberOfPages()
+  if (pages > 1) {
+    for (let i = 1; i <= pages; i++) {
+      doc.setPage(i)
+      doc.setFont('Roboto', 'normal')
+      doc.setFontSize(7.5)
+      doc.setTextColor(MUTED)
+      doc.text(`Page ${i} of ${pages}`, pw / 2, ph - 8, { align: 'center' })
+    }
+  }
+
   const fileName = `Investigations_${patient.name.replace(/\s/g, '_')}_${dateStr.replace(/\s/g, '')}.pdf`
-  await savePdfBytes(bytes, fileName)
+  await savePdf(doc, fileName)
 }
 
 // Matches the format of the real invoices she already sends (a reference

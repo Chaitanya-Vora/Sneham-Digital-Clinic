@@ -3277,7 +3277,7 @@ function InvestigationWriter({ patientId, onDone }: { patientId: string; onDone:
     <div className="space-y-4">
       <div>
         <h1 className="font-display text-[20px] font-bold text-ink">Investigations · {patient.name}</h1>
-        <div className="text-[12.5px] text-faint">Same letterhead as prescriptions · prints as a requisition slip</div>
+        <div className="text-[12.5px] text-faint">Prints as the clinic's investigation request form</div>
       </div>
 
       <div className="grid grid-cols-[1.3fr_1fr] gap-4">
@@ -3313,7 +3313,7 @@ function InvestigationWriter({ patientId, onDone }: { patientId: string; onDone:
                       className={`flex w-full items-center gap-2 rounded-[8px] border-dashed px-3 py-2 text-left transition hover:bg-tint ${matches.length > 0 ? 'mt-1 border-t border-border' : ''}`}
                     >
                       <Plus size={13} className="text-brand" />
-                      <span className="text-[13px] font-semibold text-ink">Add &quot;{trimmedQuery}&quot; as a custom line</span>
+                      <span className="text-[13px] font-semibold text-ink">Add &quot;{trimmedQuery}&quot; as a custom test</span>
                     </button>
                   )}
                 </Card>
@@ -3340,11 +3340,11 @@ function InvestigationWriter({ patientId, onDone }: { patientId: string; onDone:
           </div>
 
           <div>
-            <Label>What&apos;s this for? (prints as &quot;Diagnosis&quot; on the slip)</Label>
+            <Label>Note on the request</Label>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Optional — leave blank to use the patient's chief complaint"
+              placeholder="Optional — e.g. fasting sample required"
               rows={2}
               className="mt-2 w-full resize-none rounded-[14px] border border-border bg-surface px-3.5 py-2.5 text-[13px] outline-none focus:border-green-border"
             />
@@ -3354,7 +3354,7 @@ function InvestigationWriter({ patientId, onDone }: { patientId: string; onDone:
         <Card className="space-y-3 p-5">
           <Label>Ready to print</Label>
           <p className="text-[12.5px] text-muted">
-            Generates a requisition slip on the real letterhead with the selected test{selected.length === 1 ? '' : 's'}, grouped by category, under {patient.name}&apos;s details.
+            Generates the clinic&apos;s investigation request form for {patient.name}: the common tests are ticked, anything else is written under &quot;Other / specify&quot;.
           </p>
           <Button variant="primary" className="w-full" disabled={selected.length === 0} onClick={handleGenerate}>
             <Printer size={16} /> Generate &amp; save PDF

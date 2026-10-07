@@ -6,7 +6,7 @@ import { CLINIC_DETAILS } from './letterheadAssets'
 import { invoiceTotal, invoiceBalance, numberToWordsIndian, buildUpiLink } from './billing'
 import {
   COLOR, LEFT, RIGHT, CONTENT_W, PAGE_W, PAGE_H, RX_LAYOUT, FORM_LAYOUT, type Layout,
-  createDesignDoc, setFace, put, textWidth, hline, box, drawMasthead, drawTitle, drawDate, drawField, drawFooter,
+  createDesignDoc, drawRxSign, setFace, put, textWidth, hline, box, drawMasthead, drawTitle, drawDate, drawField, drawFooter,
   contentBottom, parseParagraphs, layoutParagraphs, flowHeight, drawFlow, type FlowStyle,
 } from './pdfDesign'
 
@@ -102,13 +102,7 @@ function drawRemedyBox(doc: jsPDF, top: number, remedy: string, potency: string)
   const h = 46.5 + extra
   box(doc, LEFT, top, CONTENT_W, h, COLOR.rxFill, COLOR.rxBorder, 8)
 
-  // The fonts carry no ℞ glyph, so it is set as the doctor's design draws it:
-  // a bold R with a small x tucked under its leg.
-  setFace(doc, 'headBold', 22, COLOR.blue)
-  put(doc, 'R', 58.5, top + 25.5)
-  const rw = textWidth(doc, 'R')
-  setFace(doc, 'headBold', 13, COLOR.blue)
-  put(doc, 'x', 58.5 + rw + 0.5, top + 29.5)
+  drawRxSign(doc, 57.6, top + 29.4, COLOR.blue)
 
   setFace(doc, 'semi', 7, COLOR.label)
   put(doc, 'REMEDY PRESCRIBED', 84, top + 15, { track: 0.3 })
@@ -134,8 +128,8 @@ function splitToAvoid(text: string): { main: string; avoid: string | null } {
   return { main: text.slice(0, idx).trim(), avoid: avoid || null }
 }
 
-const INSTRUCTION_FLOW: FlowStyle = { size: 8.2, lineH: 12, gap: 6.5, headingExtra: 4, color: COLOR.body, boldColor: COLOR.rose }
-const AVOID_FLOW: FlowStyle = { size: 8.2, lineH: 12, gap: 6, headingExtra: 0, color: COLOR.pinkText, boldColor: COLOR.pinkHead }
+const INSTRUCTION_FLOW: FlowStyle = { size: 8.2, lineH: 12, gap: 7, headingExtra: 3.5, tight: 1.6, color: COLOR.body, boldColor: COLOR.rose }
+const AVOID_FLOW: FlowStyle = { size: 7.87, lineH: 12, gap: 6, headingExtra: 0, tight: 0, color: COLOR.pinkText, boldColor: COLOR.pinkHead }
 const AVOID_X = 57
 const AVOID_W = 480.5
 
@@ -188,8 +182,8 @@ export async function exportPrescriptionPdf(rx: Prescription, patient: Patient, 
       let top = y + 14.7
       if (top + boxH > bottom) { top = newPage() - 12 }
       box(doc, LEFT, top, CONTENT_W, boxH, COLOR.pinkFill, COLOR.pinkBorder, 8)
-      setFace(doc, 'semi', 9.8, COLOR.pinkHead)
-      put(doc, 'TO AVOID', AVOID_X, top + 17)
+      setFace(doc, 'head', 8.3, COLOR.pinkHead)
+      put(doc, 'TO AVOID', AVOID_X, top + 17.5)
       drawFlow(doc, laidAvoid, AVOID_X, top + 31.7, AVOID_FLOW, Infinity, () => 0)
     }
   }
@@ -288,9 +282,15 @@ export async function exportInvestigationOrderPdf(order: InvestigationOrder, pat
   // "Other / specify" — the leftovers, written on the ruled lines.
   setFace(doc, 'body', 7.44, COLOR.label)
   put(doc, 'Other / specify:', 45.5, 349.6)
-  const otherText = remaining.map((r) => r.t).join(', ')
+  // Packed onto the ruled lines, separated by a dot — test names can hold commas themselves.
   setFace(doc, 'body', 9.2, COLOR.ink)
-  const otherLines = otherText ? (doc.splitTextToSize(otherText, CONTENT_W - 2) as string[]) : []
+  const otherLines: string[] = []
+  for (const r of remaining) {
+    const pieces = doc.splitTextToSize(r.t, CONTENT_W - 2) as string[]
+    const last = otherLines.length - 1
+    if (pieces.length === 1 && last >= 0 && doc.getTextWidth(`${otherLines[last]}  ·  ${r.t}`) <= CONTENT_W - 2) otherLines[last] += `  ·  ${r.t}`
+    else otherLines.push(...pieces)
+  }
   const ruleCount = Math.max(2, otherLines.length)
   let rulesEndY = 376
   let ruleY = 376
@@ -305,7 +305,7 @@ export async function exportInvestigationOrderPdf(order: InvestigationOrder, pat
   // The doctor's own note (fasting sample, urgency …), when there is one.
   const note = order.notes.trim()
   if (note) {
-    const st: FlowStyle = { size: 8.9, lineH: 12, gap: 6, headingExtra: 0, color: COLOR.body, boldColor: COLOR.rose }
+    const st: FlowStyle = { size: 8.9, lineH: 12, gap: 6, headingExtra: 0, tight: 0, color: COLOR.body, boldColor: COLOR.rose }
     const laid = layoutParagraphs(doc, parseParagraphs(note), CONTENT_W - 24, st)
     const boxH = 15 + 11 + flowHeight(laid, st) + 12
     let top = rulesEndY + 18
@@ -332,8 +332,8 @@ function drawReceiptNumberAndDate(doc: jsPDF, L: Layout, label: string, no: stri
   const base = L.dateBase
   // Built from the right edge inward so a longer number or date still fits.
   setFace(doc, 'body', 8.6, COLOR.ink)
-  const dateW = Math.max(39, textWidth(doc, date) + 8)
-  const noW = Math.max(31, textWidth(doc, no) + 8)
+  const dateW = Math.max(39, textWidth(doc, date) + 5)
+  const noW = Math.max(31, textWidth(doc, no) + 5)
   setFace(doc, 'semi', 8, COLOR.muted)
   const dateLabelW = textWidth(doc, 'Date')
   const noLabelW = textWidth(doc, label)

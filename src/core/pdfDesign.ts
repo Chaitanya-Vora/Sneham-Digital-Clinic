@@ -272,12 +272,35 @@ export function drawFooter(doc: jsPDF, L: Layout, o: { note: string; signed: boo
 /** Lowest y that content may reach on a page before it must continue on the next. */
 export const contentBottom = (L: Layout) => L.footRule - 14
 
+// ── The ℞ sign ───────────────────────────────────────────────────────────
+// None of the fonts carry ℞, so it is drawn from the outline used in the clinic's
+// design (a 20 pt glyph; coordinates in points from its baseline-left origin).
+const RX_GLYPH =
+  'M 1.46875 0 L 1.46875 -14.625 L 6.9375 -14.625 C 9.90625 -14.625 11.390625 -13.414062 11.390625 -11 C 11.390625 -10.09375 11.132812 -9.269531 10.625 -8.53125 C 10.125 -7.789062 9.4375 -7.222656 8.5625 -6.828125 L 9.640625 -5.28125 L 10.796875 -6.84375 L 13.0625 -6.84375 L 10.71875 -3.734375 L 13.34375 0 L 10.15625 0 L 9.078125 -1.546875 L 7.921875 0 L 5.671875 0 L 7.984375 -3.09375 L 6 -5.984375 L 4.328125 -5.984375 L 4.328125 0 Z ' +
+  'M 4.328125 -7.984375 L 5.03125 -7.984375 C 7.238281 -7.984375 8.34375 -8.875 8.34375 -10.65625 C 8.34375 -11.957031 7.359375 -12.609375 5.390625 -12.609375 L 4.328125 -12.609375 Z'
+
+export function drawRxSign(doc: jsPDF, x: number, baseline: number, color: string) {
+  const t = RX_GLYPH.split(/\s+/)
+  doc.setFillColor(color)
+  for (let i = 0; i < t.length;) {
+    const c = t[i++]
+    if (c === 'Z') { doc.close(); continue }
+    const n = c === 'C' ? 6 : 2
+    const v = t.slice(i, i + n).map((q, k) => Number(q) + (k % 2 === 0 ? x : baseline))
+    i += n
+    if (c === 'M') doc.moveTo(v[0], v[1])
+    else if (c === 'L') doc.lineTo(v[0], v[1])
+    else doc.curveTo(v[0], v[1], v[2], v[3], v[4], v[5])
+  }
+  doc.fill()
+}
+
 // ── Flowing paragraphs (instructions) ────────────────────────────────────
 // The doctor writes her instructions in plain text, marking emphasis with
 // *asterisks* — a pair makes bold. An asterisk with no partner (the "*Pills to
 // be placed…" footnotes) is printed as it is.
 interface Seg { t: string; bold: boolean }
-export interface Para { segs: Seg[]; kind: 'normal' | 'heading' }
+export interface Para { segs: Seg[]; kind: 'normal' | 'heading' | 'note' }
 
 function parseSegs(line: string): Seg[] {
   const segs: Seg[] = []
@@ -305,7 +328,9 @@ export function parseParagraphs(text: string): Para[] {
       segs = segs.map((s) => (s.bold ? { t: s.t.replace(/\s*[-–]$/, ' –'), bold: true } : { t: s.t.replace(/^\s*-\s*$/, ' –'), bold: false }))
     }
     segs = segs.map((s) => ({ t: s.t.replace(/(^|\s)-(\s|$)/g, '$1–$2'), bold: s.bold }))
-    paras.push({ segs, kind: heading ? 'heading' : 'normal' })
+    // a line that opens with a lone * is a footnote ("*Pills to be placed …")
+    const note = !heading && !segs[0].bold && segs[0].t.startsWith('*')
+    paras.push({ segs, kind: heading ? 'heading' : note ? 'note' : 'normal' })
   }
   return paras
 }
@@ -327,7 +352,23 @@ function tokenize(segs: Seg[]): Tok[] {
 
 export interface PlacedWord { t: string; bold: boolean; x: number }
 export interface LaidPara { lines: PlacedWord[][]; kind: Para['kind'] }
-export interface FlowStyle { size: number; lineH: number; gap: number; headingExtra: number; color: string; boldColor: string }
+export interface FlowStyle {
+  size: number
+  lineH: number
+  gap: number // space between paragraphs
+  headingExtra: number // extra space above a group title or the first footnote
+  tight: number // a little less space after a group title, and between footnotes
+  color: string
+  boldColor: string
+}
+
+/** Space above paragraph `p` that follows `prev`, beyond one line. */
+function gapBefore(prev: Para['kind'], p: Para['kind'], st: FlowStyle): number {
+  let g = st.gap
+  if (p === 'heading' || (p === 'note' && prev !== 'note')) g += st.headingExtra
+  if (prev === 'heading' || (prev === 'note' && p === 'note')) g -= st.tight
+  return g
+}
 
 /** Wraps every paragraph to `width` (measuring only — nothing is drawn). */
 export function layoutParagraphs(doc: jsPDF, paras: Para[], width: number, st: FlowStyle): LaidPara[] {
@@ -354,7 +395,7 @@ export function layoutParagraphs(doc: jsPDF, paras: Para[], width: number, st: F
 export function flowHeight(laid: LaidPara[], st: FlowStyle): number {
   let h = 0
   laid.forEach((p, i) => {
-    if (i > 0) h += st.gap + st.lineH + (p.kind === 'heading' ? st.headingExtra : 0)
+    if (i > 0) h += st.lineH + gapBefore(laid[i - 1].kind, p.kind, st)
     h += (p.lines.length - 1) * st.lineH
   })
   return h
@@ -375,7 +416,7 @@ export function drawFlow(
 ): number {
   laid.forEach((p, pi) => {
     p.lines.forEach((ln, li) => {
-      if (pi > 0 || li > 0) y += st.lineH + (li === 0 ? st.gap + (p.kind === 'heading' ? st.headingExtra : 0) : 0)
+      if (pi > 0 || li > 0) y += st.lineH + (li === 0 ? gapBefore(laid[pi - 1].kind, p.kind, st) : 0)
       // a heading needs room for the line that follows it, too
       const keep = li === 0 && p.kind === 'heading' ? st.lineH + st.gap : 0
       if (y + keep > bottom) y = nextPage()

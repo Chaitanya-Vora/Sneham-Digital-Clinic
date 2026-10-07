@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { WhatsAppIcon } from '../design-system/BrandIcons'
+import { Capacitor } from '@capacitor/core'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   SunHorizon,
@@ -637,9 +638,22 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
   // only then marks the channel shared — same "no fake success" rule as the
   // web console's chips. WhatsApp/SMS need a phone on file; Email always
   // opens (blank-recipient compose is still useful — she picks the recipient).
-  function shareRx(channel: 'WhatsApp' | 'SMS' | 'Email') {
+  async function shareRx(channel: 'WhatsApp' | 'SMS' | 'Email') {
     if (!publishedRxId || !currentPatient) return
     const message = `Prescription from ${doctor?.name ?? 'your doctor'} for ${currentPatient.name}:\n${bodyText.trim() || `${remedy} ${potency}`}${prep.trim() ? `\nPreparation: ${prep.trim()}` : ''}`
+    // On the phone, WhatsApp and Email carry the real letterhead prescription
+    // (the PDF) through the share sheet — a plain-text message was not how the
+    // prescription is meant to look. SMS can't attach a file, so it stays text.
+    if (Capacitor.isNativePlatform() && publishedRx && (channel === 'WhatsApp' || channel === 'Email')) {
+      haptic('success')
+      try {
+        await (await import('../core/pdfExport')).exportPrescriptionPdf(publishedRx, currentPatient, { shareText: `Prescription from ${doctor?.name ?? 'your doctor'} for ${currentPatient.name}` })
+        markPrescriptionShared(publishedRxId, channel)
+      } catch {
+        toast({ title: 'Couldn’t prepare the prescription PDF', message: 'Please try again.' })
+      }
+      return
+    }
     let sent = true
     if (channel === 'WhatsApp') sent = shareViaWhatsApp(currentPatient.phone, message)
     else if (channel === 'SMS') sent = shareViaSms(currentPatient.phone, message)
@@ -844,7 +858,7 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
               <Pressable
                 key={c}
                 hap="tick"
-                onClick={() => shareRx(c)}
+                onClick={() => void shareRx(c)}
                 className={`flex flex-1 flex-col items-center gap-1 rounded-[14px] border px-2 py-2.5 text-[11.5px] font-semibold ${
                   publishedRx?.sharedVia.includes(c) ? 'border-green-border bg-tint text-ink-deep' : 'border-border bg-surface text-muted'
                 }`}

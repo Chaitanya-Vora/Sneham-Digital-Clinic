@@ -56,7 +56,8 @@ publish() {
   local file="b$BUILD.zip"
   # index.html must sit at the root of the zip; no hidden files.
   (cd dist && zip -qrX "$dir/$file" . -x '.*' '*/.DS_Store')
-  unzip -l "$dir/$file" | grep -q ' index.html$' || { echo "index.html is not at the root of the zip" >&2; exit 1; }
+  listing="$(unzip -l "$dir/$file")"
+  grep -q ' index.html$' <<<"$listing" || { echo "index.html is not at the root of the zip" >&2; exit 1; }
 
   openssl dgst -sha256 -sign "$key" -out "$dir/$file.sig" "$dir/$file"
   # The same check the phone does, done here first: refuse to publish anything

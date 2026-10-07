@@ -11,7 +11,9 @@ export function invoiceTotal(items: InvoiceLineItem[]): number {
   return items.reduce((sum, i) => sum + i.qty * i.unitPrice, 0)
 }
 
-export function invoiceBalance(invoice: Pick<Invoice, 'items' | 'amountReceived'>): number {
+export function invoiceBalance(invoice: Pick<Invoice, 'items' | 'amountReceived'> & { status?: Invoice['status'] }): number {
+  // A waived fee was forgiven and a cancelled bill never stood: neither is owed.
+  if (invoice.status === 'waived' || invoice.status === 'cancelled') return 0
   return Math.max(0, invoiceTotal(invoice.items) - invoice.amountReceived)
 }
 
@@ -38,8 +40,12 @@ function threeDigitWords(n: number): string {
 // phrasing her current billing software prints — e.g. 1920 becomes "One
 // Thousand Nine Hundred and Twenty Rupees only".
 export function numberToWordsIndian(amount: number): string {
-  const n = Math.max(0, Math.round(amount))
-  if (n === 0) return 'Zero Rupees only'
+  // Work in whole paise so ₹2,420.50 is read as fifty paise, never rounded up
+  // to ₹2,421 (the words on a bill must match the figure above them).
+  const totalPaise = Math.max(0, Math.round(amount * 100))
+  const n = Math.floor(totalPaise / 100)
+  const paise = totalPaise % 100
+  if (n === 0 && paise === 0) return 'Zero Rupees only'
   const crore = Math.floor(n / 10000000)
   const lakh = Math.floor(n / 100000) % 100
   const thousand = Math.floor(n / 1000) % 100
@@ -49,7 +55,9 @@ export function numberToWordsIndian(amount: number): string {
   if (lakh) parts.push(`${twoDigitWords(lakh)} Lakh`)
   if (thousand) parts.push(`${twoDigitWords(thousand)} Thousand`)
   if (hundredRest) parts.push(threeDigitWords(hundredRest))
-  return `${parts.join(' ')} Rupees only`
+  const rupees = n > 0 ? `${parts.join(' ')} Rupees` : ''
+  const paiseWords = paise > 0 ? `${twoDigitWords(paise)} Paise` : ''
+  return `${[rupees, paiseWords].filter(Boolean).join(' and ')} only`
 }
 
 // A real, scannable UPI payment link — same VPA and link shape as her

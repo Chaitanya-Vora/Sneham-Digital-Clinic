@@ -86,9 +86,10 @@ export default function App() {
     }
   }, [])
 
-  // Load everything when a (different) person signs in, or when the store was
-  // reset — NOT every time Supabase re-announces the same signed-in user,
-  // which it does on every return to the app (that used to trigger a full
+  // Load everything when a (different) person signs in, when the store was
+  // reset, or once at each launch of the app (the copy saved on the device may
+  // be hours old) — NOT every time Supabase re-announces the same signed-in
+  // user, which it does on every return to the app (that used to trigger a full
   // 23-table reload and a redraw of every screen on each resume).
   const userId = user?.id
   const userRef = useRef(user)
@@ -97,7 +98,8 @@ export default function App() {
     const u = userRef.current
     if (!u) return
     const s = useClinic.getState()
-    if (!s.hydrated || s.userId !== u.id) {
+    const firstLoadThisLaunch = getLastHydrateAt() === 0 && !s.hydrating
+    if (!s.hydrated || s.userId !== u.id || firstLoadThisLaunch) {
       hydrate(u.id, u.user_metadata?.full_name || u.email || 'Doctor', u.email)
     }
   }, [userId, hydrated, hydrate])

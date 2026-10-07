@@ -6,6 +6,7 @@ import { SplashScreen } from '@capacitor/splash-screen'
 import { ErrorBoundary } from './design-system/ErrorBoundary'
 import { initErrorMonitoring } from './core/errorMonitoring'
 import { initDiagnostics } from './core/diagnostics'
+import { initLiveUpdates } from './core/liveUpdate'
 import { AuthProvider } from './auth/AuthProvider'
 import { AuthGate } from './auth/AuthGate'
 import App from './App'
@@ -31,6 +32,10 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     </ErrorBoundary>
   </React.StrictMode>,
 )
+
+// Only does anything inside the phone apps, and only for a build that carries a
+// signing key. Marks this version as started OK, then looks for a newer one.
+initLiveUpdates()
 
 if (Capacitor.isNativePlatform()) {
   void (async () => {

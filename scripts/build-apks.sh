@@ -57,7 +57,14 @@ build_surface() {
   fi
 
   VITE_DEFAULT_SURFACE="$surface" npm run build
-  npx cap sync android
+  # The surface must be visible to `cap sync` too: it decides which signing key
+  # for live updates gets baked into this app.
+  VITE_DEFAULT_SURFACE="$surface" npx cap sync android
+
+  # An app built without its live-update key would accept unsigned updates.
+  # Refuse to build it.
+  grep -q '"publicKey"' "$ROOT/android/app/src/main/assets/capacitor.config.json" \
+    || { echo "ERROR: no live-update signing key in the $surface app — aborting. (ota/keys/$surface.pub.pem missing?)" >&2; exit 1; }
 
   (cd "$ROOT/android" && ./gradlew --quiet assembleDebug)
 

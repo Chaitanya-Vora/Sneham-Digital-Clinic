@@ -43,6 +43,8 @@ import { useShallow } from 'zustand/react/shallow'
 const HOURS = Array.from({ length: 12 }, (_, i) => i + 8) // 8 AM – 7 PM
 const HOUR_HEIGHT = 56 // px per hour row
 const HALF_HOUR_HEIGHT = HOUR_HEIGHT / 2
+const CARD_MIN_HEIGHT = 36
+const CARD_GAP = 4
 
 function fmtHour(h: number): string {
   if (h === 0) return '12 AM'
@@ -557,14 +559,51 @@ function DayGridView({ appts, timeBlocks, patients, practitioners, myId, activeA
 
   const nowHour = new Date().getHours() + new Date().getMinutes() / 60
 
+  // Appointments are placed by time, but two booked at the same hour (or a
+  // 30-minute one right after another) used to land on exactly the same spot,
+  // so one hid the other — a waiting patient could be invisible on Today. Each
+  // hour row now stacks its cards in order and grows to fit them; everything
+  // that depends on vertical position (the now-line, multi-hour blocks) is
+  // measured from the real row heights below.
+  // Normally 8 AM – 7 PM, widened if anything is booked outside that so it can
+  // never be hidden.
+  const apptHours = appts.map((a) => Math.floor(parseTime(a.time)))
+  const firstHour = Math.min(HOURS[0], ...apptHours)
+  const lastHour = Math.max(HOURS[HOURS.length - 1], ...apptHours)
+  const hours = Array.from({ length: lastHour - firstHour + 1 }, (_, i) => firstHour + i)
+  const rows = hours.map((h) => {
+    const inHour = appts
+      .filter((a) => Math.floor(parseTime(a.time)) === h)
+      .sort((x, y) => parseTime(x.time) - parseTime(y.time))
+    let cursor = 0
+    const placed = inHour.map((a) => {
+      const natural = (parseTime(a.time) - h) * HOUR_HEIGHT
+      const height = Math.max((a.durationMin / 60) * HOUR_HEIGHT, CARD_MIN_HEIGHT)
+      const top = Math.max(natural, cursor)
+      cursor = top + height + CARD_GAP
+      return { a, top, height }
+    })
+    return { h, placed, rowHeight: Math.max(HOUR_HEIGHT, cursor) }
+  })
+  const rowTops: number[] = []
+  rows.reduce((acc, r) => { rowTops.push(acc); return acc + r.rowHeight }, 0)
+  const gridHeight = rowTops[rowTops.length - 1] + rows[rows.length - 1].rowHeight
+  // Vertical position of a clock time (decimal hours) in the grid.
+  const yFor = (t: number) => {
+    if (t <= hours[0]) return 0
+    if (t >= hours[hours.length - 1] + 1) return gridHeight
+    const i = Math.floor(t) - hours[0]
+    return rowTops[i] + (t - Math.floor(t)) * HOUR_HEIGHT
+  }
+
   return (
     <Card className="overflow-hidden p-0">
       <div className="relative">
         {/* now line */}
-        {nowHour >= 8 && nowHour <= 20 && (
+        {nowHour >= hours[0] && nowHour <= hours[hours.length - 1] + 1 && (
           <div
             className="pointer-events-none absolute left-0 right-0 z-20 flex items-center"
-            style={{ top: `${(nowHour - 8) * HOUR_HEIGHT}px` }}
+            style={{ top: `${yFor(nowHour)}px` }}
           >
             <span className="h-2.5 w-2.5 rounded-full bg-danger" />
             <span className="h-[1.5px] flex-1 bg-danger/60" />
@@ -572,17 +611,13 @@ function DayGridView({ appts, timeBlocks, patients, practitioners, myId, activeA
         )}
 
         {/* hour rows */}
-        {HOURS.map((h) => {
-          const hourAppts = appts.filter((a) => {
-            const t = parseTime(a.time)
-            return Math.floor(t) === h
-          })
+        {rows.map(({ h, placed, rowHeight }) => {
           const hourBlocks = timeBlocks.filter((b) => {
             return b.startHour <= h && (b.startHour + b.durationMin / 60) > h
           })
 
           return (
-            <div key={h} className="flex border-b border-border last:border-b-0" style={{ minHeight: `${HOUR_HEIGHT}px` }}>
+            <div key={h} className="flex border-b border-border last:border-b-0" style={{ minHeight: `${rowHeight}px` }}>
               {/* time label */}
               <div className="flex w-[54px] shrink-0 items-start justify-end border-r border-border px-2 pt-1.5 text-[11px] font-medium text-faint">
                 {fmtHour(h)}
@@ -607,7 +642,7 @@ function DayGridView({ appts, timeBlocks, patients, practitioners, myId, activeA
                   // subsequent rows the same way an hour-long block always
                   // has (this row has no overflow clipping).
                   const startOffset = Math.max(0, (b.startHour - h)) * HOUR_HEIGHT
-                  const blockHeight = (b.durationMin / 60) * HOUR_HEIGHT
+                  const blockHeight = yFor(b.startHour + b.durationMin / 60) - yFor(b.startHour)
                   const isStart = Math.floor(b.startHour) === h
                   const style = blockColorStyle(b.color)
 
@@ -628,12 +663,9 @@ function DayGridView({ appts, timeBlocks, patients, practitioners, myId, activeA
                 })}
 
                 {/* appointments */}
-                {hourAppts.map((a) => {
+                {placed.map(({ a, top, height }) => {
                   const p = pFind(a.patientId)
                   if (!p) return null
-                  const t = parseTime(a.time)
-                  const minuteOffset = (t - h) * HOUR_HEIGHT
-                  const blockH = (a.durationMin / 60) * HOUR_HEIGHT
                   const isActive = activeAppt?.id === a.id
                   const isSelected = selectedAppt === a.id
                   const isMine = a.practitionerId === myId
@@ -650,7 +682,7 @@ function DayGridView({ appts, timeBlocks, patients, practitioners, myId, activeA
                         isSeen ? 'border-border/60 bg-raised/50 opacity-60' :
                         'border-border bg-surface shadow-card hover:border-green-border'
                       }`}
-                      style={{ top: `${minuteOffset}px`, height: `${Math.max(blockH, 36)}px` }}
+                      style={{ top: `${top}px`, height: `${height}px` }}
                       onClick={(e) => { e.stopPropagation(); onOpenCase(p.id) }}
                     >
                       <div className="flex h-full items-center gap-2 px-2.5">

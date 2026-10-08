@@ -48,6 +48,7 @@ import { AppInfoRow } from '../components/AppInfo'
 import { useToast } from '../design-system/toast'
 import { ChatThread } from '../components/ChatThread'
 import { getDocumentUrl } from '../core/db'
+import { AuthField } from '../auth/AuthKit'
 import { currentRemedyForPatient, patientSafeDose, patientSafeRx, remedyForPatientOr, remedyTextForPatient } from '../core/rxPrivacy'
 import { useShallow } from 'zustand/react/shallow'
 
@@ -1826,7 +1827,9 @@ function TabBar({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
 }
 
 // ── PATIENT SELF-REGISTRATION ──
-function PatientSelfRegister() {
+const inputCls = 'w-full rounded-[14px] border bg-screen px-4 py-3.5 text-[15px] text-ink outline-none transition placeholder:text-faint focus:border-accent focus:bg-surface focus:ring-2 focus:ring-accent/20'
+
+export function PatientSelfRegister() {
   const { user } = useAuth()
   const addPatient = useClinic((s) => s.addPatient)
   const linkPatientIdentity = useClinic((s) => s.linkPatientIdentity)
@@ -1906,116 +1909,90 @@ function PatientSelfRegister() {
     toast({ title: 'Welcome to Sneham', message: 'Your profile has been created.' })
   }
 
+  const stepNo = step === 2 ? 2 : 1
+  const area = `${inputCls} min-h-[110px] resize-y leading-relaxed`
   return (
-    <div className="flex h-full flex-col bg-screen">
-      <div className="px-[18px] pb-4 pt-[var(--app-top)]">
-        <div className="mt-4 flex h-14 w-14 items-center justify-center rounded-[18px] bg-tint">
-          <User size={26} className="text-brand" />
+    <div className="relative flex h-full flex-col bg-screen">
+      <div className="relative shrink-0 overflow-hidden rounded-b-[30px] bg-brand px-[18px] pb-14 pt-[var(--app-top)] text-screen">
+        <div aria-hidden="true" className="pointer-events-none absolute -right-14 -top-14 h-48 w-48 rounded-full border border-dashed border-white/15" />
+        <div aria-hidden="true" className="pointer-events-none absolute -right-4 -top-4 h-28 w-28 rounded-full border border-dashed border-white/10" />
+        <div className="relative mt-3 flex items-center justify-between">
+          <div className="text-[12px] font-semibold uppercase tracking-label text-white/65">{step === 'confirm' ? 'We found you' : `Step ${stepNo} of 2`}</div>
+          <div className="flex gap-1.5" aria-hidden="true">
+            {[1, 2].map((i) => <span key={i} className={`h-1.5 w-8 rounded-full ${i <= stepNo ? 'bg-white' : 'bg-white/25'}`} />)}
+          </div>
         </div>
-        <h1 className="mt-4 font-display text-[22px] font-bold text-ink">Welcome to Sneham</h1>
-        <p className="mt-1 text-[13.5px] leading-relaxed text-muted">Tell us a little about yourself so your doctor can see your profile.</p>
+        <h1 className="relative mt-4 font-display text-[26px] font-bold leading-tight">
+          {step === 2 ? 'What brings you here?' : step === 'confirm' ? 'Is this you?' : 'Welcome to Sneham'}
+        </h1>
+        <p className="relative mt-1.5 max-w-[32ch] text-[14px] leading-relaxed text-white/75">
+          {step === 2 ? 'A few words help your doctor prepare for you.' : step === 'confirm' ? 'Your clinic already has a record that matches this phone number.' : 'Tell us a little about yourself so your doctor can see your profile.'}
+        </p>
       </div>
 
-      <div className="flex-1 space-y-5 overflow-y-auto px-[18px] pb-[120px]">
+      <div className="relative z-10 -mt-8 flex-1 overflow-y-auto px-[18px] pb-[130px]">
+        <div className="rounded-[26px] border border-border bg-surface p-5 shadow-card-lg">
           {step === 1 && (
             <div className="space-y-4 animate-fade">
-              <div>
-                <Label>Full name</Label>
-                <input
-                  ref={nameRef}
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Priya Sharma"
-                  className={fieldCls(bad('name'))}
-                  autoFocus
-                />
-                {bad('name') && err('Enter your name')}
-              </div>
+              <AuthField id="sr-name" label="Full name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Priya Sharma" autoComplete="name" autoFocus error={bad('name') ? 'Enter your name.' : null} />
               <div className="grid grid-cols-[1fr_1.9fr] gap-3">
+                <AuthField id="sr-age" label="Age" value={age} onChange={(e) => setAge(e.target.value.replace(/\D/g, ''))} placeholder="28" inputMode="numeric" error={bad('age') ? 'Enter your age.' : null} />
                 <div>
-                  <Label>Age</Label>
-                  <input
-                    value={age}
-                    onChange={(e) => setAge(e.target.value.replace(/\D/g, ''))}
-                    placeholder="28"
-                    inputMode="numeric"
-                    className={fieldCls(bad('age'))}
-                  />
-                  {bad('age') && err('Enter your age')}
-                </div>
-                <div>
-                  <Label>Sex</Label>
-                  <div className="mt-1.5 flex gap-2">
+                  <div className="mb-1.5 text-[12px] font-semibold uppercase tracking-label text-muted">Sex</div>
+                  <div role="radiogroup" aria-label="Sex" className="flex gap-1.5">
                     {(['Female', 'Male', 'Other'] as const).map((opt) => (
                       <button
                         key={opt}
                         type="button"
+                        role="radio"
+                        aria-checked={sex === opt}
                         onClick={() => setSex(opt)}
-                        className={`flex-1 rounded-[12px] border py-2.5 text-[14px] font-semibold transition ${
-                          sex === opt ? 'border-brand bg-brand text-white' : bad('sex') ? 'border-danger bg-surface text-body' : 'border-border bg-surface text-body'
-                        }`}
+                        className={`min-h-[52px] flex-1 rounded-[14px] border px-1 text-[13.5px] font-semibold transition ${sex === opt ? 'border-brand bg-brand text-white' : bad('sex') ? 'border-danger bg-screen text-body' : 'border-border bg-screen text-body'}`}
                       >
                         {opt}
                       </button>
                     ))}
                   </div>
-                  {bad('sex') && err('Choose one')}
+                  {bad('sex') && <p className="mt-1.5 text-[12.5px] font-medium text-danger">Choose one.</p>}
                 </div>
               </div>
-              <div>
-                <Label>Phone number</Label>
-                <input
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+91 98765 43210"
-                  type="tel"
-                  className={fieldCls(bad('phone'))}
-                />
-                {bad('phone') ? err('Enter a valid phone number') : <p className="mt-1 text-[11.5px] text-faint">If your clinic already has a record for you, this helps us find it.</p>}
-              </div>
-              <div>
-                <Label>City <span className="font-normal normal-case tracking-normal text-faint">· optional</span></Label>
-                <input
-                  value={location}
-                  onChange={(e) => setLocation(e.target.value)}
-                  placeholder="Your town or city"
-                  className={fieldCls(false)}
-                />
-              </div>
+              <AuthField id="sr-phone" label="Phone number" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+91 98765 43210" type="tel" autoComplete="tel" error={bad('phone') ? 'Enter a valid phone number.' : null} hint="If your clinic already has a record for you, this helps us find it." />
+              <AuthField id="sr-city" label="City" optional value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Your town or city" autoComplete="address-level2" />
             </div>
           )}
           {step === 'confirm' && matchedPatient && (
-            <div className="space-y-4 animate-fade">
-              <Card className="flex items-center gap-3 px-4 py-4">
+            <div className="animate-fade">
+              <div className="flex items-center gap-3 rounded-[18px] bg-tint-pale px-4 py-4">
                 <Avatar initials={matchedPatient.initials} size={48} />
-                <div>
-                  <div className="font-display text-[16px] font-bold text-ink">{matchedPatient.name}</div>
+                <div className="min-w-0">
+                  <div className="truncate font-display text-[16px] font-bold text-ink">{matchedPatient.name}</div>
                   <div className="text-[13px] text-muted">{[matchedPatient.age, matchedPatient.location].filter(Boolean).join(' · ')}</div>
                 </div>
-              </Card>
-              <p className="text-[14px] leading-relaxed text-body">We found an existing record with this phone number at Sneham Digital Clinic. Is this you?</p>
+              </div>
+              <p className="mt-4 text-[14px] leading-relaxed text-body">If this is you, we will link it to your account so your visits and prescriptions show up here.</p>
             </div>
           )}
           {step === 2 && (
-            <div className="space-y-4 animate-fade">
-              <div>
-                <Label>What brings you here?</Label>
-                <p className="mt-0.5 text-[12px] text-faint">Describe your main health concern</p>
-                <textarea
-                  value={complaint}
-                  onChange={(e) => setComplaint(e.target.value)}
-                  rows={4}
-                  placeholder="e.g. Difficulty sleeping, frequent headaches..."
-                  className={`mt-2 w-full resize-y rounded-[12px] border bg-surface px-3.5 py-2.5 text-[14px] leading-relaxed text-body outline-none focus:border-green-border ${tried && !canSubmit ? 'border-danger' : 'border-border'}`}
-                  autoFocus
-                />
-                {tried && !canSubmit && err('Tell your doctor a little about it')}
-              </div>
+            <div className="animate-fade">
+              <label htmlFor="sr-complaint" className="mb-1.5 block text-[12px] font-semibold uppercase tracking-label text-muted">Your main health concern</label>
+              <textarea
+                id="sr-complaint"
+                value={complaint}
+                onChange={(e) => setComplaint(e.target.value)}
+                rows={4}
+                placeholder="e.g. Difficulty sleeping, frequent headaches..."
+                autoFocus
+                data-selectable="true"
+                aria-invalid={tried && !canSubmit}
+                className={`${area} ${tried && !canSubmit ? 'border-danger' : 'border-border'}`}
+              />
+              {tried && !canSubmit && <p role="alert" className="mt-1.5 text-[12.5px] font-medium text-danger">Tell your doctor a little about it.</p>}
             </div>
           )}
+        </div>
       </div>
 
-      <div className="flex gap-2 border-t border-border bg-surface/95 px-[18px] pb-[var(--app-bottom)] pt-3 backdrop-blur">
+      <div className="absolute inset-x-0 bottom-0 flex gap-2 border-t border-border bg-surface/95 px-[18px] pb-[var(--app-bottom)] pt-3 backdrop-blur">
         {step === 2 && (
           <Button variant="ghost" className="flex-1" onClick={() => setStep(1)}>
             <CaretLeft size={16} /> Back

@@ -7,6 +7,7 @@ import { Avatar, Badge, Button, Card, Chip, Label, PatientNotFound } from '../de
 import { useToast } from '../design-system/toast'
 import { addDaysISO, todayISO, formatDayLabel, followUpPresetDate, firstAvailableMorningSlot, type FollowUpPreset } from '../core/day'
 import { FollowUpPresetMenu } from './FollowUpPresetMenu'
+import type { FollowUpChoice } from '../practitioner/FollowUpSheet'
 import { AttachmentComposer, AttachmentList } from '../components/FollowUpAttachments'
 import { uploadOutcomeAttachments, type AttachmentDraft } from '../core/db'
 import { readDraft, clearDraft, useDraftWriter } from '../core/drafts'
@@ -85,11 +86,11 @@ export function FollowUp({ patientId, onBack }: { patientId: string; onBack: () 
     setFollowUpOpen(true)
   }
 
-  function handleScheduleFollowUp(preset: FollowUpPreset) {
+  function handleScheduleFollowUp(preset: FollowUpPreset, choice: FollowUpChoice) {
     const date = followUpPresetDate(preset)
     const time = firstAvailableMorningSlot(appts, date)
-    scheduleFollowUp({ patientId, practitionerId: doctorId, time, date, type: 'In person', reason: 'Follow-up' })
-    toast({ title: `Follow-up scheduled · ${formatDayLabel(date)} · ${time}` })
+    scheduleFollowUp({ patientId, practitionerId: doctorId, time, date, type: 'In person', reason: 'Follow-up', hiddenFromPatient: choice.hiddenFromPatient })
+    toast({ title: `${choice.hiddenFromPatient ? 'Private follow-up' : 'Follow-up scheduled'} · ${formatDayLabel(date)} · ${time}`, ...(choice.hiddenFromPatient ? { message: 'Only you can see it.' } : {}) })
     onBack()
   }
 

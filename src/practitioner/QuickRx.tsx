@@ -17,6 +17,8 @@ import { Pressable } from '../design-system/Pressable'
 import { haptic } from '../design-system/haptics'
 import { useToast } from '../design-system/toast'
 import { NameOnSlip } from '../components/NameOnSlip'
+import { RefillReminder } from '../components/RefillReminder'
+import { lastRestockDays, rememberRestockDays } from '../core/restockChoice'
 import { SlipPreview } from '../components/SlipPreview'
 
 const POTENCIES: Potency[] = ['6C', '12C', '30C', '200C', '1M', '10M', '50M', 'CM', 'LM', 'Q']
@@ -88,6 +90,8 @@ export function QuickRxEditor({ patientId, onClose }: { patientId: string; onClo
   const [rep, setRep] = useState<Repetition>('Once daily · night')
   const [prep, setPrep] = useState('')
   const [restockReminder, setRestockReminder] = useState(false)
+  const [restockDays, setRestockDays] = useState(() => lastRestockDays())
+  const restockSupported = useClinic((s) => s.restockDaysSupported)
   // Hiding the name is the starting point for every prescription — showing it is a deliberate choice each time.
   const [hide, setHide] = useState(true)
   const [label, setLabel] = useState(() => lastSlipLabel())
@@ -182,7 +186,7 @@ export function QuickRxEditor({ patientId, onClose }: { patientId: string; onClo
         patientId: patient.id, practitionerId: ME, remedy: remedy.trim(), potency, doseGlobules: dose, repetition: rep,
         durationDays: oneOff ? null : duration, preparation: prep, bodyText: bodyText.trim() || undefined,
         remindersEnabled: !oneOff, reminderTimes: rep === 'Twice daily' ? ['8:00 AM', '8:00 PM'] : ['8:00 PM'],
-        sharedVia: ['Patient app'], origin: 'practitioner', restockReminderEnabled: restockReminder,
+        sharedVia: ['Patient app'], origin: 'practitioner', restockReminderEnabled: restockReminder, restockReminderDays: restockReminder ? restockDays : undefined,
         hideRemedy: hideEffective, slipLabel: hideEffective ? cleanSlipLabel(label) : undefined,
       })
     } catch (e) {
@@ -193,6 +197,7 @@ export function QuickRxEditor({ patientId, onClose }: { patientId: string; onClo
       throw e
     }
     if (hideEffective) rememberSlipLabel(label)
+    if (restockReminder) rememberRestockDays(restockDays)
     setPublishedRxId(rx.id)
     // Publishing books the review too, same as the web console — a course that ends without anyone
     // checking back is exactly what this closes.
@@ -303,12 +308,8 @@ export function QuickRxEditor({ patientId, onClose }: { patientId: string; onClo
             <textarea value={prep} onChange={(e) => setPrep(e.target.value)} rows={3} placeholder="e.g. Dissolve under the tongue at night, 15 minutes away from food or drink." aria-label="Note for the patient" data-selectable="true" className="mt-2.5 w-full rounded-[14px] border border-border bg-screen px-3.5 py-2.5 text-[13px] leading-relaxed text-body outline-none placeholder:text-faint focus:border-green-border" />
           </Card>
 
-          <Card className="flex items-center justify-between gap-3 px-4 py-3.5">
-            <div className="min-w-0">
-              <div className="font-display text-[15px] font-semibold text-ink">Remind me about a refill</div>
-              <div className="text-[12px] text-muted">Shows on Today from day 21, until you prescribe this again.</div>
-            </div>
-            <Toggle on={restockReminder} onChange={(v) => { haptic('tick'); setRestockReminder(v) }} label="Remind me about a refill" />
+          <Card className="px-4 py-3.5">
+            <RefillReminder on={restockReminder} onToggle={(v) => { haptic('tick'); setRestockReminder(v) }} days={restockDays} onDays={setRestockDays} supported={restockSupported} />
           </Card>
         </div>
 

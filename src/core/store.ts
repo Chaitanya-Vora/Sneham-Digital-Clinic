@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { todayISO, formatDayLabel } from './day'
+import { todayISO, formatDayLabel, clampRestockDays, RESTOCK_REMINDER_DAYS } from './day'
 import { persist } from 'zustand/middleware'
 import { noteConsultStart, clearConsultStart } from './consultClock'
 import { replaceEqualDeep } from './structuralShare'
@@ -56,8 +56,10 @@ import {
   updateAppointmentDb,
   insertPrescription,
   updatePrescriptionDb,
-  probeRxPrivacy,
+  probeSchema,
   rxPrivacyColumns,
+  restockDaysColumns,
+  visitPrivacyColumns,
   deleteDoseRemindersForPrescription,
   insertInvestigationOrder,
   insertSecondOpinion,
@@ -143,6 +145,8 @@ export interface PublishRxInput {
   sharedVia: string[]
   origin: Surface
   restockReminderEnabled?: boolean
+  // The day that nudge appears (default 21, core/day.ts); only used when it is on.
+  restockReminderDays?: number
   // "Don't reveal the remedy" — see core/rxPrivacy.ts. The real remedy above is always
   // recorded; these decide what the patient is given.
   hideRemedy?: boolean
@@ -151,6 +155,30 @@ export interface PublishRxInput {
 
 /** Thrown when she asks to hide the remedy but the database has not been given the v49 columns. */
 export const RX_PRIVACY_UNAVAILABLE = 'rx-privacy-unavailable'
+/** Thrown when she asks for a private visit but the database has not been given the v50 column. */
+export const PRIVATE_VISITS_UNAVAILABLE = 'private-visits-unavailable'
+
+// What the patient is told when a visit is booked for them.
+function visitScheduledNotification(appt: Appointment, practitioners: Practitioner[]): AppNotification {
+  return {
+    id: newId(),
+    surface: 'patient' as Surface,
+    kind: 'booking' as const,
+    title: 'Follow-up scheduled',
+    message: `Your next visit is ${formatDayLabel(appt.date)} at ${appt.time} with ${practitioners.find((p) => p.id === appt.practitionerId)?.name ?? 'your practitioner'}.`,
+    time: 'Just now',
+    read: false,
+    severity: 'info' as const,
+  }
+}
+
+// The day her refill nudge appears. Unset means the usual 21; a custom day is only kept when the
+// database can store it (otherwise the nudge simply uses 21 rather than a number that would be lost).
+function restockDaysFor(input: { restockReminderEnabled?: boolean; restockReminderDays?: number }, supported: boolean | null): number | undefined {
+  if (!input.restockReminderEnabled || input.restockReminderDays == null) return undefined
+  const d = clampRestockDays(input.restockReminderDays)
+  return d === RESTOCK_REMINDER_DAYS || supported === false ? undefined : d
+}
 
 export interface CreateInvestigationOrderInput {
   patientId: string
@@ -218,6 +246,9 @@ interface ClinicState {
   dbError: boolean
   // Whether the database has the "hide remedy" columns (migration v49): null = not known yet.
   rxPrivacySupported: boolean | null
+  // Same, for a custom refill-reminder day and for private visits (migration v50).
+  restockDaysSupported: boolean | null
+  privateVisitsSupported: boolean | null
   hydrated: boolean
   hydrating: boolean
   userId: string | null
@@ -250,7 +281,7 @@ interface ClinicState {
   markPrescriptionShared: (prescriptionId: string, channel: string) => void
   pushNotification: (n: Omit<AppNotification, 'id' | 'read'>) => void
   markNotificationRead: (id: string) => void
-  dismissNotification: (id: string) => void
+  dismissNotification: (id: string | null) => void
   markAllRead: (surface: Surface) => void
   acceptHandoff: (id: string) => void
   declineHandoff: (id: string) => void
@@ -271,12 +302,12 @@ interface ClinicState {
   markNoShow: (appointmentId: string) => void
   // Returns the ids it created, so a caller can offer Undo (cancel the booking and
   // take back the patient's notification).
-  scheduleFollowUp: (input: { patientId: string; practitionerId: string; time: string; date: string; type: 'In person' | 'Video'; reason: string }) => { appointmentId: string; notificationId: string }
+  scheduleFollowUp: (input: { patientId: string; practitionerId: string; time: string; date: string; type: 'In person' | 'Video'; reason: string; hiddenFromPatient?: boolean }) => { appointmentId: string; notificationId: string | null }
   updateAppointmentStatus: (id: string, status: Appointment['status']) => void
   // The doctor cancelling a visit: the appointment is cancelled AND the patient is told in their app.
   // Returns what is needed to take it back (the status it had, and the notice to withdraw), or null.
-  cancelAppointment: (id: string) => { previousStatus: Appointment['status']; notificationId: string } | null
-  updateAppointment: (id: string, patch: Partial<Pick<Appointment, 'time' | 'date' | 'type' | 'reason' | 'practitionerId'>>) => void
+  cancelAppointment: (id: string) => { previousStatus: Appointment['status']; notificationId: string | null } | null
+  updateAppointment: (id: string, patch: Partial<Pick<Appointment, 'time' | 'date' | 'type' | 'reason' | 'practitionerId' | 'hiddenFromPatient'>>) => void
   rescheduleAppointment: (id: string, time: string, date?: string) => void
   addTimeBlock: (input: Omit<TimeBlock, 'id'>) => void
   removeTimeBlock: (id: string) => void
@@ -380,6 +411,8 @@ const emptyState = () => ({
   offline: typeof navigator !== 'undefined' && 'onLine' in navigator ? !navigator.onLine : false,
   dbError: false,
   rxPrivacySupported: null as boolean | null,
+  restockDaysSupported: null as boolean | null,
+  privateVisitsSupported: null as boolean | null,
   hydrated: false,
   hydrating: false,
   userId: null as string | null,
@@ -403,7 +436,7 @@ export const useClinic = create<ClinicState>()(
         try {
           resetHydrateErrors()
           const isPatientSurface = (import.meta.env.VITE_DEFAULT_SURFACE as string | undefined) === 'patient'
-          const [data, privacy] = await Promise.all([hydrateAll(userId, userName, isPatientSurface, userEmail), probeRxPrivacy()])
+          const [data, schema] = await Promise.all([hydrateAll(userId, userName, isPatientSurface, userEmail), probeSchema()])
           const fetchErrors = getHydrateErrors()
 
           if (fetchErrors > 0) {
@@ -462,7 +495,9 @@ export const useClinic = create<ClinicState>()(
             role: data.practitioners.find((p) => p.id === data.currentPractitionerId)?.role ?? 'Owner',
             offline: false,
             dbError: false,
-            ...(privacy !== null ? { rxPrivacySupported: privacy } : {}),
+            ...(schema.rxPrivacy !== null ? { rxPrivacySupported: schema.rxPrivacy } : {}),
+            ...(schema.restockDays !== null ? { restockDaysSupported: schema.restockDays } : {}),
+            ...(schema.privateVisits !== null ? { privateVisitsSupported: schema.privateVisits } : {}),
             lastDoseResetDate: today,
           })
           lastHydrateAt = Date.now()
@@ -591,6 +626,7 @@ export const useClinic = create<ClinicState>()(
           remindersEnabled: input.remindersEnabled,
           reminderTimes: input.reminderTimes,
           restockReminderEnabled: input.restockReminderEnabled ?? false,
+          restockReminderDays: restockDaysFor(input, get().restockDaysSupported),
           hideRemedy: !!input.hideRemedy,
           slipLabel: input.hideRemedy ? cleanSlipLabel(input.slipLabel) : undefined,
         }
@@ -668,6 +704,7 @@ export const useClinic = create<ClinicState>()(
           remindersEnabled: input.remindersEnabled,
           reminderTimes: input.reminderTimes,
           restockReminderEnabled: input.restockReminderEnabled ?? false,
+          restockReminderDays: restockDaysFor(input, get().restockDaysSupported),
           hideRemedy: !!input.hideRemedy,
           slipLabel: input.hideRemedy ? cleanSlipLabel(input.slipLabel) : undefined,
         }
@@ -690,13 +727,14 @@ export const useClinic = create<ClinicState>()(
         if (input.hideRemedy && get().rxPrivacySupported === false) throw new Error(RX_PRIVACY_UNAVAILABLE)
         const updatedAt = new Date().toISOString()
         const slipLabel = input.hideRemedy ? cleanSlipLabel(input.slipLabel) : undefined
+        const restockDays = restockDaysFor(input, get().restockDaysSupported)
         set((s) => ({
           prescriptions: s.prescriptions.map((r) => (r.id === id ? {
             ...r,
             remedy: input.remedy, potency: input.potency, doseGlobules: input.doseGlobules,
             repetition: input.repetition, durationDays: input.durationDays, preparation: input.preparation,
             bodyText: input.bodyText, sharedVia: input.sharedVia, remindersEnabled: input.remindersEnabled,
-            reminderTimes: input.reminderTimes, restockReminderEnabled: input.restockReminderEnabled ?? false, updatedAt,
+            reminderTimes: input.reminderTimes, restockReminderEnabled: input.restockReminderEnabled ?? false, restockReminderDays: restockDays, updatedAt,
             hideRemedy: !!input.hideRemedy, slipLabel,
           } : r)),
         }))
@@ -706,6 +744,7 @@ export const useClinic = create<ClinicState>()(
           body_text: input.bodyText ?? null, shared_via: input.sharedVia,
           reminders_enabled: input.remindersEnabled, reminder_times: input.reminderTimes,
           restock_reminder_enabled: input.restockReminderEnabled ?? false,
+          ...restockDaysColumns({ restockReminderEnabled: input.restockReminderEnabled, restockReminderDays: restockDays }, rx.restockReminderDays != null),
           ...rxPrivacyColumns({ hideRemedy: input.hideRemedy, slipLabel }, rx.hideRemedy),
           updated_at: updatedAt,
         }
@@ -725,13 +764,14 @@ export const useClinic = create<ClinicState>()(
         const remedyLabel = `${input.remedy} ${input.potency}`
         const doctor = get().practitioners.find((p) => p.id === input.practitionerId)
         const slipLabel = input.hideRemedy ? cleanSlipLabel(input.slipLabel) : undefined
+        const restockDays = restockDaysFor(input, get().restockDaysSupported)
 
         const updated: Prescription = {
           ...rx,
           remedy: input.remedy, potency: input.potency, doseGlobules: input.doseGlobules,
           repetition: input.repetition, durationDays: input.durationDays, preparation: input.preparation,
           bodyText: input.bodyText, sharedVia: input.sharedVia, remindersEnabled: input.remindersEnabled,
-          reminderTimes: input.reminderTimes, restockReminderEnabled: input.restockReminderEnabled ?? false,
+          reminderTimes: input.reminderTimes, restockReminderEnabled: input.restockReminderEnabled ?? false, restockReminderDays: restockDays,
           hideRemedy: !!input.hideRemedy, slipLabel,
           status: 'published', publishedAt, updatedAt: publishedAt,
         }
@@ -763,6 +803,7 @@ export const useClinic = create<ClinicState>()(
           body_text: input.bodyText ?? null, shared_via: input.sharedVia,
           reminders_enabled: input.remindersEnabled, reminder_times: input.reminderTimes,
           restock_reminder_enabled: input.restockReminderEnabled ?? false,
+          ...restockDaysColumns({ restockReminderEnabled: input.restockReminderEnabled, restockReminderDays: restockDays }, rx.restockReminderDays != null),
           ...rxPrivacyColumns({ hideRemedy: input.hideRemedy, slipLabel }, rx.hideRemedy),
           status: 'published', published_at: publishedAt, updated_at: publishedAt,
         }
@@ -998,6 +1039,7 @@ export const useClinic = create<ClinicState>()(
       },
 
       dismissNotification: (id) => {
+        if (!id) return // a private visit never told the patient, so there is nothing to take back
         set((s) => ({ notifications: s.notifications.filter((n) => n.id !== id) }))
         void deleteNotificationDb(id)
       },
@@ -1351,6 +1393,9 @@ export const useClinic = create<ClinicState>()(
       },
 
       scheduleFollowUp: (input) => {
+        // A private visit is only ever saved as private: with the v50 column missing it is refused,
+        // never saved looking like an ordinary booking the patient would be told about.
+        if (input.hiddenFromPatient && get().privateVisitsSupported === false) throw new Error(PRIVATE_VISITS_UNAVAILABLE)
         const appt: Appointment = {
           id: newId(),
           patientId: input.patientId,
@@ -1361,24 +1406,16 @@ export const useClinic = create<ClinicState>()(
           type: input.type,
           status: 'Upcoming',
           reason: input.reason,
+          ...(input.hiddenFromPatient ? { hiddenFromPatient: true } : {}),
         }
-        const notif: AppNotification = {
-          id: newId(),
-          surface: 'patient' as Surface,
-          kind: 'booking' as const,
-          title: 'Follow-up scheduled',
-          message: `Your next visit is ${formatDayLabel(input.date)} at ${input.time} with ${get().practitioners.find((p) => p.id === input.practitionerId)?.name ?? 'your practitioner'}.`,
-          time: 'Just now',
-          read: false,
-          severity: 'info' as const,
-        }
+        const notif: AppNotification | null = input.hiddenFromPatient ? null : visitScheduledNotification(appt, get().practitioners)
         set((s) => ({
           appointments: [appt, ...s.appointments],
-          notifications: [notif, ...s.notifications],
+          ...(notif ? { notifications: [notif, ...s.notifications] } : {}),
         }))
         writeThrough(insertAppointment(appt), 'Appointment may not have saved.')
-        writeThrough(insertNotification(notif, resolveNotificationOwner(get().patients, get().practitioners, { patientId: input.patientId })), 'The patient may not have been notified of this follow-up.')
-        return { appointmentId: appt.id, notificationId: notif.id }
+        if (notif) writeThrough(insertNotification(notif, resolveNotificationOwner(get().patients, get().practitioners, { patientId: input.patientId })), 'The patient may not have been notified of this follow-up.')
+        return { appointmentId: appt.id, notificationId: notif?.id ?? null }
       },
 
       updateAppointmentStatus: (id, status) => {
@@ -1393,7 +1430,8 @@ export const useClinic = create<ClinicState>()(
         const appt = get().appointments.find((a) => a.id === id)
         if (!appt || appt.status === 'Cancelled') return null
         const doctor = get().practitioners.find((p) => p.id === appt.practitionerId)
-        const notif: AppNotification = {
+        // A visit the patient was never told about is cancelled without telling them anything.
+        const notif: AppNotification | null = appt.hiddenFromPatient ? null : {
           id: newId(),
           surface: 'patient' as Surface,
           kind: 'booking' as const,
@@ -1406,23 +1444,32 @@ export const useClinic = create<ClinicState>()(
         clearConsultStart(id)
         set((s) => ({
           appointments: s.appointments.map((a) => (a.id === id ? { ...a, status: 'Cancelled' as const } : a)),
-          notifications: [notif, ...s.notifications],
+          ...(notif ? { notifications: [notif, ...s.notifications] } : {}),
         }))
         writeThrough(updateAppointmentDb(id, { status: 'Cancelled' }), 'The cancellation may not have saved.')
-        writeThrough(insertNotification(notif, resolveNotificationOwner(get().patients, get().practitioners, { patientId: appt.patientId })), 'The patient may not have been told about this cancellation.')
-        return { previousStatus: appt.status, notificationId: notif.id }
+        if (notif) writeThrough(insertNotification(notif, resolveNotificationOwner(get().patients, get().practitioners, { patientId: appt.patientId })), 'The patient may not have been told about this cancellation.')
+        return { previousStatus: appt.status, notificationId: notif?.id ?? null }
       },
 
       updateAppointment: (id, patch) => {
+        const before = get().appointments.find((a) => a.id === id)
+        const { date, practitionerId, hiddenFromPatient, ...rest } = patch
+        const visibilityChanged = hiddenFromPatient !== undefined && !!before && !!before.hiddenFromPatient !== hiddenFromPatient
+        if (visibilityChanged && hiddenFromPatient && get().privateVisitsSupported === false) throw new Error(PRIVATE_VISITS_UNAVAILABLE)
+        // Sharing a visit that was private is the moment the patient is told about it, like any new booking.
+        const shared = visibilityChanged && !hiddenFromPatient && before ? { ...before, ...patch, hiddenFromPatient: undefined } : null
+        const notif = shared ? visitScheduledNotification(shared, get().practitioners) : null
         set((s) => ({
-          appointments: s.appointments.map((a) => (a.id === id ? { ...a, ...patch } : a)),
+          appointments: s.appointments.map((a) => (a.id === id ? { ...a, ...rest, ...(date ? { date } : {}), ...(practitionerId ? { practitionerId } : {}), ...(hiddenFromPatient === undefined ? {} : { hiddenFromPatient: hiddenFromPatient || undefined }) } : a)),
+          ...(notif ? { notifications: [notif, ...s.notifications] } : {}),
         }))
-        const { date, practitionerId, ...rest } = patch
         writeThrough(updateAppointmentDb(id, {
           ...rest,
           ...(date ? { day_label: date } : {}),
           ...(practitionerId ? { practitioner_id: practitionerId } : {}),
+          ...(visibilityChanged ? visitPrivacyColumns({ hiddenFromPatient }, !!before?.hiddenFromPatient) : {}),
         }), 'Appointment changes may not have saved.')
+        if (notif && before) writeThrough(insertNotification(notif, resolveNotificationOwner(get().patients, get().practitioners, { patientId: before.patientId })), 'The patient may not have been told about this visit.')
       },
 
       rescheduleAppointment: (id, time, date) => {

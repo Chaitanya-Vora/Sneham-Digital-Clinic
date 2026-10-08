@@ -11,7 +11,7 @@ import { useToast } from '../design-system/toast'
 import { haptic } from '../design-system/haptics'
 import { CaseFieldEditor, useCaseProgress, useCaseSaveStatus } from '../components/CaseFields'
 import { CaseTemplateEditorModal } from '../web/CaseTemplateEditor'
-import { FollowUpSheet } from './FollowUpSheet'
+import { FollowUpSheet, type FollowUpChoice } from './FollowUpSheet'
 import { useShallow } from 'zustand/react/shallow'
 
 export function MobileCaseSheet({
@@ -54,12 +54,12 @@ export function MobileCaseSheet({
   const appts = useClinic((s) => s.appointments)
   const currentPractitionerId = useClinic((s) => s.currentPractitionerId)
 
-  function handleScheduleFollowUp(preset: FollowUpPreset) {
+  function handleScheduleFollowUp(preset: FollowUpPreset, choice: FollowUpChoice) {
     const date = followUpPresetDate(preset)
     const time = firstAvailableMorningSlot(appts, date)
-    scheduleFollowUp({ patientId, practitionerId: currentPractitionerId, time, date, type: 'In person', reason: 'Follow-up' })
+    scheduleFollowUp({ patientId, practitionerId: currentPractitionerId, time, date, type: 'In person', reason: 'Follow-up', hiddenFromPatient: choice.hiddenFromPatient })
     haptic('success')
-    toast({ title: `Follow-up scheduled · ${formatDayLabel(date)} · ${time}` })
+    toast({ title: `${choice.hiddenFromPatient ? 'Private follow-up' : 'Follow-up scheduled'} · ${formatDayLabel(date)} · ${time}`, ...(choice.hiddenFromPatient ? { message: 'Only you can see it.' } : {}) })
     setFollowUpOpen(false)
   }
 

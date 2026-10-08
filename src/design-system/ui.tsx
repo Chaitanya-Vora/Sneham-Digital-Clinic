@@ -133,18 +133,21 @@ export function Toggle({
   on,
   onChange,
   label,
+  disabled = false,
 }: {
   on: boolean
   onChange: (v: boolean) => void
   label?: string
+  disabled?: boolean
 }) {
   return (
     <button
       role="switch"
       aria-checked={on}
       aria-label={label}
+      disabled={disabled}
       onClick={() => onChange(!on)}
-      className={`relative tap-pad h-[31px] w-[51px] rounded-pill transition ${
+      className={`relative tap-pad h-[31px] w-[51px] shrink-0 rounded-pill transition disabled:opacity-45 ${
         on ? 'bg-accent' : 'bg-border-dash'
       }`}
     >

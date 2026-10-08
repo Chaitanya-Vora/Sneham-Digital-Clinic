@@ -50,6 +50,7 @@ import { ChatThread } from '../components/ChatThread'
 import { getDocumentUrl } from '../core/db'
 import { AuthField } from '../auth/AuthKit'
 import { currentRemedyForPatient, patientSafeDose, patientSafeRx, remedyForPatientOr, remedyTextForPatient } from '../core/rxPrivacy'
+import { isVisibleToPatient } from '../core/visitPrivacy'
 import { useShallow } from 'zustand/react/shallow'
 
 type Tab = 'home' | 'appointments' | 'prescriptions' | 'profile'
@@ -470,7 +471,7 @@ function HomeScreen({ patient, doses, onToggleDose, go, openDoses, onRefresh, no
   const toast = useToast()
   const practitioners = useClinic((s) => s.practitioners)
   const allAppointments = useClinic((s) => s.appointments)
-  const nextAppt = useClinic(useShallow((s) => s.appointments.filter((a) => a.patientId === patientId && a.status !== 'Seen' && a.status !== 'Cancelled' && !isPastISO(a.date)).sort((a, b) => a.date.localeCompare(b.date))[0]))
+  const nextAppt = useClinic(useShallow((s) => s.appointments.filter((a) => isVisibleToPatient(a) && a.patientId === patientId && a.status !== 'Seen' && a.status !== 'Cancelled' && !isPastISO(a.date)).sort((a, b) => a.date.localeCompare(b.date))[0]))
   const doctorName = useClinic((s) => s.practitioners.find((p) => p.id === (nextAppt?.practitionerId ?? patient?.owningPractitionerId ?? s.practitioners[0]?.id))?.name ?? 'your doctor')
   const reschedule = useClinic((s) => s.rescheduleAppointment)
   const [notifOpen, setNotifOpen] = useState(false)
@@ -952,7 +953,7 @@ function findNextAvailableSlot(appts: Appointment[], practitionerId: string, fro
 }
 
 function usePastVisits(patientId: string) {
-  const appointments = useClinic(useShallow((s) => s.appointments.filter((a) => a.patientId === patientId && (a.status === 'Seen' || isPastISO(a.date)))))
+  const appointments = useClinic(useShallow((s) => s.appointments.filter((a) => isVisibleToPatient(a) && a.patientId === patientId && (a.status === 'Seen' || isPastISO(a.date)))))
   const practitioners = useClinic((s) => s.practitioners)
   const outcomes = useClinic(useShallow((s) => s.outcomes.filter((o) => o.patientId === patientId)))
   // A visit's remedy is the doctor's own record — masked here when that prescription is hidden from the patient.
@@ -988,7 +989,7 @@ const outcomeTone = (o: string) => {
 
 function AppointmentsScreen({ onRefresh, patientId }: { onRefresh: () => Promise<void>; patientId: string }) {
   const toast = useToast()
-  const appointments = useClinic(useShallow((s) => s.appointments.filter((a) => a.patientId === patientId)))
+  const appointments = useClinic(useShallow((s) => s.appointments.filter((a) => isVisibleToPatient(a) && a.patientId === patientId)))
   const allAppointments = useClinic((s) => s.appointments)
   const practitioners = useClinic((s) => s.practitioners)
   const myPractitionerId = useClinic((s) => s.patients.find((p) => p.id === patientId)?.owningPractitionerId)
@@ -1382,7 +1383,7 @@ function DataPrivacyScreen({ back, onRefresh }: { back: () => void; onRefresh: (
   // Only published prescriptions — a draft or cancelled one must not leak
   // into the patient's own "download my data" export either.
   const prescriptions = useClinic(useShallow((s) => s.prescriptions.filter((r) => r.patientId === patient?.id && r.status === 'published')))
-  const appointments = useClinic(useShallow((s) => s.appointments.filter((a) => a.patientId === patient?.id)))
+  const appointments = useClinic(useShallow((s) => s.appointments.filter((a) => isVisibleToPatient(a) && a.patientId === patient?.id)))
   const doses = useClinic(useShallow((s) => s.doseReminders.filter((d) => d.patientId === patient?.id)))
   const messages = useClinic(useShallow((s) => s.messages.filter((m) => m.patientId === patient?.id)))
 

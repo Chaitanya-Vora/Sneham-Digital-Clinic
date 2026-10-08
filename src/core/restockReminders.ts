@@ -1,5 +1,5 @@
 import type { Prescription } from './types'
-import { isRestockDue } from './day'
+import { isRestockDue, restockDaysOf } from './day'
 
 // Which published, opted-in prescriptions are due for a restock call right
 // now — computed live, same as every other "due" stat in this app, no
@@ -10,7 +10,7 @@ import { isRestockDue } from './day'
 export function restockRemindersDue(prescriptions: Prescription[], today: Date = new Date()): Prescription[] {
   const published = prescriptions.filter((p) => p.status === 'published' && p.publishedAt)
   return published.filter((p) => {
-    if (!p.restockReminderEnabled || !isRestockDue(p.publishedAt!, today)) return false
+    if (!p.restockReminderEnabled || !isRestockDue(p.publishedAt!, today, restockDaysOf(p))) return false
     const supersededBy = published.find(
       (other) => other.patientId === p.patientId && other.remedy === p.remedy && other.publishedAt! > p.publishedAt!,
     )

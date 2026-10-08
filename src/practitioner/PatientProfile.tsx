@@ -243,7 +243,7 @@ export function PatientDetailScreen({ patientId, onBack, onOpenCase, onOpenFollo
         open={followUpOpen}
         patientName={patient.name}
         onClose={() => setFollowUpOpen(false)}
-        onSelect={(preset) => { setFollowUpOpen(false); bookFollowUp(patient, daysFromToday(followUpPresetDate(preset))) }}
+        onSelect={(preset, choice) => { setFollowUpOpen(false); bookFollowUp(patient, daysFromToday(followUpPresetDate(preset)), choice) }}
       />
 
       <ProfileMenuSheet

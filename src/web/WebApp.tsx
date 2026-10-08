@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { OnlyYouMark } from '../components/ShowToPatient'
 import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
@@ -62,6 +63,8 @@ import {
 } from '@phosphor-icons/react'
 import { todayISO, formatDayLabel, addDaysISO, dateTimeKey } from '../core/day'
 import { restockRemindersDue } from '../core/restockReminders'
+import { RefillReminder } from '../components/RefillReminder'
+import { lastRestockDays, rememberRestockDays } from '../core/restockChoice'
 import { followUpQueue, isDue } from '../core/course'
 import { PopoverMenu } from '../design-system/PopoverMenu'
 import { ownerLabel, ownerTone, isMine, isUnassigned, isAssignedToOthers, activeCoveringHandoff } from '../core/assignment'
@@ -583,7 +586,7 @@ function TodayView({ onOpenPatient, onStartVideo, onOpenCalendarForPractitioner,
     },
     {
       key: 'refills', label: 'Refill reminders', icon: Bell, count: restockDue.length, amber: false,
-      sub: restockDue.length === 0 ? 'None due' : refillsOpen ? 'Tap a name to open the patient' : 'Day 21 from the last prescription',
+      sub: restockDue.length === 0 ? 'None due' : refillsOpen ? 'Tap a name to open the patient' : 'Each on the day you chose',
       onClick: () => setRefillsOpen((v) => !v), open: refillsOpen,
     },
     {
@@ -677,7 +680,7 @@ function TodayView({ onOpenPatient, onStartVideo, onOpenCalendarForPractitioner,
                 <Avatar initials={p?.initials ?? '?'} size={38} />
                 <div className="flex-1">
                   <div className="font-display text-[14px] font-semibold text-ink">{p?.name ?? 'Patient'}</div>
-                  <div className="text-[12px] text-muted">{a.reason}</div>
+                  <div className="text-[12px] text-muted">{a.hiddenFromPatient && <OnlyYouMark size={11} className="mr-1" />}{a.reason}</div>
                 </div>
                 {a.type === 'Video' && (
                   <button
@@ -711,7 +714,7 @@ function TodayView({ onOpenPatient, onStartVideo, onOpenCalendarForPractitioner,
                         onSelect: async () => {
                           const ok = await confirmDialog({
                             title: 'Cancel this appointment?',
-                            message: `${p?.name ?? 'The patient'} · ${a.time}. The slot becomes free again and ${p?.name?.split(' ')[0] ?? 'the patient'} is told in the app.`,
+                            message: `${p?.name ?? 'The patient'} · ${a.time}. The slot becomes free again${a.hiddenFromPatient ? '. This visit was private, so nobody is told.' : ` and ${p?.name?.split(' ')[0] ?? 'the patient'} is told in the app.`}`,
                             confirmLabel: 'Cancel appointment', cancelLabel: 'Keep it', icon: <XCircle size={28} weight="fill" />,
                           })
                           if (!ok) return
@@ -796,7 +799,7 @@ function TodayView({ onOpenPatient, onStartVideo, onOpenCalendarForPractitioner,
                           >
                             <span className="w-14 text-[12.5px] font-semibold text-body">{a.time}</span>
                             <span className="flex-1 truncate text-[12.5px] text-ink">{pt?.name ?? 'Patient'}</span>
-                            <span className="truncate text-[11.5px] text-faint">{a.reason}</span>
+                            <span className="truncate text-[11.5px] text-faint">{a.hiddenFromPatient && <OnlyYouMark size={11} className="mr-1" />}{a.reason}</span>
                             {a.status !== 'Upcoming' && (
                               <Badge tone={a.status === 'In consult' ? 'green' : 'neutral'}>{a.status}</Badge>
                             )}
@@ -1693,7 +1696,7 @@ function FollowUpsOverview({ onOpenFollowUp }: { onOpenFollowUp: (id: string) =>
                         const undo = useClinic.getState().cancelAppointment(a.id)
                         toast({
                           title: 'Follow-up cancelled',
-                          message: `${pt?.name ?? 'Patient'} · ${formatDayLabel(a.date)} — told in the app.`,
+                          message: `${pt?.name ?? 'Patient'} · ${formatDayLabel(a.date)}${a.hiddenFromPatient ? ' — it was private, nobody is told.' : ' — told in the app.'}`,
                           ...(undo ? { action: { label: 'Undo', onClick: () => { const s = useClinic.getState(); s.updateAppointmentStatus(a.id, undo.previousStatus); s.dismissNotification(undo.notificationId) } } } : {}),
                         })
                       }}
@@ -2855,6 +2858,8 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
   // Off by default — she opts in per prescription rather than every course
   // getting a reminder whether she wants one or not.
   const [restockReminder, setRestockReminder] = useState(false)
+  const [restockDays, setRestockDays] = useState(() => lastRestockDays())
+  const restockSupported = useClinic((s) => s.restockDaysSupported)
   // Brief "Published!" state on the button itself before navigating away —
   // this is a deliberate, occasional action (a few times a day per doctor),
   // not a high-frequency one, so a short earned moment of confirmation is
@@ -2914,6 +2919,7 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
     setBodyTouched(!!draft.bodyText)
     setChannels(draft.sharedVia.filter((c) => c !== 'Patient app'))
     setRestockReminder(draft.restockReminderEnabled ?? false)
+    setRestockDays(draft.restockReminderDays ?? lastRestockDays())
     setHide(draft.hideRemedy ?? false) // a draft keeps the choice she made when she saved it
     if (draft.slipLabel) setLabel(draft.slipLabel)
   }, [draft?.id])
@@ -3002,6 +3008,7 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
       sharedVia: ['Patient app', ...channels],
       origin: 'web',
       restockReminderEnabled: restockReminder,
+      restockReminderDays: restockReminder ? restockDays : undefined,
       hideRemedy: hideEffective,
       slipLabel: hideEffective ? cleanSlipLabel(label) : undefined,
     }
@@ -3014,6 +3021,7 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
     }
     if (!rx) return // draft vanished from under us (e.g. cancelled elsewhere) — bail quietly
     if (hideEffective) rememberSlipLabel(label)
+    if (restockReminder) rememberRestockDays(restockDays)
 
     // Publishing books the review too — a course that ends without anyone
     // checking back on it is the exact gap a follow-up reminder exists to
@@ -3060,6 +3068,7 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
       sharedVia: channels, // no 'Patient app' — nothing has been sent yet
       origin: 'web',
       restockReminderEnabled: restockReminder,
+      restockReminderDays: restockReminder ? restockDays : undefined,
       hideRemedy: hideEffective,
       slipLabel: hideEffective ? cleanSlipLabel(label) : undefined,
     }
@@ -3195,12 +3204,8 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
             </div>
           </div>
 
-          <div className="flex items-center justify-between rounded-[14px] border border-border bg-surface px-4 py-3">
-            <div>
-              <div className="text-[13.5px] font-semibold text-ink">Remind me about a refill</div>
-              <div className="text-[12px] text-muted">Shows under "Restock calls due" on Today from day 21, until you prescribe this again.</div>
-            </div>
-            <Toggle on={restockReminder} onChange={setRestockReminder} label="Remind me about a refill" />
+          <div className="rounded-[14px] border border-border bg-surface px-4 py-3">
+            <RefillReminder on={restockReminder} onToggle={setRestockReminder} days={restockDays} onDays={setRestockDays} supported={restockSupported} />
           </div>
 
           <div>

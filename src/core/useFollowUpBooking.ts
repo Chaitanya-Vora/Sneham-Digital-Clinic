@@ -17,19 +17,20 @@ export function useBookFollowUp() {
   const dismissNotification = useClinic((s) => s.dismissNotification)
   const toast = useToast()
 
-  return (patient: Patient, days: number) => {
+  return (patient: Patient, days: number, choice: { hiddenFromPatient?: boolean } = {}) => {
     const date = addDaysISO(todayISO(), days)
     const time = firstAvailableMorningSlot(appointments, date)
     const { appointmentId, notificationId } = scheduleFollowUp({
       patientId: patient.id,
       practitionerId: patient.owningPractitionerId ?? me,
       time, date, type: 'In person', reason: 'Follow-up',
+      hiddenFromPatient: choice.hiddenFromPatient,
     })
     rememberFollowUpDays(days)
     haptic('success')
     toast({
-      title: `Booked · ${followUpDateLabel(date)}`,
-      message: `${patient.name} · ${time}`,
+      title: `${choice.hiddenFromPatient ? 'Booked privately' : 'Booked'} · ${followUpDateLabel(date)}`,
+      message: choice.hiddenFromPatient ? `${patient.name} · ${time} · only you can see it` : `${patient.name} · ${time}`,
       action: {
         label: 'Undo',
         onClick: () => { updateAppointmentStatus(appointmentId, 'Cancelled'); dismissNotification(notificationId) },

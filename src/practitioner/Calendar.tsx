@@ -1,7 +1,7 @@
 import { useMemo, useState, useCallback } from 'react'
 import { CalendarPlus, CaretDown, Plus, Prohibit, XCircle, Check } from '@phosphor-icons/react'
 import { toISO, todayISO, formatDayLabel, type ISODate } from '../core/day'
-import { useClinic } from '../core/store'
+import { useClinic, PRIVATE_VISITS_UNAVAILABLE } from '../core/store'
 import { addDaysTo, dayCapacity, isWorkingDay, shiftMonth, shiftWeek, type DayLoad } from '../core/calendarGrid'
 import { formatDecimalTime, minutesFromMidnight } from '../core/clock'
 import type { Appointment, Patient, TimeBlock } from '../core/types'
@@ -9,6 +9,7 @@ import { Avatar, BottomSheet, Chip, Label } from '../design-system/ui'
 import { Pressable } from '../design-system/Pressable'
 import { haptic } from '../design-system/haptics'
 import { PullToRefresh } from '../design-system/gestures'
+import { ShowToPatient } from '../components/ShowToPatient'
 import { useToast } from '../design-system/toast'
 import { PatientQuickView } from './PatientQuickView'
 import { BlockTimeSheet } from './BlockTimeSheet'
@@ -106,6 +107,11 @@ export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatien
   const [bookHour, setBookHour] = useState(9)
   const [bookType, setBookType] = useState<'In person' | 'Video'>('In person')
   const [bookReason, setBookReason] = useState('')
+  // Whether the patient is told about this visit. An already-shared visit can't be quietly taken back, so editing one locks it on.
+  const [bookShown, setBookShown] = useState(true)
+  const [bookShareLocked, setBookShareLocked] = useState(false)
+  const [bookWasPrivate, setBookWasPrivate] = useState(false)
+  const privateVisits = useClinic((s) => s.privateVisitsSupported)
   const [cancelApptId, setCancelApptId] = useState<string | null>(null)
 
   const byDate = useMemo(() => groupByDate(appointments), [appointments])
@@ -148,6 +154,7 @@ export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatien
     setBookHour(9)
     setBookType('In person')
     setBookReason('')
+    setBookShown(true); setBookShareLocked(false); setBookWasPrivate(false)
     setBookOpen(true)
   }
 
@@ -159,21 +166,31 @@ export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatien
     setBookHour(parseHour(appt.time))
     setBookType(appt.type)
     setBookReason(appt.reason ?? '')
+    setBookShown(!appt.hiddenFromPatient); setBookShareLocked(!appt.hiddenFromPatient); setBookWasPrivate(!!appt.hiddenFromPatient)
     setBookOpen(true)
   }
 
   function handleBookAppt() {
     if (!bookPatientId) return
     const time = formatDecimalTime(bookHour)
-    if (editingApptId) {
-      updateAppointment(editingApptId, { date: bookDate, time, type: bookType, reason: bookReason.trim() || 'Consultation' })
-      haptic('success')
-      toast({ title: 'Appointment updated', message: `${time} · ${patientMap.get(bookPatientId)?.name ?? 'Patient'}` })
-    } else {
-      if (!ME) return
-      scheduleFollowUp({ patientId: bookPatientId, practitionerId: scopedPractitionerId, time, date: bookDate, type: bookType, reason: bookReason.trim() || 'Consultation' })
-      haptic('success')
-      toast({ title: 'Appointment booked', message: `${time} · ${patientMap.get(bookPatientId)?.name ?? 'Patient'}` })
+    const who = patientMap.get(bookPatientId)?.name ?? 'Patient'
+    try {
+      if (editingApptId) {
+        updateAppointment(editingApptId, { date: bookDate, time, type: bookType, reason: bookReason.trim() || 'Consultation', hiddenFromPatient: !bookShown })
+        haptic('success')
+        toast({ title: 'Appointment updated', message: bookWasPrivate && bookShown ? `${time} · ${who} · they have been told` : `${time} · ${who}` })
+      } else {
+        if (!ME) return
+        scheduleFollowUp({ patientId: bookPatientId, practitionerId: scopedPractitionerId, time, date: bookDate, type: bookType, reason: bookReason.trim() || 'Consultation', hiddenFromPatient: !bookShown })
+        haptic('success')
+        toast({ title: bookShown ? 'Appointment booked' : 'Private visit booked', message: bookShown ? `${time} · ${who}` : `${time} · ${who} · only you can see it` })
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message === PRIVATE_VISITS_UNAVAILABLE) {
+        toast({ title: 'Couldn’t keep it private', message: 'The database update for this has not been applied yet. Switch to Show, or ask the clinic owner to apply it.' })
+        return
+      }
+      throw e
     }
     setBookOpen(false)
   }
@@ -184,7 +201,7 @@ export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatien
     haptic('impact')
     toast({
       title: 'Appointment cancelled',
-      message: `${patientMap.get(appt?.patientId ?? '')?.name ?? 'The patient'} has been told.`,
+      message: appt?.hiddenFromPatient ? 'It was private, so nobody is told.' : `${patientMap.get(appt?.patientId ?? '')?.name ?? 'The patient'} has been told.`,
       ...(undo ? { action: { label: 'Undo', onClick: () => { updateAppointmentStatus(apptId, undo.previousStatus); dismissNotification(undo.notificationId) } } } : {}),
     })
     setCancelApptId(null)
@@ -277,6 +294,11 @@ export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatien
         onTypeChange={setBookType}
         reason={bookReason}
         onReasonChange={setBookReason}
+        shown={bookShown}
+        onShownChange={setBookShown}
+        shareLocked={bookShareLocked}
+        willAnnounce={bookWasPrivate && bookShown}
+        privacy={privateVisits}
         onClose={() => setBookOpen(false)}
         onConfirm={handleBookAppt}
       />
@@ -354,6 +376,7 @@ export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatien
 function BookApptSheet({
   open, isEditing, patients, query, onQueryChange, patientId, onPickPatient, onClearPatient,
   date, onDateChange, hour, onHourChange, apptType, onTypeChange, reason, onReasonChange,
+  shown, onShownChange, shareLocked, willAnnounce, privacy,
   onClose, onConfirm,
 }: {
   open: boolean
@@ -372,6 +395,11 @@ function BookApptSheet({
   onTypeChange: (t: 'In person' | 'Video') => void
   reason: string
   onReasonChange: (r: string) => void
+  shown: boolean
+  onShownChange: (v: boolean) => void
+  shareLocked: boolean
+  willAnnounce: boolean
+  privacy: boolean | null
   onClose: () => void
   onConfirm: () => void
 }) {
@@ -446,6 +474,7 @@ function BookApptSheet({
               className="mt-1.5 w-full rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-[13px] text-body outline-none focus:border-green-border"
             />
           </div>
+          <div className="mt-3"><ShowToPatient shown={shown} onChange={onShownChange} locked={shareLocked} willAnnounce={willAnnounce} supported={privacy} /></div>
           <Pressable hap="success" onClick={onConfirm} className="mt-4 flex w-full items-center justify-center rounded-pill bg-brand py-3 font-display text-[15px] font-semibold text-screen shadow-float">
             {isEditing ? 'Save changes' : 'Book appointment'}
           </Pressable>
@@ -470,7 +499,7 @@ function CancelApptSheet({ open, appt, patient, onClose, onConfirm }: {
         <div className="flex h-14 w-14 items-center justify-center rounded-full bg-danger/10 text-danger"><XCircle size={28} weight="fill" /></div>
         <div className="mt-3 font-display text-[17px] font-bold text-ink">Cancel appointment?</div>
         <div className="mt-1 text-[13px] text-muted">{patient?.name} · {appt?.time}</div>
-        <div className="mt-2 px-4 text-[12.5px] leading-relaxed text-muted">The slot becomes free again and {patient?.name?.split(' ')[0] ?? 'the patient'} is told in the app.</div>
+        <div className="mt-2 px-4 text-[12.5px] leading-relaxed text-muted">The slot becomes free again{appt?.hiddenFromPatient ? '. This visit was private, so nobody is told.' : ` and ${patient?.name?.split(' ')[0] ?? 'the patient'} is told in the app.`}</div>
         <div className="mt-4 flex w-full gap-2">
           <Pressable hap="tick" onClick={onClose} className="flex-1 rounded-pill border border-border bg-surface py-2.5 text-center text-[14px] font-semibold text-body">Keep it</Pressable>
           <Pressable hap="impact" onClick={onConfirm} className="flex-1 rounded-pill bg-danger py-2.5 text-center text-[14px] font-semibold text-white">Cancel it</Pressable>

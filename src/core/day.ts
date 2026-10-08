@@ -55,10 +55,24 @@ export function followUpPresetDate(preset: FollowUpPreset, from: Date = new Date
 }
 
 // How long after publishing a course of medicine to nudge about a refill
-// call, and how long that nudge stays visible before it quietly ages out
-// (rather than nagging forever if she decides not to restock).
+// call (her choice per prescription — 21 is the usual), and how long that nudge
+// stays visible before it quietly ages out (rather than nagging forever if she
+// decides not to restock).
 export const RESTOCK_REMINDER_DAYS = 21
+export const RESTOCK_REMINDER_MIN_DAYS = 1
+export const RESTOCK_REMINDER_MAX_DAYS = 180
 export const RESTOCK_REMINDER_WINDOW_DAYS = 14
+
+/** A restock day as a whole number she could really have chosen; anything else is the usual. */
+export function clampRestockDays(n: unknown): number {
+  const v = typeof n === 'number' ? Math.round(n) : NaN
+  return Number.isFinite(v) ? Math.min(RESTOCK_REMINDER_MAX_DAYS, Math.max(RESTOCK_REMINDER_MIN_DAYS, v)) : RESTOCK_REMINDER_DAYS
+}
+
+/** The day this prescription's refill nudge appears — her own choice, else the usual 21. */
+export function restockDaysOf(p: { restockReminderDays?: number }): number {
+  return p.restockReminderDays == null ? RESTOCK_REMINDER_DAYS : clampRestockDays(p.restockReminderDays)
+}
 
 /** Whole days between an ISO timestamp (e.g. Prescription.publishedAt) and
  *  today — used for the restock-reminder window, computed live on every
@@ -74,9 +88,9 @@ export function daysSince(isoTimestamp: string, today: Date = new Date()): numbe
   return Math.round((b.getTime() - a.getTime()) / msPerDay)
 }
 
-export function isRestockDue(publishedAt: string, today: Date = new Date()): boolean {
+export function isRestockDue(publishedAt: string, today: Date = new Date(), days: number = RESTOCK_REMINDER_DAYS): boolean {
   const d = daysSince(publishedAt, today)
-  return d >= RESTOCK_REMINDER_DAYS && d <= RESTOCK_REMINDER_DAYS + RESTOCK_REMINDER_WINDOW_DAYS
+  return d >= days && d <= days + RESTOCK_REMINDER_WINDOW_DAYS
 }
 
 export function todayISO(): ISODate {

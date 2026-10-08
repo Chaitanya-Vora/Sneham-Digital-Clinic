@@ -49,7 +49,7 @@ export function FollowUpQueue({ onReview }: { onReview: (patientId: string) => v
               <FollowUpPresetMenu
                 open={customFor === r.patient.id}
                 onClose={() => setCustomFor(null)}
-                onSelect={(preset) => { setCustomFor(null); const days = Number(preset.match(/\d+/)?.[0] ?? 0); if (days) book(r.patient, days) }}
+                onSelect={(preset, choice) => { setCustomFor(null); const days = Number(preset.match(/\d+/)?.[0] ?? 0); if (days) book(r.patient, days, choice) }}
               />
             </div>
           </div>

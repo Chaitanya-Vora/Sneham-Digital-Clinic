@@ -62,8 +62,9 @@ export function ProfileHero(p: ProfileHeroProps) {
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="truncate font-display text-[24px] font-bold leading-tight">{p.name}</div>
-          <div className="truncate text-[13px] text-white/80">{p.meta}</div>
+          {/* a long name or address wraps onto a second line instead of being cut off; a very long name steps down a size first */}
+          <div className={`line-clamp-2 break-words font-display font-bold leading-tight ${p.name.length > 20 ? 'text-[21px]' : 'text-[24px]'}`}>{p.name}</div>
+          <div className="line-clamp-2 break-words text-[13px] leading-snug text-white/80">{p.meta}</div>
           <div className="text-[12px] text-white/60">{p.idLabel}</div>
           {p.phone && (
             <div className="mt-2 flex items-center gap-2">

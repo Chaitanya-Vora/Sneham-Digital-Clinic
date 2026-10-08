@@ -27,7 +27,7 @@ import type {
 } from './types'
 import type { CaseState, CustomCaseTemplate } from './caseTemplate'
 import { DEFAULT_PRACTITIONER_REMEDIES } from './remedies'
-import { normaliseDayValue } from './day'
+import { normaliseDayValue, RESTOCK_REMINDER_DAYS } from './day'
 
 
 let _hydrateErrors = 0
@@ -358,7 +358,16 @@ function toAppAppointment(r: any): Appointment {
     tag: r.tag ?? undefined,
     reason: r.reason ?? undefined,
     isFirstVisit: r.is_first_visit ?? undefined,
+    hiddenFromPatient: r.hidden_from_patient ? true : undefined,
   }
+}
+
+// `hidden_from_patient` (migration v50) is only sent for a private visit, so booking keeps
+// working on a database that has not been updated yet. If she asks for a private visit and the
+// column is missing the write fails — it is never saved as one the patient can see.
+export function visitPrivacyColumns(a: { hiddenFromPatient?: boolean }, wasHidden = false): Record<string, unknown> {
+  if (a.hiddenFromPatient) return { hidden_from_patient: true }
+  return wasHidden ? { hidden_from_patient: false } : {}
 }
 
 function toDbAppointment(a: Appointment) {
@@ -374,6 +383,7 @@ function toDbAppointment(a: Appointment) {
     tag: a.tag ?? null,
     reason: a.reason ?? null,
     is_first_visit: a.isFirstVisit ?? false,
+    ...visitPrivacyColumns(a),
   }
 }
 
@@ -419,6 +429,7 @@ function toAppPrescription(r: any): Prescription {
     remindersEnabled: r.reminders_enabled,
     reminderTimes: r.reminder_times ?? [],
     restockReminderEnabled: r.restock_reminder_enabled ?? false,
+    restockReminderDays: r.restock_reminder_days ?? undefined,
     hideRemedy: r.hide_remedy ?? false,
     slipLabel: r.slip_label ?? undefined,
   }
@@ -432,15 +443,39 @@ export function rxPrivacyColumns(p: { hideRemedy?: boolean; slipLabel?: string }
   return wasHidden ? { hide_remedy: false, slip_label: null } : {}
 }
 
-/** Does the database have the "hide remedy" columns? true / false, or null when we could not tell (offline). */
-export async function probeRxPrivacy(): Promise<boolean | null> {
+// `restock_reminder_days` (migration v50) is only sent when the day is not the usual 21 — same
+// reason: everything keeps working on a database that has not been updated yet.
+export function restockDaysColumns(p: { restockReminderEnabled?: boolean; restockReminderDays?: number }, wasCustom = false): Record<string, unknown> {
+  const days = p.restockReminderEnabled ? p.restockReminderDays : undefined
+  if (days != null && days !== RESTOCK_REMINDER_DAYS) return { restock_reminder_days: days }
+  return wasCustom ? { restock_reminder_days: null } : {}
+}
+
+// Which optional columns does the database have? Asked on every full refresh until the answer
+// is a confirmed "yes" (then never again). true / false, or null when we could not tell (offline).
+const FEATURE_COLUMNS = {
+  rxPrivacy: ['prescriptions', 'hide_remedy'],
+  restockDays: ['prescriptions', 'restock_reminder_days'],
+  privateVisits: ['appointments', 'hidden_from_patient'],
+} as const
+export type SchemaFeature = keyof typeof FEATURE_COLUMNS
+const confirmedFeatures = new Set<SchemaFeature>()
+
+async function probeColumn(feature: SchemaFeature): Promise<boolean | null> {
+  if (confirmedFeatures.has(feature)) return true
+  const [table, column] = FEATURE_COLUMNS[feature]
   // This runs alongside every full refresh, so it must never be the reason a refresh fails.
   try {
-    const { error } = await supabase.from('prescriptions').select('hide_remedy').limit(1)
-    if (!error) return true
-    if (error.code === '42703' || /hide_remedy/i.test(error.message)) return false
+    const { error } = await supabase.from(table).select(column).limit(1)
+    if (!error) { confirmedFeatures.add(feature); return true }
+    if (error.code === '42703' || new RegExp(column, 'i').test(error.message)) return false
   } catch { /* offline or blocked — we simply do not know */ }
   return null
+}
+
+export async function probeSchema(): Promise<Record<SchemaFeature, boolean | null>> {
+  const [rxPrivacy, restockDays, privateVisits] = await Promise.all([probeColumn('rxPrivacy'), probeColumn('restockDays'), probeColumn('privateVisits')])
+  return { rxPrivacy, restockDays, privateVisits }
 }
 
 function toDbPrescription(p: Prescription) {
@@ -464,6 +499,7 @@ function toDbPrescription(p: Prescription) {
     reminders_enabled: p.remindersEnabled,
     reminder_times: p.reminderTimes,
     restock_reminder_enabled: p.restockReminderEnabled ?? false,
+    ...restockDaysColumns(p),
     ...rxPrivacyColumns(p),
   }
 }

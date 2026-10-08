@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { OnlyYouMark } from '../components/ShowToPatient'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   CaretLeft,
@@ -205,7 +206,7 @@ export function WebCalendar({ onOpenPatient, focusPractitionerId }: { onOpenPati
                 const who = patients.find((p) => p.id === a.patientId)?.name
                 const ok = await confirmDialog({
                   title: 'Cancel this appointment?',
-                  message: `${who ? `${who} · ` : ''}${a.time}. The slot becomes free again and ${who ? who.split(' ')[0] : 'the patient'} is told in the app.`,
+                  message: `${who ? `${who} · ` : ''}${a.time}. The slot becomes free again${a.hiddenFromPatient ? '. This visit was private, so nobody is told.' : ` and ${who ? who.split(' ')[0] : 'the patient'} is told in the app.`}`,
                   confirmLabel: 'Cancel appointment', cancelLabel: 'Keep it', icon: <XCircle size={28} weight="fill" />,
                 })
                 if (!ok) return
@@ -284,6 +285,7 @@ function DayView({ appts, patients, onOpen, onEdit, onCancel, onAddSlot }: {
                         <div className="text-[13px] font-semibold text-ink">{p.name}</div>
                         <div className="flex items-center gap-1.5 text-[11px] text-muted">
                           {a.type === 'Video' && <VideoCamera size={11} weight="fill" className="text-brand" />}
+                          {a.hiddenFromPatient && <OnlyYouMark size={11} />}
                           {a.time} · {a.durationMin}m
                           {a.reason && <> · {a.reason}</>}
                         </div>

@@ -4,6 +4,8 @@ import { MAX_FOLLOW_UP_DAYS, addDaysISO, todayISO, firstAvailableMorningSlot, cu
 import { FOLLOW_UP_DAY_CHIPS, lastFollowUpDays, rememberFollowUpDays, followUpDateLabel } from '../core/followUpChoice'
 import { useClinic } from '../core/store'
 import { Card } from '../design-system/ui'
+import { ShowToPatient } from '../components/ShowToPatient'
+import type { FollowUpChoice } from '../practitioner/FollowUpSheet'
 
 // Small anchored popover, not a full modal — matches the template-picker
 // popover already used in CaseSheet.tsx (absolute + top-full + shadow-float)
@@ -11,10 +13,12 @@ import { Card } from '../design-system/ui'
 // out of place on desktop. Same idea as the phone's follow-up sheet: the date
 // and slot are shown before she confirms; a chip for the usual day counts, or
 // any number typed in. Opens on the number she chose last time.
-export function FollowUpPresetMenu({ open, onClose, onSelect }: { open: boolean; onClose: () => void; onSelect: (preset: FollowUpPreset) => void }) {
+export function FollowUpPresetMenu({ open, onClose, onSelect }: { open: boolean; onClose: () => void; onSelect: (preset: FollowUpPreset, choice: FollowUpChoice) => void }) {
   const appts = useClinic((s) => s.appointments)
+  const privacy = useClinic((s) => s.privateVisitsSupported)
+  const [shown, setShown] = useState(true)
   const [text, setText] = useState(() => String(lastFollowUpDays()))
-  useEffect(() => { if (open) setText(String(lastFollowUpDays())) }, [open])
+  useEffect(() => { if (open) { setText(String(lastFollowUpDays())); setShown(true) } }, [open])
   if (!open) return null
 
   const n = Number(text)
@@ -24,7 +28,7 @@ export function FollowUpPresetMenu({ open, onClose, onSelect }: { open: boolean;
   const confirm = () => {
     if (!valid) return
     rememberFollowUpDays(n)
-    onSelect(customFollowUpPreset(n))
+    onSelect(customFollowUpPreset(n), { hiddenFromPatient: !shown })
   }
 
   return (
@@ -61,6 +65,7 @@ export function FollowUpPresetMenu({ open, onClose, onSelect }: { open: boolean;
         />
         <span>days</span>
       </div>
+      <div className="mt-3"><ShowToPatient shown={shown} onChange={setShown} supported={privacy} /></div>
       <button
         onClick={confirm}
         disabled={!valid}

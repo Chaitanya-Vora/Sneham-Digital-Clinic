@@ -4,16 +4,22 @@ import { addDaysISO, todayISO, firstAvailableMorningSlot, customFollowUpPreset, 
 import { FOLLOW_UP_DAY_CHIPS, lastFollowUpDays, rememberFollowUpDays, followUpDateLabel, daysFromToday } from '../core/followUpChoice'
 import { useClinic } from '../core/store'
 import { BottomSheet, Label } from '../design-system/ui'
+import { ShowToPatient } from '../components/ShowToPatient'
 import { Pressable } from '../design-system/Pressable'
 
 // "Follow-up after how many days?" — one sheet for every place a follow-up is
 // offered. The date it will land on (and the slot it will take) is on screen
 // before she confirms; the usual choices are one tap, and any other number is
 // a tap of + / − or typed in. Tapping the date opens the calendar instead.
-export function FollowUpSheet({ open, patientName, onClose, onSelect }: { open: boolean; patientName: string; onClose: () => void; onSelect: (preset: FollowUpPreset) => void }) {
+export interface FollowUpChoice { hiddenFromPatient: boolean }
+
+export function FollowUpSheet({ open, patientName, onClose, onSelect }: { open: boolean; patientName: string; onClose: () => void; onSelect: (preset: FollowUpPreset, choice: FollowUpChoice) => void }) {
   const appts = useClinic((s) => s.appointments)
+  const privacy = useClinic((s) => s.privateVisitsSupported)
+  // Each follow-up starts as an ordinary one the patient is told about; keeping it to herself is a choice every time.
+  const [shown, setShown] = useState(true)
   const [text, setText] = useState(() => String(lastFollowUpDays()))
-  useEffect(() => { if (open) setText(String(lastFollowUpDays())) }, [open])
+  useEffect(() => { if (open) { setText(String(lastFollowUpDays())); setShown(true) } }, [open])
 
   const n = Number(text)
   const valid = text.trim() !== '' && Number.isInteger(n) && n >= 1 && n <= MAX_FOLLOW_UP_DAYS
@@ -28,7 +34,7 @@ export function FollowUpSheet({ open, patientName, onClose, onSelect }: { open: 
   const confirm = () => {
     if (!valid) return
     rememberFollowUpDays(n)
-    onSelect(customFollowUpPreset(n))
+    onSelect(customFollowUpPreset(n), { hiddenFromPatient: !shown })
   }
 
   return (
@@ -97,6 +103,8 @@ export function FollowUpSheet({ open, patientName, onClose, onSelect }: { open: 
             </Pressable>
           </div>
         </div>
+
+        <ShowToPatient shown={shown} onChange={setShown} supported={privacy} />
 
         <Pressable
           hap="success"

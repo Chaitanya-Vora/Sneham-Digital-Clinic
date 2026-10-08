@@ -185,6 +185,9 @@ export interface Appointment {
   tag?: string // e.g. "Nux Vomica 200C"
   reason?: string
   isFirstVisit?: boolean
+  // A visit the doctor put in for her own reference. The patient is not notified and it
+  // never appears in their app (core/visitPrivacy.ts); every doctor-side screen still shows it.
+  hiddenFromPatient?: boolean
 }
 
 // Billing lives entirely on its own — never required an appointment to
@@ -254,6 +257,8 @@ export interface Prescription {
   // separate from remindersEnabled above (which is the patient's own
   // daily take-your-dose reminders).
   restockReminderEnabled?: boolean
+  // Which day after publishing that nudge appears. Unset = the usual 21 (core/day.ts).
+  restockReminderDays?: number
   // Many homeopaths do not tell the patient which remedy they are taking. When
   // true, nothing the patient receives or sees names it — the printed slip, the
   // WhatsApp/email text, the patient app, the notification and the dose

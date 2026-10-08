@@ -9,6 +9,7 @@ import { useToast } from '../design-system/toast'
 import { CaseFieldEditor, sectionHasContent, useCaseProgress, useCaseSaveStatus } from '../components/CaseFields'
 import { CaseTemplateEditorModal } from './CaseTemplateEditor'
 import { FollowUpPresetMenu } from './FollowUpPresetMenu'
+import type { FollowUpChoice } from '../practitioner/FollowUpSheet'
 import { useShallow } from 'zustand/react/shallow'
 
 function VisitHistoryPanel({
@@ -181,11 +182,11 @@ export function CaseSheet({
   const currentPractitionerId = useClinic((s) => s.currentPractitionerId)
   const toast = useToast()
 
-  function handleScheduleFollowUp(preset: FollowUpPreset) {
+  function handleScheduleFollowUp(preset: FollowUpPreset, choice: FollowUpChoice) {
     const date = followUpPresetDate(preset)
     const time = firstAvailableMorningSlot(appts, date)
-    scheduleFollowUp({ patientId, practitionerId: currentPractitionerId, time, date, type: 'In person', reason: 'Follow-up' })
-    toast({ title: `Follow-up scheduled · ${formatDayLabel(date)} · ${time}` })
+    scheduleFollowUp({ patientId, practitionerId: currentPractitionerId, time, date, type: 'In person', reason: 'Follow-up', hiddenFromPatient: choice.hiddenFromPatient })
+    toast({ title: `${choice.hiddenFromPatient ? 'Private follow-up' : 'Follow-up scheduled'} · ${formatDayLabel(date)} · ${time}`, ...(choice.hiddenFromPatient ? { message: 'Only you can see it.' } : {}) })
     setFollowUpOpen(false)
   }
 

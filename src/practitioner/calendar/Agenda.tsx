@@ -7,6 +7,7 @@ import { formatDecimalTime, parseTime } from '../../core/clock'
 import { sameDay, addDaysTo } from '../../core/calendarGrid'
 import type { Appointment, Patient, TimeBlock } from '../../core/types'
 import { blockColorStyle } from '../BlockTimeSheet'
+import { OnlyYouMark } from '../../components/ShowToPatient'
 
 // One day's agenda: a single card of hairline-separated rows (appointments and blocked time
 // in clock order), cancelled visits folded away, every action behind one ⋯ (a 44px target).
@@ -68,6 +69,7 @@ export function Agenda(p: AgendaProps) {
           <div className={`truncate font-display text-[14px] font-semibold text-ink ${dim ? 'line-through' : ''}`}>{pt?.name ?? 'Unknown'}</div>
           <div className="flex items-center gap-1 truncate text-[12px] text-muted">
             {a.type === 'Video' ? <VideoCamera size={11} weight="fill" className="shrink-0" /> : <MapPin size={11} weight="fill" className="shrink-0" />}
+            {a.hiddenFromPatient && <span className="shrink-0 font-medium text-body"><OnlyYouMark size={11} className="mr-0.5 !text-body" />Only you ·</span>}
             <span className="truncate">{detail}</span>
           </div>
         </div>

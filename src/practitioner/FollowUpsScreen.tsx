@@ -9,7 +9,7 @@ import { useBookFollowUp } from '../core/useFollowUpBooking'
 import { Avatar, Badge, Card, Chip, Label } from '../design-system/ui'
 import { Pressable } from '../design-system/Pressable'
 import { TickNumber } from '../design-system/feedback'
-import { FollowUpSheet } from './FollowUpSheet'
+import { FollowUpSheet, type FollowUpChoice } from './FollowUpSheet'
 import { PatientQuickView } from './PatientQuickView'
 
 // The Follow-ups tab as a recall queue. Who is due is read from the course the
@@ -36,7 +36,7 @@ export function FollowUpsScreen({ openCompare, openCase, goRx }: { openCompare: 
   const later = needs.filter((r) => r.bucket === 'later')
   const urgent = overdue.length + soon.length // what is actually waiting on her; the rest are mid-course
 
-  const book = (row: QueueRow, days: number) => bookFollowUp(row.patient, days)
+  const book = (row: QueueRow, days: number, choice?: FollowUpChoice) => bookFollowUp(row.patient, days, choice)
 
   const card = (row: QueueRow) => {
     const tone = row.bucket === 'overdue' ? 'text-danger' : row.bucket === 'soon' ? 'text-amber-text' : 'text-muted'
@@ -142,11 +142,11 @@ export function FollowUpsScreen({ openCompare, openCase, goRx }: { openCompare: 
         open={sheetFor !== null}
         patientName={sheetFor?.patient.name ?? ''}
         onClose={() => setSheetFor(null)}
-        onSelect={(preset) => {
+        onSelect={(preset, choice) => {
           const row = sheetFor
           const days = Number(preset.match(/\d+/)?.[0] ?? 0)
           setSheetFor(null)
-          if (row && days) book(row, days)
+          if (row && days) book(row, days, choice)
         }}
       />
       <PatientQuickView patientId={peekId} onClose={() => setPeekId(null)} onOpenCase={openCase} onPrescribe={goRx} />

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { OnlyYouMark } from '../components/ShowToPatient'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   Play,
@@ -24,7 +25,7 @@ import {
   Bell,
 } from '@phosphor-icons/react'
 import { todayISO, toISO, formatDayLabel, firstAvailableMorningSlot, isPastISO, isTodayISO, followUpPresetDate, type FollowUpPreset } from '../core/day'
-import { FollowUpSheet } from './FollowUpSheet'
+import { FollowUpSheet, type FollowUpChoice } from './FollowUpSheet'
 import { restockRemindersDue } from '../core/restockReminders'
 import { useClinic } from '../core/store'
 import type { Appointment, TimeBlock } from '../core/types'
@@ -171,12 +172,12 @@ export function TodayGrid({
     if (appt) setFollowUpSheet(appt.patientId)
   }
 
-  function handleScheduleFollowUp(patientId: string, preset: FollowUpPreset) {
+  function handleScheduleFollowUp(patientId: string, preset: FollowUpPreset, choice: FollowUpChoice) {
     const date = followUpPresetDate(preset)
     const time = firstAvailableMorningSlot(appts, date)
-    scheduleFollowUp({ patientId, practitionerId: ME, time, date, type: 'In person', reason: 'Follow-up' })
+    scheduleFollowUp({ patientId, practitionerId: ME, time, date, type: 'In person', reason: 'Follow-up', hiddenFromPatient: choice.hiddenFromPatient })
     haptic('success')
-    toast({ title: `Follow-up scheduled · ${formatDayLabel(date)} · ${time}` })
+    toast({ title: `${choice.hiddenFromPatient ? 'Private follow-up' : 'Follow-up scheduled'} · ${formatDayLabel(date)} · ${time}`, ...(choice.hiddenFromPatient ? { message: 'Only you can see it.' } : {}) })
     setFollowUpSheet(null)
   }
 
@@ -522,7 +523,7 @@ export function TodayGrid({
 
       {/* bottom sheets */}
       <EndConsultSheet open={endConsultSheet !== null} apptId={endConsultSheet} onClose={() => setEndConsultSheet(null)} onConfirm={() => endConsultSheet && handleEndConsult(endConsultSheet)} />
-      <FollowUpSheet open={followUpSheet !== null} patientName={followUpSheet ? pFind(followUpSheet)?.name ?? 'patient' : ''} onClose={() => setFollowUpSheet(null)} onSelect={(p) => followUpSheet && handleScheduleFollowUp(followUpSheet, p)} />
+      <FollowUpSheet open={followUpSheet !== null} patientName={followUpSheet ? pFind(followUpSheet)?.name ?? 'patient' : ''} onClose={() => setFollowUpSheet(null)} onSelect={(p, c) => followUpSheet && handleScheduleFollowUp(followUpSheet, p, c)} />
       <NoShowSheet open={noShowSheet !== null} appts={allAppts} pFind={pFind} noShowId={noShowSheet} onClose={() => setNoShowSheet(null)} onConfirm={() => noShowSheet && handleNoShow(noShowSheet)} />
       <BlockTimeSheet
         open={blockOpen}
@@ -699,7 +700,7 @@ function DayGridView({ appts, timeBlocks, patients, practitioners, myId, activeA
                             {a.type === 'Video' && <VideoCamera size={11} weight="fill" className="shrink-0 text-brand" />}
                             {!isMine && <Badge tone="neutral" className="!px-1.5 !py-0 !text-[11px]">{prFind(a.practitionerId)?.name ?? 'Team'}</Badge>}
                           </div>
-                          <div className="truncate text-[12px] text-muted">{a.time} · {a.reason ?? ''}</div>
+                          <div className="truncate text-[12px] text-muted">{a.hiddenFromPatient && <OnlyYouMark size={11} className="mr-1" />}{a.time} · {a.reason ?? ''}</div>
                         </div>
                         <div className="flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
                           {canStart && (
@@ -800,6 +801,7 @@ function ListView({
                 </div>
                 <div className="flex items-center gap-1.5 truncate text-[12px] text-muted">
                   {a.type === 'Video' && <VideoCamera size={12} weight="fill" className="text-brand" />}
+                  {a.hiddenFromPatient && <OnlyYouMark />}
                   {a.tag ?? a.reason}
                 </div>
               </div>

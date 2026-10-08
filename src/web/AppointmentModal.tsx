@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { X, MagnifyingGlass } from '@phosphor-icons/react'
-import { useClinic } from '../core/store'
+import { useClinic, PRIVATE_VISITS_UNAVAILABLE } from '../core/store'
 import type { Appointment, ConsultType } from '../core/types'
 import { todayISO, formatDayLabel } from '../core/day'
 import { Avatar, Badge, Chip, Label } from '../design-system/ui'
 import { useToast } from '../design-system/toast'
+import { ShowToPatient } from '../components/ShowToPatient'
 import { useShallow } from 'zustand/react/shallow'
 
 const BOOK_HOURS = Array.from({ length: 12 }, (_, i) => i + 8) // 8 AM – 7 PM
@@ -48,6 +49,9 @@ export function AppointmentModal({ request, onClose }: { request: AppointmentMod
   const [apptType, setApptType] = useState<ConsultType>('In person')
   const [reason, setReason] = useState('')
   const [practitionerId, setPractitionerId] = useState('')
+  // Whether the patient is told about this visit (an already-shared one can't be quietly taken back — see ShowToPatient).
+  const [shown, setShown] = useState(true)
+  const privateVisits = useClinic((s) => s.privateVisitsSupported)
 
   useEffect(() => {
     if (!request) return
@@ -58,6 +62,7 @@ export function AppointmentModal({ request, onClose }: { request: AppointmentMod
       setApptType(request.appointment.type)
       setReason(request.appointment.reason ?? '')
       setPractitionerId(request.appointment.practitionerId)
+      setShown(!request.appointment.hiddenFromPatient)
     } else {
       const prefilled = request.patientId ? patients.find((p) => p.id === request.patientId) : null
       setPatientId(request.patientId ?? null)
@@ -66,6 +71,7 @@ export function AppointmentModal({ request, onClose }: { request: AppointmentMod
       setHour(request.hour ?? 9)
       setApptType('In person')
       setReason(request.reason ?? '')
+      setShown(true)
       // Same default as the rest of the app — the patient's own doctor,
       // falling back to whoever's booking when there isn't one yet.
       setPractitionerId(prefilled?.owningPractitionerId ?? currentPractitionerId ?? '')
@@ -80,19 +86,26 @@ export function AppointmentModal({ request, onClose }: { request: AppointmentMod
     ? patients.filter((p) => p.name.toLowerCase().includes(patientQuery.trim().toLowerCase())).slice(0, 6)
     : []
 
+  const wasPrivate = request.mode === 'edit' && !!request.appointment.hiddenFromPatient
+
   const onConfirm = () => {
     if (!patientId) return
     const time = hourToTime(hour)
-    if (request.mode === 'edit') {
-      updateAppointment(request.appointment.id, { date, time, type: apptType, reason: reason.trim() || request.appointment.reason || 'Consultation', practitionerId: practitionerId || request.appointment.practitionerId })
-      const reassigned = practitionerId && practitionerId !== request.appointment.practitionerId
-      toast({ title: 'Appointment updated', message: reassigned ? `Reassigned to ${practitioners.find((p) => p.id === practitionerId)?.name ?? 'another doctor'} · ${formatDayLabel(date)} · ${time}` : `${formatDayLabel(date)} · ${time}` })
-    } else {
-      // Defaults to the patient's own doctor (set above), but stays
-      // editable — booking this for a colleague, e.g. handing a retake to
-      // whoever's actually doing it, is a real, intentional choice.
-      scheduleFollowUp({ patientId, practitionerId: practitionerId || currentPractitionerId || '', time, date, type: apptType, reason: reason.trim() || 'Consultation' })
-      toast({ title: 'Appointment booked', message: `${patient?.name ?? 'Patient'} · ${formatDayLabel(date)} · ${time}` })
+    try {
+      if (request.mode === 'edit') {
+        updateAppointment(request.appointment.id, { date, time, type: apptType, reason: reason.trim() || request.appointment.reason || 'Consultation', practitionerId: practitionerId || request.appointment.practitionerId, hiddenFromPatient: !shown })
+        const reassigned = practitionerId && practitionerId !== request.appointment.practitionerId
+        toast({ title: 'Appointment updated', message: reassigned ? `Reassigned to ${practitioners.find((p) => p.id === practitionerId)?.name ?? 'another doctor'} · ${formatDayLabel(date)} · ${time}` : `${formatDayLabel(date)} · ${time}${wasPrivate && shown ? ' · the patient has been told' : ''}` })
+      } else {
+        // Defaults to the patient's own doctor (set above), but stays
+        // editable — booking this for a colleague, e.g. handing a retake to
+        // whoever's actually doing it, is a real, intentional choice.
+        scheduleFollowUp({ patientId, practitionerId: practitionerId || currentPractitionerId || '', time, date, type: apptType, reason: reason.trim() || 'Consultation', hiddenFromPatient: !shown })
+        toast({ title: shown ? 'Appointment booked' : 'Private visit booked', message: `${patient?.name ?? 'Patient'} · ${formatDayLabel(date)} · ${time}${shown ? '' : ' · only you can see it'}` })
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message === PRIVATE_VISITS_UNAVAILABLE) { toast({ title: 'Couldn’t keep it private', message: 'The database update for this has not been applied yet. Switch to Show, or apply the update first.' }); return }
+      throw e
     }
     onClose()
   }
@@ -214,6 +227,8 @@ export function AppointmentModal({ request, onClose }: { request: AppointmentMod
                 className="mt-1.5 w-full rounded-[12px] border border-border bg-screen px-3 py-2.5 text-[13px] text-ink outline-none transition focus:border-green-border"
               />
             </div>
+
+            <ShowToPatient shown={shown} onChange={setShown} locked={request.mode === 'edit' && !wasPrivate} willAnnounce={wasPrivate && shown} supported={privateVisits} />
 
             <div className="flex gap-2 pt-1">
               <button onClick={onClose} className="flex-1 rounded-pill border border-border px-4 py-2.5 text-[13px] font-semibold text-body transition hover:bg-surface-hover">

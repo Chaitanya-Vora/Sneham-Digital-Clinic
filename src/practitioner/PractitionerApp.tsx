@@ -784,8 +784,12 @@ function InboxScreen({ onOpenPatient, onOpenChat }: { onOpenPatient: (id: string
               const Icon = iconFor(n.kind)
               return (
                 <motion.div key={n.id} variants={listItem}>
+                  {/* a <div>, not the default <button>: a button shrinks to its text and centres it, which left this
+                      card narrower than the screen with centred text (and it holds its own buttons below) */}
                   <Pressable
+                    as="div"
                     hap="tick"
+                    className="cursor-pointer"
                     onClick={() => {
                       if (!n.read) markRead(n.id)
                       if (n.patientId) onOpenPatient(n.patientId)

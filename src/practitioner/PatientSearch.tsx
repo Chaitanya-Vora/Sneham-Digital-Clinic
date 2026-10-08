@@ -140,19 +140,19 @@ export function PatientSearchSheet({
             <Pressable ariaLabel="back" hap="tick" onClick={onClose} className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
               <CaretLeft size={18} className="text-body" />
             </Pressable>
-            <div className="flex flex-1 items-center gap-2 rounded-pill border border-border bg-surface px-3.5 py-2">
+            <div className="flex flex-1 items-center gap-2 rounded-pill border border-border bg-surface px-3.5 py-3">
               <MagnifyingGlass size={16} className="text-faint" />
               <input
                 ref={inputRef}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Name, WS code, complaint, remedy..."
-                className="-my-2 w-full bg-transparent py-2 text-[13px] outline-none placeholder:text-faint"
+                className="-my-3 w-full bg-transparent py-3 text-[13px] outline-none placeholder:text-faint"
                 data-selectable="true"
               />
               {query && (
-                <Pressable ariaLabel="clear" hap="tick" onClick={() => setQuery('')} className="relative tap-pad-lg text-faint">
-                  <X size={14} />
+                <Pressable ariaLabel="clear" hap="tick" onClick={() => setQuery('')} className="relative tap-pad-lg flex h-8 w-8 shrink-0 items-center justify-center text-faint">
+                  <X size={16} />
                 </Pressable>
               )}
             </div>
@@ -337,35 +337,35 @@ export function InvoiceSheet({
               value={item.name}
               onChange={(e) => updateItem(i, { name: e.target.value })}
               placeholder="e.g. Consultation, Medicine"
-              className="min-w-0 flex-1 rounded-[10px] border border-border bg-surface px-2.5 py-2 text-[13px] text-ink outline-none focus:border-green-border"
+              className="min-w-0 flex-1 rounded-[10px] border border-border bg-surface px-2.5 py-3 text-[13px] text-ink outline-none focus:border-green-border"
               data-selectable="true"
             />
             <input
               type="number"
               value={item.qty}
               onChange={(e) => updateItem(i, { qty: Math.max(1, Number(e.target.value) || 1) })}
-              className="w-11 rounded-[10px] border border-border bg-surface px-1 py-2 text-center text-[13px] text-ink outline-none focus:border-green-border"
+              className="w-11 rounded-[10px] border border-border bg-surface px-1 py-3 text-center text-[13px] text-ink outline-none focus:border-green-border"
               title="Quantity"
               data-selectable="true"
             />
-            <div className="flex w-[84px] items-center gap-1 rounded-[10px] border border-border bg-surface px-2 py-2">
+            <div className="flex w-[84px] items-center gap-1 rounded-[10px] border border-border bg-surface px-2">
               <span className="text-[12px] text-muted">₹</span>
               <input
                 type="number"
                 value={item.unitPrice}
                 onChange={(e) => updateItem(i, { unitPrice: Number(e.target.value) || 0 })}
-                className="w-full bg-transparent text-[13px] text-ink outline-none"
+                className="w-full bg-transparent py-3 text-[13px] text-ink outline-none"
                 title="Price per unit"
                 data-selectable="true"
               />
             </div>
-            <Pressable hap="tick" onClick={() => removeItem(i)} className={`p-1 text-faint ${items.length === 1 ? 'opacity-30' : ''}`}>
+            <Pressable hap="tick" onClick={() => removeItem(i)} className={`relative tap-pad p-1 text-faint ${items.length === 1 ? 'opacity-30' : ''}`} ariaLabel="remove item">
               <X size={14} weight="bold" />
             </Pressable>
           </div>
         ))}
       </div>
-      <Pressable hap="tick" onClick={addItem} className="mt-2 flex items-center gap-1 text-[12.5px] font-semibold text-brand">
+      <Pressable hap="tick" onClick={addItem} className="relative tap-pad-y mt-2 flex items-center gap-1 py-2 text-[12.5px] font-semibold text-brand">
         <Plus size={13} weight="bold" /> Add item
       </Pressable>
 
@@ -375,23 +375,23 @@ export function InvoiceSheet({
       </div>
 
       <Label className="mt-4">Amount received</Label>
-      <div className="mt-1.5 flex items-center gap-2 rounded-[14px] border border-border bg-surface px-3.5 py-2.5">
+      <div className="mt-1.5 flex items-center gap-2 rounded-[14px] border border-border bg-surface px-3.5">
         <span className="text-[14px] font-semibold text-muted">₹</span>
         <input
           type="number"
           value={waived ? 0 : amountReceived}
           disabled={waived}
           onChange={(e) => { receivedTouched.current = true; setAmountReceived(Number(e.target.value) || 0) }}
-          className="w-full bg-transparent text-[14px] font-semibold text-ink outline-none disabled:opacity-50"
+          className="w-full bg-transparent py-3 text-[14px] font-semibold text-ink outline-none disabled:opacity-50"
           data-selectable="true"
         />
         {!waived && amountReceived !== total && (
-          <Pressable hap="tick" onClick={() => { receivedTouched.current = true; setAmountReceived(total) }} className="shrink-0 text-[11.5px] font-semibold text-brand">Paid in full</Pressable>
+          <Pressable hap="tick" onClick={() => { receivedTouched.current = true; setAmountReceived(total) }} className="relative tap-pad shrink-0 text-[12px] font-semibold text-brand">Paid in full</Pressable>
         )}
       </div>
       <div className="mt-1.5 flex items-center justify-between">
-        <label className="flex items-center gap-1.5 text-[12px] text-muted">
-          <input type="checkbox" checked={waived} onChange={(e) => setWaived(e.target.checked)} className="accent-brand" />
+        <label className="flex min-h-[44px] items-center gap-2 text-[12.5px] text-muted">
+          <input type="checkbox" checked={waived} onChange={(e) => setWaived(e.target.checked)} className="h-5 w-5 accent-brand" />
           Waive this bill (no charge)
         </label>
         {!waived && amountReceived < total && <span className="text-[12px] font-semibold text-amber-text">Balance ₹{(total - amountReceived).toLocaleString('en-IN')}</span>}

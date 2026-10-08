@@ -19,7 +19,7 @@ function Tile({ tone, children }: { tone: 'brand' | 'tint' | 'amber'; children: 
   return <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-[16px] ${cls}`}>{children}</div>
 }
 const Cta = ({ onClick, children }: { onClick: () => void; children: ReactNode }) => (
-  <Pressable hap="impact" onClick={onClick} className="shrink-0 rounded-pill bg-brand px-4 py-2.5 text-[13px] font-semibold text-screen shadow-float">{children}</Pressable>
+  <Pressable hap="impact" onClick={onClick} className="min-h-[44px] shrink-0 rounded-pill bg-brand px-5 py-2.5 text-[13.5px] font-semibold text-screen shadow-float">{children}</Pressable>
 )
 const Eyebrow = ({ children }: { children: ReactNode }) => <div className="text-[11px] font-semibold uppercase tracking-label text-faint">{children}</div>
 

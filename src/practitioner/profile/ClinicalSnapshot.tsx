@@ -22,7 +22,7 @@ export function ClinicalSnapshot({ complaint, allergies, medication, care, onEdi
     <Card className="mt-4 px-4 py-3.5">
       <div className="flex items-center justify-between">
         <div className="font-display text-[15px] font-semibold text-ink">Clinical snapshot</div>
-        <Pressable hap="tick" onClick={onEdit} ariaLabel="edit patient details" className="relative tap-pad flex items-center gap-1 text-[12.5px] font-semibold text-brand"><PencilSimple size={14} /> Edit</Pressable>
+        <Pressable hap="tick" onClick={onEdit} ariaLabel="edit patient details" className="relative tap-pad flex items-center gap-1 px-1 py-2 text-[12.5px] font-semibold text-brand"><PencilSimple size={14} /> Edit</Pressable>
       </div>
       <div className="mt-3">
         <Label>Chief complaint</Label>

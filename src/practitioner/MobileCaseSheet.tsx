@@ -110,7 +110,7 @@ export function MobileCaseSheet({
             <button
               key={t.name}
               onClick={() => { setTemplate(t.name); setActiveId(getSections(t.name, customTemplates)[0].id) }}
-              className={`relative tap-pad-y4 rounded-pill px-3 py-1 text-[12px] font-semibold transition ${
+              className={`relative tap-pad-y rounded-pill px-3 py-2 text-[12px] font-semibold transition ${
                 template === t.name ? 'bg-brand text-white' : 'bg-tint text-body'
               }`}
             >
@@ -119,7 +119,7 @@ export function MobileCaseSheet({
           ))}
           <button
             onClick={() => setEditingTemplate(true)}
-            className="relative tap-pad-y4 flex items-center gap-1 rounded-pill border border-dashed border-border-dash px-2.5 py-1 text-[11.5px] font-semibold text-muted"
+            className="relative tap-pad-y flex items-center gap-1 rounded-pill border border-dashed border-border-dash px-2.5 py-2 text-[12px] font-semibold text-muted"
           >
             <PencilSimpleLine size={12} /> {customTemplates.some((c) => c.id === template) ? 'Edit' : 'New'}
           </button>
@@ -146,7 +146,7 @@ export function MobileCaseSheet({
                   <div className="font-display text-[13.5px] font-semibold text-ink">Case retake</div>
                   <div className="text-[11.5px] text-muted">Remedy didn't work? Start fresh.</div>
                 </div>
-                <Pressable hap="tick" onClick={() => setRetakeOpen((v) => !v)} className="text-[12.5px] font-semibold text-purple">
+                <Pressable hap="tick" onClick={() => setRetakeOpen((v) => !v)} className="relative tap-pad px-1 py-2 text-[12.5px] font-semibold text-purple">
                   {retakeOpen ? 'Cancel' : 'Start'}
                 </Pressable>
               </div>
@@ -198,7 +198,7 @@ export function MobileCaseSheet({
           <button
             key={s.id}
             onClick={() => setActiveId(s.id)}
-            className={`flex shrink-0 items-center gap-1.5 rounded-pill px-3 py-1.5 text-[12.5px] font-semibold transition ${
+            className={`flex shrink-0 items-center gap-1.5 rounded-pill px-3.5 py-3 text-[12.5px] font-semibold transition ${
               activeId === s.id ? 'bg-brand text-screen' : 'bg-surface text-muted border border-border'
             }`}
           >

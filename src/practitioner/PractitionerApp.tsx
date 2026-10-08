@@ -564,13 +564,13 @@ function QuickInvestigationScreen({ patientId, onBack }: { patientId: string; on
       <div className="flex-1 space-y-4 overflow-y-auto px-[18px] pb-[120px] pt-2">
         <div>
           <Label>Add investigation</Label>
-          <div className="mt-2 flex items-center gap-2 rounded-pill border border-border bg-surface px-3.5 py-2">
+          <div className="mt-2 flex items-center gap-2 rounded-pill border border-border bg-surface px-3.5">
             <MagnifyingGlass size={16} className="text-faint" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Start typing — CBC, thyroid, vitamin d…"
-              className="w-full bg-transparent text-[13px] outline-none placeholder:text-faint"
+              className="w-full bg-transparent py-3 text-[13px] outline-none placeholder:text-faint"
               data-selectable="true"
             />
           </div>

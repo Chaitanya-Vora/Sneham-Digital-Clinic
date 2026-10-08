@@ -93,7 +93,7 @@ export function SlipPreview({ rx, instructions, doctorName, patientName, note }:
               role="tab"
               aria-selected={view === id}
               onClick={() => setView(id)}
-              className={`relative tap-pad-y4 flex items-center gap-1 rounded-pill px-2.5 py-1.5 text-[12px] font-semibold transition ${view === id ? 'bg-brand text-screen' : 'text-muted'}`}
+              className={`relative tap-pad-y flex items-center gap-1 rounded-pill px-2.5 py-1.5 text-[12px] font-semibold transition ${view === id ? 'bg-brand text-screen' : 'text-muted'}`}
             >
               <Icon size={12} />{label}
             </button>

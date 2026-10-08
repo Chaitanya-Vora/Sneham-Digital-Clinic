@@ -46,7 +46,7 @@ export function AppInfoRow() {
           hap="tick"
           onClick={() => void shareDiagnostics()}
           ariaLabel="share diagnostics"
-          className="flex h-10 shrink-0 items-center gap-1.5 rounded-pill border border-border bg-surface px-3.5 text-[12.5px] font-semibold text-body"
+          className="relative tap-pad-y flex h-10 shrink-0 items-center gap-1.5 rounded-pill border border-border bg-surface px-3.5 text-[12.5px] font-semibold text-body"
         >
           <ShareNetwork size={15} className="text-brand" /> Diagnostics
         </Pressable>

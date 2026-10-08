@@ -275,7 +275,7 @@ export function QuickRxEditor({ patientId, onClose }: { patientId: string; onClo
                 <div className="font-display text-[15px] font-semibold text-ink">Instructions</div>
                 <div className="text-[12px] text-muted">Exactly as it will print — your own words are fine</div>
               </div>
-              <Pressable hap="none" onClick={insertStandardInstructions} className="relative tap-pad shrink-0 text-[12.5px] font-semibold text-brand">Insert standard</Pressable>
+              <Pressable hap="none" onClick={insertStandardInstructions} className="relative tap-pad shrink-0 px-1 py-2 text-[12.5px] font-semibold text-brand">Insert standard</Pressable>
             </div>
             <textarea
               value={bodyText}

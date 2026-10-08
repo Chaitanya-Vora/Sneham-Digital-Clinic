@@ -493,7 +493,7 @@ function HomeScreen({ patient, doses, onToggleDose, go, openDoses, onRefresh, no
         ariaLabel="notifications"
         hap="tick"
         onClick={() => setNotifOpen((o) => !o)}
-        className="relative flex h-10 w-10 items-center justify-center rounded-full border border-border bg-surface"
+        className="relative tap-pad-sm flex h-10 w-10 items-center justify-center rounded-full border border-border bg-surface"
       >
         <Bell size={19} className="text-body" />
         {notifs.some((n: AppNotification) => !n.read) && (

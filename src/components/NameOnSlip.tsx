@@ -35,7 +35,7 @@ export function NameOnSlip({ hide, onHide, label, onLabel, supported, extraLabel
               aria-pressed={hide === value}
               disabled={value && unavailable}
               onClick={() => onHide(value)}
-              className={`relative tap-pad-y4 rounded-pill px-3.5 py-2 text-[13px] font-semibold transition disabled:opacity-40 ${hide === value ? 'bg-brand text-screen shadow-sm' : 'text-muted'}`}
+              className={`relative tap-pad-y rounded-pill px-3.5 py-2 text-[13px] font-semibold transition disabled:opacity-40 ${hide === value ? 'bg-brand text-screen shadow-sm' : 'text-muted'}`}
             >
               {text}
             </button>
@@ -53,7 +53,7 @@ export function NameOnSlip({ hide, onHide, label, onLabel, supported, extraLabel
       {hide && (
         <div className="mt-3 border-t border-border pt-3">
           <Label>Written on the slip as</Label>
-          <div className="mt-2 flex items-center gap-2 rounded-[12px] border border-border bg-screen px-3.5 py-2.5 focus-within:border-green-border">
+          <div className="mt-2 flex items-center gap-2 rounded-[12px] border border-border bg-screen px-3.5 focus-within:border-green-border">
             <Lock size={14} weight="fill" className="shrink-0 text-faint" />
             <input
               value={label}
@@ -62,7 +62,7 @@ export function NameOnSlip({ hide, onHide, label, onLabel, supported, extraLabel
               placeholder="e.g. Pills No. 1 — or leave blank"
               aria-label="Written on the slip as"
               data-selectable="true"
-              className="w-full bg-transparent text-[14px] text-ink outline-none placeholder:text-faint"
+              className="w-full bg-transparent py-3 text-[14px] text-ink outline-none placeholder:text-faint"
             />
           </div>
           <div className="mt-2 flex flex-wrap gap-2">

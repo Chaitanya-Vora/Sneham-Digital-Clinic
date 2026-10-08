@@ -12,7 +12,7 @@ export const MAX_ATTACHMENTS = 8
 const MAX_BYTES = 9 * 1024 * 1024 // bucket cap is 10 MB; stay safely under it
 
 const addBtn =
-  'flex h-10 items-center gap-1.5 rounded-pill border border-border bg-surface px-3.5 text-[13px] font-medium text-body transition hover:bg-surface-hover active:scale-[0.98] disabled:opacity-50'
+  'flex h-11 items-center gap-1.5 rounded-pill border border-border bg-surface px-3.5 text-[13px] font-medium text-body transition hover:bg-surface-hover active:scale-[0.98] disabled:opacity-50'
 
 function fmtSecs(s: number) {
   return `${Math.floor(s / 60)}:${String(Math.round(s) % 60).padStart(2, '0')}`

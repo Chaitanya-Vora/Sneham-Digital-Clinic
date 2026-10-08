@@ -118,7 +118,7 @@ export function CalendarCanvas({ selected, today, mode, loads, capacity, isOpenD
         style={{ touchAction: 'none' }}
         className="flex justify-center"
       >
-        <Pressable hap="tick" onClick={() => onMode(mode === 'week' ? 'month' : 'week')} ariaLabel={mode === 'week' ? 'show whole month' : 'show this week only'} className="relative tap-pad-y flex h-[18px] w-24 items-center justify-center">
+        <Pressable hap="tick" onClick={() => onMode(mode === 'week' ? 'month' : 'week')} ariaLabel={mode === 'week' ? 'show whole month' : 'show this week only'} className="relative tap-pad-y flex h-7 w-24 items-center justify-center">
           <span className="h-[4px] w-9 rounded-full bg-border-dash" />
         </Pressable>
       </motion.div>

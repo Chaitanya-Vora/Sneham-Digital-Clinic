@@ -208,7 +208,7 @@ export function PatientDetailScreen({ patientId, onBack, onOpenCase, onOpenFollo
 
           <div role="tablist" className="mt-6 flex gap-5 border-b border-border">
             {tabs.map((t) => (
-              <Pressable key={t.id} hap="tick" onClick={() => setTab(t.id)} ariaLabel={`${t.label}, ${t.n}`} className={`relative -mb-px flex items-center gap-1.5 border-b-2 pb-2.5 text-[14px] font-semibold ${tab === t.id ? 'border-brand text-ink' : 'border-transparent text-faint'}`}>
+              <Pressable key={t.id} hap="tick" onClick={() => setTab(t.id)} ariaLabel={`${t.label}, ${t.n}`} className={`relative tap-pad-y -mb-px flex items-center gap-1.5 border-b-2 pb-2.5 text-[14px] font-semibold ${tab === t.id ? 'border-brand text-ink' : 'border-transparent text-faint'}`}>
                 {t.label}<span className={`rounded-pill px-1.5 text-[11px] ${tab === t.id ? 'bg-tint text-brand' : 'bg-screen text-faint'}`}>{t.n}</span>
               </Pressable>
             ))}

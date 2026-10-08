@@ -1829,7 +1829,7 @@ function TabBar({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
 // ── PATIENT SELF-REGISTRATION ──
 const inputCls = 'w-full rounded-[14px] border bg-screen px-4 py-3.5 text-[15px] text-ink outline-none transition placeholder:text-faint focus:border-accent focus:bg-surface focus:ring-2 focus:ring-accent/20'
 
-export function PatientSelfRegister() {
+function PatientSelfRegister() {
   const { user } = useAuth()
   const addPatient = useClinic((s) => s.addPatient)
   const linkPatientIdentity = useClinic((s) => s.linkPatientIdentity)

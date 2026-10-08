@@ -337,6 +337,11 @@ const resolveNotificationOwner = (
 // connection looked identical to a successful one. This surfaces it as a
 // toast without blocking the UI on the write. useToasts is itself a Zustand
 // store, so it's reachable from here with no React plumbing needed.
+// Saves dose reminders one after another (they need their prescription to exist first).
+async function insertReminders(reminders: DoseReminder[]) {
+  for (const d of reminders) await insertDoseReminder(d)
+}
+
 function writeThrough(promise: Promise<boolean>, failureMessage: string) {
   void promise.then((ok) => {
     if (!ok) useToasts.getState().show({ title: 'Could not save', message: failureMessage })
@@ -548,7 +553,11 @@ export const useClinic = create<ClinicState>()(
             }
           } else if (w.kind === 'prescription') {
             const ok = await insertPrescription(w.rx)
-            if (ok) set((s) => ({ pendingWrites: s.pendingWrites.filter((p) => p.id !== w.id) }))
+            if (ok) {
+              set((s) => ({ pendingWrites: s.pendingWrites.filter((p) => p.id !== w.id) }))
+              // its dose reminders were created locally while offline and never saved
+              if (w.rx.status === 'published') void insertReminders(get().doseReminders.filter((d) => d.prescriptionId === w.rx.id))
+            }
           } else if (w.kind === 'prescriptionPatch') {
             const ok = await updatePrescriptionDb(w.prescriptionId, w.patch)
             if (ok) set((s) => ({ pendingWrites: s.pendingWrites.filter((p) => p.id !== w.id) }))
@@ -625,9 +634,12 @@ export const useClinic = create<ClinicState>()(
           set((s) => ({ pendingWrites: [...s.pendingWrites, { id: newId(), kind: 'prescription', rx, queuedAt: new Date().toISOString() }] }))
           useToasts.getState().show({ title: 'Saved — will send once back online', message: `${remedyLabel} is queued and will publish automatically as soon as you're reconnected.` })
         } else {
-          writeThrough(insertPrescription(rx), 'Your prescription may not have saved.')
+          // A dose reminder points at its prescription (foreign key), so it can only be saved once that
+          // row exists — saving both at the same moment lost the reminders whenever it arrived first.
+          const saved = insertPrescription(rx)
+          writeThrough(saved, 'Your prescription may not have saved.')
+          void saved.then((ok) => { if (ok) return insertReminders(newReminders) })
         }
-        for (const dr of newReminders) void insertDoseReminder(dr)
         void updatePatient(input.patientId, { currentRemedy: remedyLabel })
         writeThrough(insertNotification(notif, resolveNotificationOwner(get().patients, get().practitioners, { patientId: input.patientId })), 'The patient may not have been notified of this prescription.')
 
@@ -760,7 +772,8 @@ export const useClinic = create<ClinicState>()(
         } else {
           writeThrough(updatePrescriptionDb(id, dbPatch), 'Your prescription may not have saved.')
         }
-        for (const dr of newReminders) void insertDoseReminder(dr)
+        // (the draft's row already exists, so its reminders can go straight in)
+        void insertReminders(newReminders)
         void updatePatient(input.patientId, { currentRemedy: remedyLabel })
         writeThrough(insertNotification(notif, resolveNotificationOwner(get().patients, get().practitioners, { patientId: input.patientId })), 'The patient may not have been notified of this prescription.')
 

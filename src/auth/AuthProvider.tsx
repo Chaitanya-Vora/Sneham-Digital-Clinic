@@ -22,8 +22,7 @@ interface AuthCtx {
   dismissSignupConfirmation: () => void
 }
 
-export const AuthContext = createContext<AuthCtx | null>(null)
-export type { AuthCtx }
+const AuthContext = createContext<AuthCtx | null>(null)
 
 const native = Capacitor.isNativePlatform()
 

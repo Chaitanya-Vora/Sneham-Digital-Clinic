@@ -14,6 +14,7 @@ const EVENT_ICON: Record<JourneyKind, typeof Stethoscope> = {
 }
 const short = (iso: string) => fromISO(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
 const monthOf = (iso: string) => fromISO(iso).toLocaleDateString('en-IN', { month: 'short' })
+const dayMonth = (iso: string) => fromISO(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
 
 type Mood = 'better' | 'partial' | 'same' | 'worse' | 'none'
 function moodOf(tone: JourneyTone | undefined): Mood {
@@ -48,7 +49,8 @@ function Strip({ episodes, onPick }: { episodes: Episode[]; onPick: (id: string)
             {i > 0 && <span aria-hidden="true" className={`mt-[14px] min-w-[14px] flex-1 border-t-2 ${ep.status === 'current' ? 'border-dashed border-brand/50' : 'border-solid border-border-dash'}`} />}
             <Pressable hap="tick" scale={0.92} onClick={() => onPick(ep.id)} ariaLabel={`${ep.title}, ${ep.outcome?.label ?? (ep.status === 'cancelled' ? 'cancelled' : 'no review yet')}`} className="relative tap-pad-sm flex w-[46px] shrink-0 flex-col items-center gap-1 py-1">
               <Dot ep={ep} size={22} />
-              <span className="text-[11px] font-medium text-faint">{monthOf(ep.startDate)}</span>
+              {/* the month — or the day too when the remedy before it began in the same month */}
+              <span className="text-[11px] font-medium text-faint">{i > 0 && monthOf(courses[i - 1].startDate) === monthOf(ep.startDate) ? dayMonth(ep.startDate) : monthOf(ep.startDate)}</span>
             </Pressable>
           </Fragment>
         ))}

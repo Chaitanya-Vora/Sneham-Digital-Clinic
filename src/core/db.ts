@@ -434,9 +434,12 @@ export function rxPrivacyColumns(p: { hideRemedy?: boolean; slipLabel?: string }
 
 /** Does the database have the "hide remedy" columns? true / false, or null when we could not tell (offline). */
 export async function probeRxPrivacy(): Promise<boolean | null> {
-  const { error } = await supabase.from('prescriptions').select('hide_remedy').limit(1)
-  if (!error) return true
-  if (error.code === '42703' || /hide_remedy/i.test(error.message)) return false
+  // This runs alongside every full refresh, so it must never be the reason a refresh fails.
+  try {
+    const { error } = await supabase.from('prescriptions').select('hide_remedy').limit(1)
+    if (!error) return true
+    if (error.code === '42703' || /hide_remedy/i.test(error.message)) return false
+  } catch { /* offline or blocked — we simply do not know */ }
   return null
 }
 

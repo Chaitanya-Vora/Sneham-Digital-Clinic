@@ -55,9 +55,15 @@ import {
   ArrowCounterClockwise,
   VideoCamera,
   Copy,
+  XCircle,
+  UserMinus,
+  ChatCircleDots,
+  CalendarPlus,
 } from '@phosphor-icons/react'
 import { todayISO, formatDayLabel, addDaysISO, dateTimeKey } from '../core/day'
 import { restockRemindersDue } from '../core/restockReminders'
+import { followUpQueue, isDue } from '../core/course'
+import { PopoverMenu } from '../design-system/PopoverMenu'
 import { ownerLabel, ownerTone, isMine, isUnassigned, isAssignedToOthers, activeCoveringHandoff } from '../core/assignment'
 import { getSections, CASE_TEMPLATES } from '../core/caseTemplate'
 import { useClinic, CASE_RETAKE_APPT_MARKER, type PublishRxInput } from '../core/store'
@@ -78,7 +84,8 @@ import { Pressable } from '../design-system/Pressable'
 import { CLINIC_DETAILS } from '../core/letterheadAssets'
 import { SnehamLockup } from '../design-system/Logo'
 import { ToastHost, useToast } from '../design-system/toast'
-import { CountUp } from '../design-system/feedback'
+import { ConfirmHost, confirmDialog } from '../design-system/confirm'
+import { CountUp, TickNumber } from '../design-system/feedback'
 import { easeCalm, listContainer, listItem } from '../design-system/motion'
 import { CaseSheet } from './CaseSheet'
 import { FollowUp, HandoffDrawer } from './FollowUp'
@@ -86,6 +93,7 @@ import { WhatsAppIcon } from '../design-system/BrandIcons'
 import { CommandPalette, type Command } from './CommandPalette'
 import { WebCalendar } from './WebCalendar'
 import { AppointmentModal, type AppointmentModalRequest } from './AppointmentModal'
+import { FollowUpQueue } from './FollowUpQueue'
 import { useShallow } from 'zustand/react/shallow'
 // Lazy — Jitsi's SDK is ~116KB and should only load on the rare screen
 // that actually starts a video call, not on every console load.
@@ -146,6 +154,8 @@ export function WebApp() {
   const [guestMeeting, setGuestMeeting] = useState<{ id: string; guestName: string } | null>(null)
   const [instantMeetingOpen, setInstantMeetingOpen] = useState(false)
   const [messagesPatientId, setMessagesPatientId] = useState<string | null>(null)
+  // Set when the dashboard sends her to a particular tab of the Patients page (e.g. "Payment due").
+  const [patientsTab, setPatientsTab] = useState<string | undefined>(undefined)
   const [calendarFocusPractitionerId, setCalendarFocusPractitionerId] = useState<string | null>(null)
   const [rxDraftId, setRxDraftId] = useState<string | null>(null)
   const clinicRef = useRef<HTMLDivElement>(null)
@@ -265,6 +275,7 @@ export function WebApp() {
       setScreen('restricted')
       return
     }
+    if (id === 'patients') setPatientsTab(undefined)
     if (id === 'today' || id === 'calendar' || id === 'patients' || id === 'reports' || id === 'settings') { setScreen(id as Screen); return }
     if (id === 'messages') { setScreen('messages'); return }
     if (id === 'prescriptions') { setScreen('prescriptions-all'); return }
@@ -339,7 +350,7 @@ export function WebApp() {
                   <n.icon size={19} weight={active ? 'fill' : 'regular'} />
                   <span className="flex-1 text-left">{n.label}</span>
                   {n.id === 'messages' && unreadMessages > 0 && (
-                    <span className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-white">{unreadMessages}</span>
+                    <span className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-danger px-1 text-[11px] font-bold text-white">{unreadMessages}</span>
                   )}
                   {locked && <Lock size={13} className="text-faint" />}
                 </span>
@@ -387,7 +398,7 @@ export function WebApp() {
             >
               <Bell size={17} className="text-body" />
               {unread > 0 && (
-                <span className="notif-pulse absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-white">
+                <span className="notif-pulse absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[11px] font-bold text-white">
                   {unread}
                 </span>
               )}
@@ -405,9 +416,9 @@ export function WebApp() {
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.24, ease: easeCalm }}
             >
-              {screen === 'today' && <TodayView onOpenPatient={openPatient} onStartVideo={setVideoApptId} onOpenCalendarForPractitioner={openCalendarForPractitioner} onOpenInstantMeeting={() => setInstantMeetingOpen(true)} />}
+              {screen === 'today' && <TodayView onOpenPatient={openPatient} onStartVideo={setVideoApptId} onOpenCalendarForPractitioner={openCalendarForPractitioner} onOpenInstantMeeting={() => setInstantMeetingOpen(true)} onGo={(to) => { if (to === 'payments') { setPatientsTab('Payment due'); setScreen('patients') } else navTo(to, to === 'followups') }} />}
               {screen === 'calendar' && <WebCalendar onOpenPatient={openPatient} focusPractitionerId={calendarFocusPractitionerId} />}
-              {screen === 'patients' && <PatientsView onOpenPatient={openPatient} onNewPatient={() => setNewPatientOpen(true)} />}
+              {screen === 'patients' && <PatientsView key={patientsTab ?? 'default'} initialTab={patientsTab} onOpenPatient={openPatient} onNewPatient={() => setNewPatientOpen(true)} />}
               {screen === 'messages' && <MessagesView initialPatientId={messagesPatientId} onOpenPatient={openPatient} />}
               {screen === 'patient' && (
                 <PatientDetail
@@ -440,6 +451,7 @@ export function WebApp() {
       </div>
 
       <ToastHost />
+      <ConfirmHost />
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} commands={commands} />
       <AnimatePresence>
         {newPatientOpen && <NewPatientModal onClose={() => setNewPatientOpen(false)} onOpenPatient={openPatient} />}
@@ -487,7 +499,7 @@ export function WebApp() {
 }
 
 // ── TODAY ──
-function TodayView({ onOpenPatient, onStartVideo, onOpenCalendarForPractitioner, onOpenInstantMeeting }: { onOpenPatient: (id: string) => void; onStartVideo: (apptId: string) => void; onOpenCalendarForPractitioner: (practitionerId: string) => void; onOpenInstantMeeting: () => void }) {
+function TodayView({ onOpenPatient, onStartVideo, onOpenCalendarForPractitioner, onOpenInstantMeeting, onGo }: { onOpenPatient: (id: string) => void; onStartVideo: (apptId: string) => void; onOpenCalendarForPractitioner: (practitionerId: string) => void; onOpenInstantMeeting: () => void; onGo: (to: 'followups' | 'messages' | 'payments') => void }) {
   // Cancelled appointments stay in the database (never deleted — an
   // accidental walk-in can now be cancelled instead of being permanently
   // stuck with no way to edit or remove it), just excluded from every
@@ -499,7 +511,10 @@ function TodayView({ onOpenPatient, onStartVideo, onOpenCalendarForPractitioner,
   const role = useClinic((s) => s.role)
   const myId = useClinic((s) => s.currentPractitionerId)
   const practitioners = useClinic(useShallow((s) => s.practitioners.filter((p) => p.status === 'active')))
+  const unreadMessages = useClinic((s) => s.messages.filter((m) => m.sender === 'patient' && !m.read).length)
   const toast = useToast()
+  const [editAppt, setEditAppt] = useState<AppointmentModalRequest | null>(null)
+  const [refillsOpen, setRefillsOpen] = useState(false)
   // null = modal closed. patientId: null = show the patient picker first
   // (top-level "Quick bill"); a real id = already scoped to that patient
   // (opened from a specific appointment's "₹ Collect").
@@ -515,7 +530,6 @@ function TodayView({ onOpenPatient, onStartVideo, onOpenCalendarForPractitioner,
   const seenToday = todayAppts.filter((a) => a.status === 'Seen' || a.status === 'In consult').length
   const remainingToday = todayAppts.filter((a) => a.status === 'Upcoming' || a.status === 'Waiting' || a.status === 'New').length
   const newToday = todayAppts.filter((a) => a.isFirstVisit).length
-  const followUpsDue = appts.filter((a) => a.reason?.toLowerCase().includes('follow')).length
   // Only her own prescriptions — same "mine first" scoping as the rest of
   // this screen, not the whole clinic's opted-in courses.
   const restockDue = restockRemindersDue(prescriptions.filter((p) => p.practitionerId === myId))
@@ -526,6 +540,24 @@ function TodayView({ onOpenPatient, onStartVideo, onOpenCalendarForPractitioner,
   const revenueToday = myInvoicesToday.reduce((sum, i) => sum + i.amountReceived, 0)
   const paidCount = myInvoicesToday.filter((i) => i.amountReceived > 0).length
   const avgValue = paidCount > 0 ? Math.round(revenueToday / paidCount) : 0
+
+  // What is waiting on her — each number comes from the same place the page it opens does.
+  const queue = useMemo(() => followUpQueue(patients, allAppts, prescriptions), [patients, allAppts, prescriptions])
+  const dueFollowUps = queue.needs.filter(isDue)
+  const overdueCount = dueFollowUps.filter((r) => r.bucket === 'overdue').length
+  const endingCount = dueFollowUps.length - overdueCount
+  const { payersOwing, owed } = useMemo(() => {
+    const active = new Set(patients.filter((p) => !p.archivedAt).map((p) => p.id))
+    const byPatient = new Map<string, number>()
+    for (const i of invoices) {
+      if (i.status === 'cancelled' || !active.has(i.patientId)) continue
+      byPatient.set(i.patientId, (byPatient.get(i.patientId) ?? 0) + invoiceBalance(i))
+    }
+    let count = 0
+    let total = 0
+    for (const v of byPatient.values()) if (v > 0) { count++; total += v }
+    return { payersOwing: count, owed: total }
+  }, [patients, invoices])
   const team = practitioners.filter((p) => p.id !== myId)
   const teamToday = allAppts.filter((a) => a.date === todayISO() && a.practitionerId !== myId)
   // "Everyone" is Owner-only — a non-Owner's own fetched data is already
@@ -535,15 +567,35 @@ function TodayView({ onOpenPatient, onStartVideo, onOpenCalendarForPractitioner,
     : todayAppts
   const stats = [
     { label: "Today's appointments", num: todayAppts.length, format: fmt, sub: `${remainingToday} remaining` },
-    { label: 'Patients seen', num: seenToday, format: fmt, sub: newToday > 0 ? `${newToday} new` : 'today' },
-    { label: 'Follow-ups due', num: followUpsDue, format: fmt, sub: followUpsDue > 0 ? 'this week' : 'none pending', tone: followUpsDue > 2 ? 'amber' as const : undefined },
-    { label: 'Revenue today', num: revenueToday, format: inr, sub: paidCount > 0 ? `${paidCount} paid` : 'no payments yet' },
-    { label: 'Avg consult value', num: avgValue, format: inr, sub: seenToday > 0 ? 'per visit' : 'no consults yet', tone: seenToday > 0 ? 'green' as const : undefined },
+    { label: 'Patients seen', num: seenToday, format: fmt, sub: newToday > 0 ? `${newToday} new` : `of ${todayAppts.length} today` },
+    { label: 'Collected today', num: revenueToday, format: inr, sub: paidCount > 0 ? `${paidCount} bill${paidCount === 1 ? '' : 's'} paid` : 'no payments yet' },
+    { label: 'Avg per paid bill', num: avgValue, format: inr, sub: paidCount > 0 ? `from ${paidCount} bill${paidCount === 1 ? '' : 's'}` : 'no paid bills yet', tone: paidCount > 0 ? 'green' as const : undefined },
+  ]
+
+  const attention: { key: string; label: string; sub: string; icon: typeof Bell; count: number; amber: boolean; onClick: () => void; open?: boolean }[] = [
+    {
+      key: 'followups', label: 'Follow-ups to book', icon: CalendarPlus, count: dueFollowUps.length, amber: dueFollowUps.length > 0,
+      sub: dueFollowUps.length === 0 ? 'Every course has a visit booked' : [overdueCount > 0 && `${overdueCount} overdue`, endingCount > 0 && `${endingCount} ending this week`].filter(Boolean).join(' · '),
+      onClick: () => onGo('followups'),
+    },
+    {
+      key: 'refills', label: 'Refill reminders', icon: Bell, count: restockDue.length, amber: false,
+      sub: restockDue.length === 0 ? 'None due' : refillsOpen ? 'Tap a name to open the patient' : 'Day 21 from the last prescription',
+      onClick: () => setRefillsOpen((v) => !v), open: refillsOpen,
+    },
+    {
+      key: 'messages', label: 'Unread messages', icon: ChatCircleDots, count: unreadMessages, amber: false,
+      sub: unreadMessages === 0 ? 'All read' : 'From patients', onClick: () => onGo('messages'),
+    },
+    {
+      key: 'payments', label: 'Payments due', icon: CurrencyInr, count: payersOwing, amber: payersOwing > 0,
+      sub: payersOwing === 0 ? 'Nothing outstanding' : `${inr(owed)} outstanding`, onClick: () => onGo('payments'),
+    },
   ]
   return (
     <div className="space-y-5">
       <motion.div
-        className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5"
+        className="grid grid-cols-2 gap-3 lg:grid-cols-4"
         variants={listContainer}
         initial="hidden"
         animate="show"
@@ -553,7 +605,7 @@ function TodayView({ onOpenPatient, onStartVideo, onOpenCalendarForPractitioner,
             <Card className="px-4 py-3.5 transition-shadow hover:shadow-float">
               <Label>{s.label}</Label>
               <CountUp value={s.num} format={s.format} duration={1.2} className="mt-1 block font-display text-[24px] font-bold leading-none text-ink" />
-              <div className={`mt-1.5 text-[12px] ${s.tone === 'amber' ? 'text-amber-text' : s.tone === 'green' ? 'text-success' : 'text-faint'}`}>
+              <div className={`mt-1.5 text-[12px] ${s.tone === 'green' ? 'text-success' : 'text-faint'}`}>
                 {s.sub}
               </div>
             </Card>
@@ -561,34 +613,11 @@ function TodayView({ onOpenPatient, onStartVideo, onOpenCalendarForPractitioner,
         ))}
       </motion.div>
 
-      {restockDue.length > 0 && (
-        <Card className="border-amber-border bg-amber-tint p-4">
-          <div className="mb-2 flex items-center gap-2">
-            <Bell size={16} weight="fill" className="text-amber-text" />
-            <h2 className="font-display text-[14px] font-bold text-amber-text">Restock calls due</h2>
-          </div>
-          <div className="space-y-1">
-            {restockDue.map((rx) => {
-              const p = patients.find((pt) => pt.id === rx.patientId)
-              return (
-                <button
-                  key={rx.id}
-                  onClick={() => p && onOpenPatient(p.id)}
-                  className="flex w-full items-center gap-3 rounded-[10px] px-2 py-1.5 text-left transition hover:bg-white/40"
-                >
-                  <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-ink">{p?.name ?? 'Patient'}</span>
-                  <span className="text-[12px] text-amber-text">{rx.remedy} {rx.potency} · published {formatDayLabel(rx.publishedAt!.slice(0, 10))}</span>
-                </button>
-              )
-            })}
-          </div>
-        </Card>
-      )}
-
+      <div className="grid items-start gap-4 lg:grid-cols-[1.75fr_1fr]">
       <Card className="p-5">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="font-display text-[16px] font-bold text-ink">Today's schedule</h2>
-          <div className="flex items-center gap-2">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <h2 className="whitespace-nowrap font-display text-[16px] font-bold text-ink">Today's schedule</h2>
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => setBilling({ patientId: null })}
               className="flex items-center gap-1.5 rounded-pill border border-border bg-surface px-3 py-1.5 text-[12px] font-semibold text-body transition hover:border-green-border hover:text-brand"
@@ -668,25 +697,67 @@ function TodayView({ onOpenPatient, onStartVideo, onOpenCalendarForPractitioner,
                 {a.status !== 'Upcoming' && (
                   <Badge tone={a.status === 'In consult' ? 'green' : 'neutral'}>{a.status}</Badge>
                 )}
-                {a.status !== 'Seen' && a.status !== 'In consult' && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      if (!window.confirm(`Cancel ${p?.name ?? 'this'}'s ${a.time} appointment?`)) return
-                      useClinic.getState().updateAppointmentStatus(a.id, 'Cancelled')
-                      toast({ title: 'Appointment cancelled', message: `${p?.name ?? 'Patient'}'s ${a.time} slot is now free.` })
-                    }}
-                    className="rounded-full p-1.5 text-faint opacity-40 transition hover:bg-danger/10 hover:text-danger hover:opacity-100 group-hover:opacity-100 focus-visible:opacity-100"
-                    title="Cancel appointment"
-                  >
-                    <X size={15} />
-                  </button>
-                )}
+                <PopoverMenu
+                  label={`Actions for ${p?.name ?? 'this appointment'}`}
+                  items={[
+                    { key: 'open', label: 'Open patient', icon: <UserCircle size={17} />, onSelect: () => onOpenPatient(a.patientId) },
+                    ...(a.status !== 'Seen' && a.status !== 'In consult' ? [
+                      { key: 'edit', label: 'Edit appointment', icon: <PencilSimple size={17} />, onSelect: () => setEditAppt({ mode: 'edit', appointment: a }) },
+                      {
+                        key: 'cancel', label: 'Cancel appointment', icon: <XCircle size={17} />, tone: 'danger' as const,
+                        onSelect: async () => {
+                          const ok = await confirmDialog({
+                            title: 'Cancel this appointment?',
+                            message: `${p?.name ?? 'The patient'} · ${a.time}. The slot becomes free again.`,
+                            confirmLabel: 'Cancel appointment', cancelLabel: 'Keep it', icon: <XCircle size={28} weight="fill" />,
+                          })
+                          if (!ok) return
+                          useClinic.getState().updateAppointmentStatus(a.id, 'Cancelled')
+                          toast({ title: 'Appointment cancelled', message: `${p?.name ?? 'Patient'}'s ${a.time} slot is now free.` })
+                        },
+                      },
+                    ] : []),
+                  ]}
+                />
               </motion.div>
             )
           })}
         </motion.div>
       </Card>
+
+      <Card className="p-5">
+        <h2 className="mb-2 font-display text-[16px] font-bold text-ink">Needs attention</h2>
+        <div className="space-y-0.5">
+          {attention.map((r) => (
+            <div key={r.key}>
+              <button onClick={r.onClick} aria-expanded={r.open} className="flex w-full items-center gap-3.5 rounded-[16px] px-2 py-2.5 text-left outline-none transition hover:bg-screen focus-visible:bg-screen">
+                <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-[14px] font-display text-[20px] font-bold ${r.amber ? 'bg-amber-tint text-amber-text' : r.count > 0 ? 'bg-tint text-ink-deep' : 'bg-screen text-faint'}`}>
+                  <TickNumber value={r.count} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className={`font-display text-[14px] font-semibold ${r.count > 0 ? 'text-ink' : 'text-body'}`}>{r.label}</div>
+                  <div className="truncate text-[12.5px] text-muted">{r.sub}</div>
+                </div>
+                <CaretRight size={16} className={`shrink-0 text-faint transition ${r.open ? 'rotate-90' : ''}`} />
+              </button>
+              {r.key === 'refills' && refillsOpen && restockDue.length > 0 && (
+                <div className="mb-1 ml-[62px] space-y-0.5 border-l border-border-dash pl-3">
+                  {restockDue.map((rx) => {
+                    const pt = patients.find((x) => x.id === rx.patientId)
+                    return (
+                      <button key={rx.id} onClick={() => pt && onOpenPatient(pt.id)} className="flex w-full flex-col rounded-[10px] px-2 py-1.5 text-left transition hover:bg-screen">
+                        <span className="truncate text-[13px] font-semibold text-ink">{pt?.name ?? 'Patient'}</span>
+                        <span className="truncate text-[12px] text-muted">{rx.remedy} {rx.potency} · {formatDayLabel(rx.publishedAt!.slice(0, 10))}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </Card>
+      </div>
 
       {role === 'Owner' && viewMode === 'everyone' && team.length > 0 && (
         <Card className="p-5">
@@ -737,6 +808,8 @@ function TodayView({ onOpenPatient, onStartVideo, onOpenCalendarForPractitioner,
           </div>
         </Card>
       )}
+
+      <AnimatePresence>{editAppt && <AppointmentModal request={editAppt} onClose={() => setEditAppt(null)} />}</AnimatePresence>
 
       <InvoiceModal
         open={billing !== null}
@@ -1060,7 +1133,7 @@ function WalkInButton() {
 }
 
 // ── PATIENTS ──
-function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: string) => void; onNewPatient: () => void }) {
+function PatientsView({ onOpenPatient, onNewPatient, initialTab }: { onOpenPatient: (id: string) => void; onNewPatient: () => void; initialTab?: string }) {
   const allPatients = useClinic((s) => s.patients)
   const archivePatient = useClinic((s) => s.archivePatient)
   const restorePatient = useClinic((s) => s.restorePatient)
@@ -1069,12 +1142,14 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
   const practitioners = useClinic(useShallow((s) => s.practitioners.filter((p) => p.status === 'active')))
   const assignPatient = useClinic((s) => s.assignPatient)
   const invoices = useClinic((s) => s.invoices)
+  const appointments = useClinic((s) => s.appointments)
+  const prescriptions = useClinic((s) => s.prescriptions)
   const ME = useClinic((s) => s.currentPractitionerId)
   const role = useClinic((s) => s.role)
   const rolePermissions = useClinic((s) => s.rolePermissions)
   const canAssign = hasRolePermission(role, rolePermissions, 'assignCases')
   const toast = useToast()
-  const [active, setActive] = useState('My cases')
+  const [active, setActive] = useState(initialTab ?? 'My cases')
   const [search, setSearch] = useState('')
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [activeFilters, setActiveFilters] = useState<string[]>([])
@@ -1097,11 +1172,15 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
     return () => document.removeEventListener('click', close)
   }, [menuFor])
 
+  // Same definition as the Follow-ups tab and the dashboard: a course that has ended or
+  // ends this week, with no visit booked.
+  const followUpDueIds = useMemo(() => new Set(followUpQueue(patients, appointments, prescriptions).needs.filter(isDue).map((r) => r.patient.id)), [patients, appointments, prescriptions])
+
   const filterChips = [
     { label: 'Active cases', predicate: (p: Patient) => isMine(p, ME) },
     { label: 'Closed', predicate: (p: Patient) => p.lastOutcome === 'Clear improvement' },
     { label: 'New this month', predicate: (p: Patient) => p.lastSeen === 'Today' || p.lastSeen === 'Yesterday' || p.lastSeen === '2 days ago' },
-    { label: 'Has follow-up due', predicate: (p: Patient) => isMine(p, ME) && p.currentRemedy !== null },
+    { label: 'Has follow-up due', predicate: (p: Patient) => followUpDueIds.has(p.id) },
   ] as const
 
   // Always derived live from owningPractitionerId relative to ME (see
@@ -1110,7 +1189,7 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
   const unassignedCount = patients.filter((p) => isUnassigned(p)).length
   const mineCount = patients.filter((p) => isMine(p, ME)).length
   const withOthersCount = patients.filter((p) => isAssignedToOthers(p, ME)).length
-  const followUpDue = patients.filter((p) => isMine(p, ME) && p.currentRemedy !== null).length
+  const followUpDue = followUpDueIds.size
   const paymentDueCount = patients.filter((p) => balanceDue(p.id) > 0).length
 
   const tabFilters = [
@@ -1118,7 +1197,7 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
     ['Assigned to me', mineCount] as const,
     ['With other doctors', withOthersCount] as const,
     ['Unassigned', unassignedCount] as const,
-    ['Overdue follow-ups', followUpDue] as const,
+    ['Follow-ups due', followUpDue] as const,
     ['Payment due', paymentDueCount] as const,
     ['Archived', archivedPatients.length] as const,
   ]
@@ -1128,7 +1207,7 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
       case 'Assigned to me': return isMine(p, ME)
       case 'With other doctors': return isAssignedToOthers(p, ME)
       case 'Unassigned': return isUnassigned(p)
-      case 'Overdue follow-ups': return isMine(p, ME) && p.currentRemedy !== null
+      case 'Follow-ups due': return followUpDueIds.has(p.id)
       case 'Payment due': return balanceDue(p.id) > 0
       default: return true
     }
@@ -1337,10 +1416,10 @@ function PatientsView({ onOpenPatient, onNewPatient }: { onOpenPatient: (id: str
               <button
                 onClick={() => {
                   const p = allPatients.find((x) => x.id === menuFor)
-                  if (!window.confirm(`Archive ${p?.name ?? 'this patient'}? They'll be hidden from your active roster but nothing is deleted.`)) return
-                  archivePatient(menuFor)
+                  const id = menuFor
+                  archivePatient(id)
                   setMenuFor(null)
-                  toast({ title: 'Patient archived', message: `${p?.name ?? 'Patient'} is hidden from your active roster. Restore any time from the Archived tab.` })
+                  toast({ title: 'Patient archived', message: `${p?.name ?? 'Patient'} is hidden from your active roster.`, action: { label: 'Undo', onClick: () => restorePatient(id) } })
                 }}
                 className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-[13px] font-semibold text-body transition hover:bg-surface-hover"
               >
@@ -1566,8 +1645,10 @@ function FollowUpsOverview({ onOpenFollowUp }: { onOpenFollowUp: (id: string) =>
     <div className="space-y-4">
       <div>
         <h1 className="font-display text-[20px] font-bold text-ink">Follow-ups</h1>
-        <div className="text-[12.5px] text-faint">{followUps.length.toLocaleString('en-IN')} upcoming</div>
+        <div className="text-[12.5px] text-faint">{followUps.length.toLocaleString('en-IN')} booked</div>
       </div>
+
+      <FollowUpQueue onReview={onOpenFollowUp} />
 
       <Card className="overflow-hidden p-0">
         {followUps.length === 0 ? (
@@ -1605,9 +1686,12 @@ function FollowUpsOverview({ onOpenFollowUp }: { onOpenFollowUp: (id: string) =>
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
-                        if (!window.confirm(`Cancel ${pt?.name ?? 'this'}'s ${formatDayLabel(a.date)} follow-up?`)) return
                         useClinic.getState().updateAppointmentStatus(a.id, 'Cancelled')
-                        toast({ title: 'Follow-up cancelled', message: `${pt?.name ?? 'Patient'}'s follow-up has been cancelled.` })
+                        toast({
+                          title: 'Follow-up cancelled',
+                          message: `${pt?.name ?? 'Patient'} · ${formatDayLabel(a.date)}`,
+                          action: { label: 'Undo', onClick: () => useClinic.getState().updateAppointmentStatus(a.id, 'Upcoming') },
+                        })
                       }}
                       className="rounded-full p-1.5 text-faint transition hover:bg-danger/10 hover:text-danger"
                       title="Cancel follow-up"
@@ -1700,7 +1784,7 @@ function MessagesView({ initialPatientId, onOpenPatient }: { initialPatientId: s
                         {preview}
                       </span>
                       {c.unread > 0 && (
-                        <span className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-bold text-white">{c.unread}</span>
+                        <span className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-brand px-1 text-[11px] font-bold text-white">{c.unread}</span>
                       )}
                     </div>
                   </div>
@@ -1806,7 +1890,7 @@ function WebChatThread({ patientId }: { patientId: string }) {
               <div key={msg.id}>
                 {showDivider && (
                   <div className="mb-3 flex items-center justify-center">
-                    <span className="rounded-pill bg-surface px-3 py-1 text-[10.5px] font-semibold uppercase tracking-wider text-faint">{thisDay}</span>
+                    <span className="rounded-pill bg-surface px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-faint">{thisDay}</span>
                   </div>
                 )}
                 <div className={`flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
@@ -1886,7 +1970,7 @@ function ProgressChart({ points }: { points: { date: string; value: number }[] }
           />
         ))}
       </svg>
-      <div className="mt-1 flex items-center justify-between text-[10.5px] text-faint">
+      <div className="mt-1 flex items-center justify-between text-[11px] text-faint">
         <span>{shortDate(points[0].date)}</span>
         {n > 1 && <span>{shortDate(points[n - 1].date)}</span>}
       </div>
@@ -2241,10 +2325,9 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
                 ) : (
                   <button
                     onClick={() => {
-                      if (!window.confirm(`Archive ${patient.name}? They'll be hidden from your active roster but nothing is deleted.`)) return
                       archivePatient(patient.id)
                       setPatientMenuOpen(false)
-                      toast({ title: 'Patient archived', message: `${patient.name} is hidden from your active roster. Restore any time from the Archived tab.` })
+                      toast({ title: 'Patient archived', message: `${patient.name} is hidden from your active roster.`, action: { label: 'Undo', onClick: () => restorePatient(patient.id) } })
                     }}
                     className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-[13px] text-body transition hover:bg-surface-hover"
                   >
@@ -2549,7 +2632,7 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
                       <div className="absolute -left-[29px] flex h-6 w-6 items-center justify-center rounded-full border-2 border-border bg-surface">
                         <Icon size={12} weight="fill" className={dotColor} />
                       </div>
-                      <div className="text-[10px] font-semibold text-faint">{new Date(ev.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })} · {kindLabel(ev.kind)}</div>
+                      <div className="text-[11px] font-semibold text-faint">{new Date(ev.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })} · {kindLabel(ev.kind)}</div>
                       <div className="mt-0.5 flex items-center gap-2">
                         <span className="text-[13px] font-semibold text-ink">{ev.title}</span>
                         <Badge tone={ev.tone}>{kindLabel(ev.kind)}</Badge>
@@ -4338,13 +4421,18 @@ function SettingsView() {
               )}
               {role === 'Owner' && pr.id !== currentId && pr.role !== 'Owner' && (
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     const owner = practitioners.find((p) => p.role === 'Owner')
                     const owned = patients.filter((p) => p.owningPractitionerId === pr.id)
                     const reassignNote = owned.length > 0
-                      ? ` ${owned.length} of their patient${owned.length !== 1 ? 's' : ''} will be automatically reassigned to ${owner?.name ?? 'you'} so no one is left without an owner.`
+                      ? `${owned.length} of their patient${owned.length !== 1 ? 's' : ''} will be reassigned to ${owner?.name ?? 'you'} so no one is left without an owner. `
                       : ''
-                    if (!window.confirm(`Remove ${pr.name} from the active team?${reassignNote} Their appointments, prescriptions, and case history all stay exactly as they are — this just ends their access. You can reinstate them any time.`)) return
+                    const ok = await confirmDialog({
+                      title: `Remove ${pr.name} from the team?`,
+                      message: `${reassignNote}Their appointments, prescriptions and case history stay exactly as they are — this only ends their access. You can reinstate them any time.`,
+                      confirmLabel: 'Remove', cancelLabel: 'Keep them', icon: <UserMinus size={26} weight="fill" />,
+                    })
+                    if (!ok) return
                     updatePractitioner(pr.id, { status: 'inactive' })
                     if (owner) owned.forEach((p) => assignPatient(p.id, owner.id))
                     toast({
@@ -4440,10 +4528,12 @@ function SettingsView() {
                           <button
                             onClick={() => {
                               const next = !c.value
-                              const verb = next ? 'grant' : 'remove'
-                              if (!window.confirm(`${verb === 'grant' ? 'Grant' : 'Remove'} "${labelFor[c.key]}" ${verb === 'grant' ? 'to' : 'from'} ${r}?`)) return
                               updateRolePermission(r as EditableRole, { [c.key]: next } as Partial<RolePermissionSet>)
-                              toast({ title: 'Permission updated', message: `${r} can ${next ? 'now' : 'no longer'} ${labelFor[c.key]}.` })
+                              toast({
+                                title: 'Permission updated',
+                                message: `${r} can ${next ? 'now' : 'no longer'} ${labelFor[c.key]}.`,
+                                action: { label: 'Undo', onClick: () => updateRolePermission(r as EditableRole, { [c.key]: !next } as Partial<RolePermissionSet>) },
+                              })
                             }}
                             className="rounded-full p-1 transition hover:bg-surface-hover active:scale-90"
                             title={`Click to ${c.value ? 'remove' : 'grant'}`}
@@ -4750,7 +4840,7 @@ function NewPatientModal({ onClose, onOpenPatient }: { onClose: () => void; onOp
       name: form.name.trim(),
       age: parseInt(form.age) || 0,
       sex: form.sex,
-      location: form.location.trim() || 'Mumbai',
+      location: form.location.trim(),
       chiefComplaint: form.chiefComplaint.trim(),
       phone: form.phone.trim(),
       referralSource: form.referralSource,

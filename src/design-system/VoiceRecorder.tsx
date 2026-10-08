@@ -130,7 +130,7 @@ export function VoiceRecorder({ onAttach }: { onAttach?: (seconds: number, blob:
 
           {status === 'recorded' && (
             <div className="flex shrink-0 items-center gap-1">
-              <button onClick={reset} className="flex h-9 w-9 items-center justify-center rounded-full text-faint hover:text-danger" aria-label="delete">
+              <button onClick={reset} className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full text-faint hover:text-danger" aria-label="delete">
                 <Trash size={16} />
               </button>
               <button

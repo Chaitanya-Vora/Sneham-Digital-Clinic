@@ -190,7 +190,7 @@ export function PatientSearchSheet({
                     </div>
                     <div className="flex flex-col items-end gap-1">
                       {p.currentRemedy && <Badge tone="green">{p.currentRemedy}</Badge>}
-                      <span className="text-[11px] text-faint">{p.lastSeen}</span>
+                      <span className="text-[12px] text-faint">{p.lastSeen}</span>
                     </div>
                   </Pressable>
                 </motion.div>
@@ -364,7 +364,7 @@ export function PatientDetailScreen({
             <div className="truncate text-[13px] text-muted">
               {[`${patient.age}y`, patient.sex, patient.location].filter(Boolean).join(' · ')}
             </div>
-            <div className="truncate text-[11px] text-faint">Patient ID {patient.wsCode.replace('#WS-', '')}</div>
+            <div className="truncate text-[12px] text-faint">Patient ID {patient.wsCode.replace('#WS-', '')}</div>
           </div>
           {patient.phone && (
             <div className="flex shrink-0 items-center gap-1.5">
@@ -394,7 +394,7 @@ export function PatientDetailScreen({
             team card below now, not duplicated here */}
         <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
           {patient.currentRemedy && <Badge tone="green">{patient.currentRemedy}</Badge>}
-          <span className="text-[11px] text-faint">Last seen: {patient.lastSeen}</span>
+          <span className="text-[12px] text-faint">Last seen: {patient.lastSeen}</span>
         </div>
 
         {/* dose adherence */}
@@ -629,7 +629,7 @@ export function PatientDetailScreen({
                       <div key={inv.id} className={`flex items-center gap-2.5 rounded-[14px] border border-border bg-surface px-3 py-2.5 ${cancelled ? 'opacity-60' : ''}`}>
                         <div className="flex-1">
                           <div className={`font-display text-[13.5px] font-semibold text-ink ${cancelled ? 'line-through' : ''}`}>
-                            ₹{total.toLocaleString('en-IN')} <span className="font-body text-[11px] font-normal text-faint">#{inv.invoiceNo}</span>
+                            ₹{total.toLocaleString('en-IN')} <span className="font-body text-[12px] font-normal text-faint">#{inv.invoiceNo}</span>
                           </div>
                           <div className="text-[11.5px] text-muted">{formatDayLabel(inv.date)} · {inv.items[0]?.name ?? 'Consultation'}{inv.items.length > 1 ? ` +${inv.items.length - 1} more` : ''}</div>
                         </div>
@@ -697,7 +697,7 @@ export function PatientDetailScreen({
                         <span>{rx.durationDays ? `${rx.durationDays} days` : 'Until settled'}</span>
                       </div>
                       <div className="mt-1.5 flex items-center justify-between gap-3">
-                        <div className="text-[11px] text-faint">
+                        <div className="text-[12px] text-faint">
                           {rx.status === 'published' ? 'Published' : rx.status === 'cancelled' ? 'Cancelled' : 'Saved (not yet published)'} {new Date(rx.publishedAt ?? rx.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
                         </div>
                         {rx.status !== 'cancelled' && (
@@ -705,7 +705,7 @@ export function PatientDetailScreen({
                             hap="tick"
                             ariaLabel={rx.status === 'draft' ? 'discard draft' : 'cancel prescription'}
                             onClick={() => setCancelRx({ id: rx.id, open: true })}
-                            className="relative tap-pad-text flex shrink-0 items-center gap-1 text-[11px] font-medium text-danger/70"
+                            className="relative tap-pad-text flex shrink-0 items-center gap-1 text-[12px] font-medium text-danger/70"
                           >
                             <Prohibit size={12} /> {rx.status === 'draft' ? 'Discard' : 'Cancel'}
                           </Pressable>
@@ -826,10 +826,9 @@ export function PatientDetailScreen({
               as="div"
               hap="warn"
               onClick={() => {
-                if (!window.confirm(`Archive ${patient.name}? They'll be hidden from the active roster but nothing is deleted.`)) return
                 archivePatient(patient.id)
                 setActionsOpen(false)
-                toast({ title: 'Patient archived', message: `${patient.name} is hidden from the active roster.` })
+                toast({ title: 'Patient archived', message: `${patient.name} is hidden from the active roster.`, action: { label: 'Undo', onClick: () => restorePatient(patient.id) } })
                 onBack()
               }}
               className="flex cursor-pointer items-center gap-3 rounded-[14px] px-2 py-3"

@@ -8,8 +8,10 @@ import {
   Plus,
   PencilSimple,
   X,
+  XCircle,
 } from '@phosphor-icons/react'
 import { toISO } from '../core/day'
+import { confirmDialog } from '../design-system/confirm'
 import { useClinic } from '../core/store'
 import type { Appointment } from '../core/types'
 import { Avatar, Badge, Card, Chip } from '../design-system/ui'
@@ -199,8 +201,14 @@ export function WebCalendar({ onOpenPatient, focusPractitionerId }: { onOpenPati
               patients={patients}
               onOpen={onOpenPatient}
               onEdit={(a) => setModalRequest({ mode: 'edit', appointment: a })}
-              onCancel={(a) => {
-                if (!window.confirm(`Cancel this appointment at ${a.time}?`)) return
+              onCancel={async (a) => {
+                const who = patients.find((p) => p.id === a.patientId)?.name
+                const ok = await confirmDialog({
+                  title: 'Cancel this appointment?',
+                  message: `${who ? `${who} · ` : ''}${a.time}. The slot becomes free again.`,
+                  confirmLabel: 'Cancel appointment', cancelLabel: 'Keep it', icon: <XCircle size={28} weight="fill" />,
+                })
+                if (!ok) return
                 useClinic.getState().updateAppointmentStatus(a.id, 'Cancelled')
                 toast({ title: 'Appointment cancelled', message: `${a.time} slot is now free.` })
               }}
@@ -353,7 +361,7 @@ function WeekView({ dates, allAppts, timeBlocks, patients, onSelectDay, onOpenPa
               onClick={() => onSelectDay(d)}
               className="flex flex-col items-center gap-0.5 border-l border-border py-2 transition hover:bg-surface-hover"
             >
-              <span className="text-[10.5px] font-medium text-faint">{DAYS[d.getDay() === 0 ? 6 : d.getDay() - 1]}</span>
+              <span className="text-[11px] font-medium text-faint">{DAYS[d.getDay() === 0 ? 6 : d.getDay() - 1]}</span>
               <span className={`flex h-6 w-6 items-center justify-center rounded-full text-[12px] font-bold ${today ? 'bg-brand text-screen' : 'text-ink'}`}>
                 {d.getDate()}
               </span>
@@ -366,7 +374,7 @@ function WeekView({ dates, allAppts, timeBlocks, patients, onSelectDay, onOpenPa
       <div className="relative">
         {HOURS.map((h) => (
           <div key={h} className="grid grid-cols-[52px_repeat(7,1fr)] border-b border-border last:border-b-0" style={{ minHeight: WEEK_HOUR_HEIGHT }}>
-            <div className="flex items-start justify-end border-r border-border px-2 pt-1 text-[10px] text-faint">{fmtHour(h)}</div>
+            <div className="flex items-start justify-end border-r border-border px-2 pt-1 text-[11px] text-faint">{fmtHour(h)}</div>
             {dates.map((d) => {
               const iso = toISO(d)
               const dayAppts = apptsForDate(d, allAppts).filter((a) => Math.floor(parseHour(a.time)) === h)
@@ -384,7 +392,7 @@ function WeekView({ dates, allAppts, timeBlocks, patients, onSelectDay, onOpenPa
                   {dayBlocks.map((b) => (
                     <div
                       key={b.id}
-                      className="absolute inset-x-0.5 z-[5] flex items-center justify-center overflow-hidden rounded-[6px] border border-dashed border-border-dash bg-raised/60 px-1 text-[9px] font-medium text-faint"
+                      className="absolute inset-x-0.5 z-[5] flex items-center justify-center overflow-hidden rounded-[6px] border border-dashed border-border-dash bg-raised/60 px-1 text-[11px] font-medium text-faint"
                       style={{ top: 1, height: Math.max((b.durationMin / 60) * WEEK_HOUR_HEIGHT - 2, WEEK_HOUR_HEIGHT - 2) }}
                     >
                       {b.reason}
@@ -403,7 +411,7 @@ function WeekView({ dates, allAppts, timeBlocks, patients, onSelectDay, onOpenPa
                         className={`absolute inset-x-0.5 z-10 overflow-hidden rounded-[6px] px-1.5 py-0.5 text-left transition hover:brightness-95 ${isVideo ? 'bg-amber-tint text-amber-text' : 'bg-tint text-brand'}`}
                         style={{ top: topOffset, height: blockHeight }}
                       >
-                        <div className="truncate text-[10px] font-semibold">{isVideo ? 'Video' : 'Consult'}</div>
+                        <div className="truncate text-[11px] font-semibold">{isVideo ? 'Video' : 'Consult'}</div>
                         {blockHeight > 32 && <div className="truncate text-[9.5px] opacity-80">{p?.name ?? 'Patient'}</div>}
                       </button>
                     )
@@ -453,12 +461,12 @@ function MonthView({ grid, selectedDate, onSelectDay, allAppts, patients }: {
                     {appts.slice(0, 2).map((a) => {
                       const p = patients.find((pt) => pt.id === a.patientId)
                       return (
-                        <div key={a.id} className="truncate rounded-[4px] bg-tint-pale px-1 py-0.5 text-[9px] font-medium text-brand">
+                        <div key={a.id} className="truncate rounded-[4px] bg-tint-pale px-1 py-0.5 text-[11px] font-medium text-brand">
                           {a.time.replace(' AM', '').replace(' PM', '')} {p?.name?.split(' ')[0]}
                         </div>
                       )
                     })}
-                    {appts.length > 2 && <div className="text-[9px] text-faint">+{appts.length - 2}</div>}
+                    {appts.length > 2 && <div className="text-[11px] text-faint">+{appts.length - 2}</div>}
                   </div>
                 )}
               </button>

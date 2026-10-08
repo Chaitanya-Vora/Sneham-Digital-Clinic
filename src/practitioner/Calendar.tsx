@@ -345,7 +345,7 @@ export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatien
                 Today
               </Pressable>
             )}
-            <Pressable hap="tick" onClick={() => setAddChooserOpen(true)} className="relative tap-pad-sm flex h-8 w-8 items-center justify-center rounded-full bg-brand text-screen">
+            <Pressable hap="tick" onClick={() => setAddChooserOpen(true)} className="relative tap-pad flex h-8 w-8 items-center justify-center rounded-full bg-brand text-screen">
               <Plus size={16} weight="bold" />
             </Pressable>
           </div>
@@ -384,7 +384,7 @@ export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatien
                   key={p.id}
                   hap="select"
                   onClick={() => setViewPractitionerId(isMe ? null : p.id)}
-                  className={`flex shrink-0 items-center gap-1.5 rounded-pill border px-3 py-1.5 text-[12.5px] font-semibold transition-colors ${
+                  className={`flex shrink-0 items-center gap-1.5 rounded-pill border px-3.5 py-3 text-[12.5px] font-semibold transition-colors ${
                     selected ? 'border-brand bg-brand text-screen' : 'border-border bg-surface text-body'
                   }`}
                 >
@@ -412,13 +412,13 @@ export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatien
               {/* day strip */}
               <div className="px-[18px] pb-2 pt-3">
                 <div className="flex items-center justify-between">
-                  <Pressable hap="tick" onClick={() => shiftWeek(-1)} className="relative tap-pad-sm flex h-8 w-8 items-center justify-center rounded-full border border-border bg-surface">
+                  <Pressable hap="tick" onClick={() => shiftWeek(-1)} className="relative tap-pad flex h-8 w-8 items-center justify-center rounded-full border border-border bg-surface">
                     <CaretLeft size={16} className="text-body" />
                   </Pressable>
                   <div className="text-[13px] font-semibold text-muted">
                     {weekDays[0].getDate()} {MONTH_NAMES_SHORT[weekDays[0].getMonth()]} – {weekDays[6].getDate()} {MONTH_NAMES_SHORT[weekDays[6].getMonth()]}
                   </div>
-                  <Pressable hap="tick" onClick={() => shiftWeek(1)} className="relative tap-pad-sm flex h-8 w-8 items-center justify-center rounded-full border border-border bg-surface">
+                  <Pressable hap="tick" onClick={() => shiftWeek(1)} className="relative tap-pad flex h-8 w-8 items-center justify-center rounded-full border border-border bg-surface">
                     <CaretRight size={16} className="text-body" />
                   </Pressable>
                 </div>
@@ -434,7 +434,7 @@ export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatien
                         onClick={() => selectDay(d)}
                         className={`relative flex flex-1 flex-col items-center gap-1 rounded-[14px] py-2 transition-colors ${selected ? 'bg-brand' : ''}`}
                       >
-                        <span className={`text-[11px] font-medium ${selected ? 'text-white/80' : isToday ? 'text-brand' : 'text-muted'}`}>
+                        <span className={`text-[12px] font-medium ${selected ? 'text-white/80' : isToday ? 'text-brand' : 'text-muted'}`}>
                           {DAY_NAMES[d.getDay() === 0 ? 6 : d.getDay() - 1]}
                         </span>
                         <span className={`font-display text-[16px] font-bold ${selected ? 'text-white' : isToday ? 'text-brand' : 'text-ink'}`}>
@@ -645,7 +645,7 @@ function MonthGrid({
       {/* day headers */}
       <div className="mt-4 grid grid-cols-7 gap-0">
         {DAY_NAMES.map((d) => (
-          <div key={d} className="py-1 text-center text-[11px] font-semibold text-muted">{d}</div>
+          <div key={d} className="py-1 text-center text-[12px] font-semibold text-muted">{d}</div>
         ))}
       </div>
 
@@ -748,7 +748,7 @@ function AppointmentCard({
         <div className="font-display text-[13px] font-bold text-ink">
           {a.time.replace(' AM', '').replace(' PM', '')}
         </div>
-        <div className="text-[11px] text-faint">
+        <div className="text-[12px] text-faint">
           {a.time.includes('AM') ? 'AM' : 'PM'}
         </div>
       </div>
@@ -761,12 +761,12 @@ function AppointmentCard({
           {p?.name ?? 'Unknown'}
         </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-          <span className="flex items-center gap-0.5 text-[11px] text-muted">
+          <span className="flex items-center gap-0.5 text-[12px] text-muted">
             {a.type === 'Video' ? <VideoCamera size={11} weight="fill" /> : <MapPin size={11} weight="fill" />}
             {a.type}
           </span>
-          <span className="text-[11px] text-faint">·</span>
-          <span className="text-[11px] text-muted">{a.durationMin}m</span>
+          <span className="text-[12px] text-faint">·</span>
+          <span className="text-[12px] text-muted">{a.durationMin}m</span>
         </div>
         {(a.tag || a.reason) && (
           <div className="mt-0.5 truncate text-[12px] text-muted">{a.tag ?? a.reason}</div>
@@ -779,7 +779,7 @@ function AppointmentCard({
             <Pressable
               hap="tick"
               onClick={(e) => { e?.stopPropagation(); onEdit() }}
-              className="relative tap-pad-text text-[11px] font-medium text-brand"
+              className="relative tap-pad px-2 py-2 text-[12px] font-medium text-brand"
             >
               Edit
             </Pressable>
@@ -788,7 +788,7 @@ function AppointmentCard({
             <Pressable
               hap="tick"
               onClick={(e) => { e?.stopPropagation(); onCancel() }}
-              className="relative tap-pad-text text-[11px] font-medium text-danger/70"
+              className="relative tap-pad px-2 py-2 text-[12px] font-medium text-danger/70"
             >
               Cancel
             </Pressable>
@@ -797,7 +797,7 @@ function AppointmentCard({
             <Pressable
               hap="tick"
               onClick={(e) => { e?.stopPropagation(); onReassign() }}
-              className="relative tap-pad-text text-[11px] font-medium text-brand"
+              className="relative tap-pad-text text-[12px] font-medium text-brand"
             >
               Reassign to me
             </Pressable>
@@ -898,7 +898,7 @@ function BookApptSheet({
             <Label>Time</Label>
             <div className="mt-1.5 flex flex-wrap gap-1.5">
               {BOOK_HOURS.map((h) => (
-                <Chip key={h} selected={hour === h} onClick={() => onHourChange(h)} className="text-[11px]">{fmtHour(h)}</Chip>
+                <Chip key={h} selected={hour === h} onClick={() => onHourChange(h)} className="text-[12px]">{fmtHour(h)}</Chip>
               ))}
             </div>
           </div>

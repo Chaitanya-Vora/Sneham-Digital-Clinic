@@ -166,7 +166,7 @@ export function MobileCaseSheet({
                     rows={2}
                     className="mt-1.5 w-full resize-y rounded-[10px] border border-border bg-surface px-2.5 py-2 text-[12.5px] leading-relaxed text-body outline-none focus:border-purple-border"
                   />
-                  <p className="mt-1.5 text-[11px] text-faint">Saves the current notes as their own visit, then clears the sheet for a fresh case-taking. Applies when this consult ends.</p>
+                  <p className="mt-1.5 text-[12px] text-faint">Saves the current notes as their own visit, then clears the sheet for a fresh case-taking. Applies when this consult ends.</p>
                   <Pressable
                     hap="tick"
                     onClick={() => {
@@ -221,7 +221,7 @@ export function MobileCaseSheet({
                 <div key={d.id} className="flex items-center gap-2 rounded-[12px] border border-border bg-surface px-3 py-2">
                   <Microphone size={14} className="text-brand" />
                   <span className="flex-1 truncate text-[12.5px] font-medium text-ink">{d.name}</span>
-                  <span className="shrink-0 text-[11px] text-faint">{d.date}</span>
+                  <span className="shrink-0 text-[12px] text-faint">{d.date}</span>
                 </div>
               ))}
             </div>

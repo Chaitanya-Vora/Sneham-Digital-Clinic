@@ -217,7 +217,7 @@ export function PatientApp() {
                   <ReadOnlyField label="Full name" value={patient.name} />
                   <ReadOnlyField label="Age" value={`${patient.age} years`} />
                   <ReadOnlyField label="Sex" value={patient.sex} />
-                  <ReadOnlyField label="Location" value={patient.location} />
+                  <ReadOnlyField label="Location" value={patient.location || '—'} />
                   <ReadOnlyField label="Patient since" value={patient.patientSince} />
                   <ReadOnlyField label="WS Code" value={patient.wsCode} />
                 </div>
@@ -444,10 +444,10 @@ function NotificationListPanel({ notifs, markRead, onClose }: { notifs: AppNotif
               <div className="min-w-0 flex-1">
                 <div className="font-display text-[13px] font-semibold text-ink">{n.title}</div>
                 <div className="mt-0.5 text-[12px] leading-snug text-muted">{n.message}</div>
-                <div className="mt-1 text-[11px] text-faint">{n.time}</div>
+                <div className="mt-1 text-[12px] text-faint">{n.time}</div>
               </div>
               {!n.read && (
-                <Pressable ariaLabel="mark read" hap="tick" onClick={() => markRead(n.id)} className="mt-0.5 text-[11px] font-semibold text-brand">
+                <Pressable ariaLabel="mark read" hap="tick" onClick={() => markRead(n.id)} className="mt-0.5 text-[12px] font-semibold text-brand">
                   Mark read
                 </Pressable>
               )}
@@ -678,7 +678,7 @@ function HomeScreen({ patient, doses, onToggleDose, go, openDoses, onRefresh, no
           ].map((a) => (
             <Pressable key={a.label} as="div" hap="tick" onClick={a.on} scale={0.94} className="flex cursor-pointer flex-col items-center gap-2 rounded-[18px] border border-border bg-surface py-3.5">
               <a.icon size={22} className="text-brand" />
-              <span className="text-[11px] font-medium text-body">{a.label}</span>
+              <span className="text-[12px] font-medium text-body">{a.label}</span>
             </Pressable>
           ))}
         </div>
@@ -730,7 +730,7 @@ function DoseRow({ d, onToggle }: { d: any; onToggle: (id: string) => void }) {
         hap={d.loggedToday ? 'tick' : 'success'}
         scale={0.8}
         onClick={() => onToggle(d.id)}
-        className={`flex h-9 w-9 items-center justify-center rounded-full border transition-colors ${d.loggedToday ? 'border-accent bg-accent text-white' : 'border-border-dash bg-surface text-faint'}`}
+        className={`relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full border transition-colors ${d.loggedToday ? 'border-accent bg-accent text-white' : 'border-border-dash bg-surface text-faint'}`}
       >
         <motion.span key={String(d.loggedToday)} initial={{ scale: 0.4, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: 'spring', stiffness: 500, damping: 18 }}>
           <Check size={16} weight="bold" />
@@ -889,7 +889,7 @@ function DosesScreen({ doses, onToggle, back, onRefresh }: any) {
         <Card className="flex flex-col items-center py-6">
           <ProgressRing pct={pct} size={148} stroke={13}>
             <CountUp value={pct} format={(n) => `${Math.round(n)}%`} className="font-display text-[30px] font-bold text-ink" />
-            <span className="text-[11px] text-faint">logged today</span>
+            <span className="text-[12px] text-faint">logged today</span>
           </ProgressRing>
         </Card>
 
@@ -1071,7 +1071,7 @@ function AppointmentsScreen({ onRefresh, patientId }: { onRefresh: () => Promise
               >
                 {p.id === myPractitionerId && <Check size={13} weight="bold" className="text-brand" />}
                 {p.name}
-                {p.id !== myPractitionerId && <span className="text-[11px] font-normal text-faint">Covering</span>}
+                {p.id !== myPractitionerId && <span className="text-[12px] font-normal text-faint">Covering</span>}
               </Pressable>
             ))}
           </div>
@@ -1248,7 +1248,7 @@ function AppointmentsScreen({ onRefresh, patientId }: { onRefresh: () => Promise
 function ProfileScreen({ patient, onRefresh, onPush }: { patient: any; onRefresh: () => Promise<void>; onPush: (s: PushedScreen) => void }) {
   const header = <BigHeader title="Profile" />
   const rows: { title: string; sub: string; push: PushedScreen }[] = [
-    { title: 'Personal details', sub: `${patient.name} · ${patient.age} · ${patient.location}`, push: 'personal' },
+    { title: 'Personal details', sub: [patient.name, patient.age, patient.location].filter(Boolean).join(' · '), push: 'personal' },
     { title: 'Medical basics', sub: [patient.allergies, patient.regularMedication].filter(Boolean).join(' · ') || 'Not recorded yet', push: 'medical' },
     { title: 'Notifications', sub: 'Doses, appointments, follow-ups', push: 'notifications' },
     { title: 'Messages', sub: 'Chat with your doctor', push: 'messages' },
@@ -1261,7 +1261,7 @@ function ProfileScreen({ patient, onRefresh, onPush }: { patient: any; onRefresh
         <div className="flex flex-col items-center py-3">
           <Avatar initials={patient.initials} size={72} />
           <div className="mt-3 font-display text-[20px] font-bold text-ink">{patient.name}</div>
-          <div className="text-[13px] text-muted">{patient.wsCode} · Sneham Digital Clinic, {patient.location}</div>
+          <div className="text-[13px] text-muted">{patient.wsCode} · Sneham Digital Clinic{patient.location ? `, ${patient.location}` : ''}</div>
         </div>
         {rows.map((row) => (
           <Pressable
@@ -1594,7 +1594,7 @@ function CheckInScreen({ back, onRefresh, patientId }: { back: () => void; onRef
               className="mt-3 w-full accent-brand"
               aria-label="Overall improvement"
             />
-            <div className="mt-1 flex justify-between text-[11px] text-faint">
+            <div className="mt-1 flex justify-between text-[12px] text-faint">
               <span>No better</span>
               <span>Much better</span>
             </div>
@@ -1640,7 +1640,7 @@ function CheckInScreen({ back, onRefresh, patientId }: { back: () => void; onRef
                   </div>
                   {ci.changeChips.length > 0 && (
                     <div className="mt-1.5 flex flex-wrap gap-1">
-                      {ci.changeChips.map((c) => <span key={c} className="rounded-pill bg-screen px-2 py-0.5 text-[11px] font-medium text-body">{c}</span>)}
+                      {ci.changeChips.map((c) => <span key={c} className="rounded-pill bg-screen px-2 py-0.5 text-[12px] font-medium text-body">{c}</span>)}
                     </div>
                   )}
                 </Card>
@@ -1763,7 +1763,7 @@ function MessagesScreen({ back, onRefresh, patientId }: { back: () => void; onRe
     <div className="flex h-full flex-col bg-screen">
       {/* WhatsApp-style green header */}
       <div className="flex items-center gap-3 bg-brand px-3 pb-3 pt-[var(--app-top)]">
-        <Pressable ariaLabel="back" hap="impact" onClick={back} className="flex h-9 w-9 items-center justify-center">
+        <Pressable ariaLabel="back" hap="impact" onClick={back} className="relative tap-pad-sm flex h-9 w-9 items-center justify-center">
           <CaretLeft size={20} weight="bold" className="text-white" />
         </Pressable>
         <div className="flex h-[38px] w-[38px] items-center justify-center rounded-full bg-white/20 font-display text-[14px] font-semibold text-white">
@@ -1771,7 +1771,7 @@ function MessagesScreen({ back, onRefresh, patientId }: { back: () => void; onRe
         </div>
         <div className="flex-1">
           <div className="font-display text-[16px] font-semibold text-white">{doctorName}</div>
-          <div className="text-[11px] text-white/70">Doctor</div>
+          <div className="text-[12px] text-white/70">Doctor</div>
         </div>
       </div>
       <div className="min-h-0 flex-1">
@@ -1819,7 +1819,9 @@ function PatientSelfRegister() {
   const toast = useToast()
   const [name, setName] = useState('')
   const [age, setAge] = useState('')
-  const [sex, setSex] = useState<'Female' | 'Male' | 'Other'>('Female')
+  // Nothing is chosen for her: a pre-selected sex used to be saved on the record even when she never touched it.
+  const [sex, setSex] = useState<'Female' | 'Male' | 'Other' | null>(null)
+  const [tried, setTried] = useState(false) // she tapped Continue — now say what is missing
   const [location, setLocation] = useState('')
   const [phone, setPhone] = useState('')
   const [complaint, setComplaint] = useState('')
@@ -1828,17 +1830,29 @@ function PatientSelfRegister() {
   const [saving, setSaving] = useState(false)
   const nameRef = useRef<HTMLInputElement>(null)
 
-  const canProceed = name.trim().length >= 2 && age.trim().length > 0 && phone.trim().length >= 7
+  const ageNum = parseInt(age, 10)
+  const missing = {
+    name: name.trim().length < 2,
+    age: !(ageNum >= 1 && ageNum <= 120),
+    sex: sex === null,
+    phone: phone.replace(/\D/g, '').length < 7,
+  }
+  const canProceed = !Object.values(missing).some(Boolean)
   const canSubmit = complaint.trim().length >= 3
+  const bad = (k: keyof typeof missing) => tried && missing[k]
+  const fieldCls = (isBad: boolean) => `mt-1.5 w-full rounded-[12px] border bg-surface px-3.5 py-2.5 text-[14px] text-body outline-none focus:border-green-border ${isBad ? 'border-danger' : 'border-border'}`
+  const err = (text: string) => <p className="mt-1 text-[12px] font-medium text-danger">{text}</p>
 
   // If the practitioner already added this person as a patient, their phone
   // number is the only thing we have to recognise them by — so a real match
   // here means "link this login to that existing record" instead of
   // creating a duplicate. Only ever matches a record no one has claimed yet.
   function handleContinue() {
+    setTried(true)
     if (!canProceed) return
     const trimmedPhone = phone.trim()
     const match = patients.find((p) => p.phone?.trim() === trimmedPhone && !p.authUserId)
+    setTried(false)
     if (match) {
       setMatchedPatient(match)
       setStep('confirm')
@@ -1856,17 +1870,19 @@ function PatientSelfRegister() {
 
   function notMe() {
     setMatchedPatient(null)
+    setTried(false)
     setStep(2)
   }
 
   function submit() {
-    if (!canSubmit) return
+    setTried(true)
+    if (!canSubmit || sex === null) return
     setSaving(true)
     const created = addPatient({
       name: name.trim(),
-      age: parseInt(age, 10) || 0,
+      age: ageNum || 0,
       sex,
-      location: location.trim() || 'Mumbai',
+      location: location.trim(), // optional — left empty, it stays empty
       chiefComplaint: complaint.trim(),
       phone: phone.trim(),
     })
@@ -1895,11 +1911,12 @@ function PatientSelfRegister() {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="e.g. Priya Sharma"
-                  className="mt-1.5 w-full rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-[14px] text-body outline-none focus:border-green-border"
+                  className={fieldCls(bad('name'))}
                   autoFocus
                 />
+                {bad('name') && err('Enter your name')}
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-[1fr_1.9fr] gap-3">
                 <div>
                   <Label>Age</Label>
                   <input
@@ -1907,8 +1924,9 @@ function PatientSelfRegister() {
                     onChange={(e) => setAge(e.target.value.replace(/\D/g, ''))}
                     placeholder="28"
                     inputMode="numeric"
-                    className="mt-1.5 w-full rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-[14px] text-body outline-none focus:border-green-border"
+                    className={fieldCls(bad('age'))}
                   />
+                  {bad('age') && err('Enter your age')}
                 </div>
                 <div>
                   <Label>Sex</Label>
@@ -1919,13 +1937,14 @@ function PatientSelfRegister() {
                         type="button"
                         onClick={() => setSex(opt)}
                         className={`flex-1 rounded-[12px] border py-2.5 text-[14px] font-semibold transition ${
-                          sex === opt ? 'border-brand bg-brand text-white' : 'border-border bg-surface text-body'
+                          sex === opt ? 'border-brand bg-brand text-white' : bad('sex') ? 'border-danger bg-surface text-body' : 'border-border bg-surface text-body'
                         }`}
                       >
                         {opt}
                       </button>
                     ))}
                   </div>
+                  {bad('sex') && err('Choose one')}
                 </div>
               </div>
               <div>
@@ -1935,17 +1954,17 @@ function PatientSelfRegister() {
                   onChange={(e) => setPhone(e.target.value)}
                   placeholder="+91 98765 43210"
                   type="tel"
-                  className="mt-1.5 w-full rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-[14px] text-body outline-none focus:border-green-border"
+                  className={fieldCls(bad('phone'))}
                 />
-                <p className="mt-1 text-[11.5px] text-faint">If your clinic already has a record for you, this helps us find it.</p>
+                {bad('phone') ? err('Enter a valid phone number') : <p className="mt-1 text-[11.5px] text-faint">If your clinic already has a record for you, this helps us find it.</p>}
               </div>
               <div>
-                <Label>City</Label>
+                <Label>City <span className="font-normal normal-case tracking-normal text-faint">· optional</span></Label>
                 <input
                   value={location}
                   onChange={(e) => setLocation(e.target.value)}
-                  placeholder="Mumbai"
-                  className="mt-1.5 w-full rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-[14px] text-body outline-none focus:border-green-border"
+                  placeholder="Your town or city"
+                  className={fieldCls(false)}
                 />
               </div>
             </div>
@@ -1956,7 +1975,7 @@ function PatientSelfRegister() {
                 <Avatar initials={matchedPatient.initials} size={48} />
                 <div>
                   <div className="font-display text-[16px] font-bold text-ink">{matchedPatient.name}</div>
-                  <div className="text-[13px] text-muted">{matchedPatient.age} &middot; {matchedPatient.location}</div>
+                  <div className="text-[13px] text-muted">{[matchedPatient.age, matchedPatient.location].filter(Boolean).join(' · ')}</div>
                 </div>
               </Card>
               <p className="text-[14px] leading-relaxed text-body">We found an existing record with this phone number at Sneham Digital Clinic. Is this you?</p>
@@ -1972,9 +1991,10 @@ function PatientSelfRegister() {
                   onChange={(e) => setComplaint(e.target.value)}
                   rows={4}
                   placeholder="e.g. Difficulty sleeping, frequent headaches..."
-                  className="mt-2 w-full resize-y rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-[14px] leading-relaxed text-body outline-none focus:border-green-border"
+                  className={`mt-2 w-full resize-y rounded-[12px] border bg-surface px-3.5 py-2.5 text-[14px] leading-relaxed text-body outline-none focus:border-green-border ${tried && !canSubmit ? 'border-danger' : 'border-border'}`}
                   autoFocus
                 />
+                {tried && !canSubmit && err('Tell your doctor a little about it')}
               </div>
             </div>
           )}
@@ -1987,7 +2007,7 @@ function PatientSelfRegister() {
           </Button>
         )}
         {step === 1 && (
-          <Button variant="primary" className="flex-1" disabled={!canProceed} onClick={handleContinue}>
+          <Button variant="primary" className="flex-1" onClick={handleContinue}>
             Continue
           </Button>
         )}
@@ -2002,7 +2022,7 @@ function PatientSelfRegister() {
           </>
         )}
         {step === 2 && (
-          <Button variant="primary" className="flex-1" disabled={!canSubmit || saving} onClick={submit}>
+          <Button variant="primary" className="flex-1" disabled={saving} onClick={submit}>
             {saving ? 'Creating profile...' : 'Get started'}
           </Button>
         )}

@@ -32,7 +32,7 @@ function AudioChip({ src, seconds, onRemove }: { src?: string; seconds?: number;
           if (!a) return
           if (a.paused) { void a.play(); setPlaying(true) } else { a.pause(); setPlaying(false) }
         }}
-        className="flex h-7 w-7 items-center justify-center rounded-full bg-tint text-brand disabled:opacity-40"
+        className="relative tap-pad flex h-7 w-7 items-center justify-center rounded-full bg-tint text-brand disabled:opacity-40"
       >
         {playing ? <Pause size={13} weight="fill" /> : <Play size={13} weight="fill" />}
       </button>
@@ -208,7 +208,7 @@ export function AttachmentList({ attachments }: { attachments?: OutcomeAttachmen
           </button>
         )
       })}
-      {failed && <span className="text-[11px] text-faint">Couldn't load attachments — check your connection.</span>}
+      {failed && <span className="text-[12px] text-faint">Couldn't load attachments — check your connection.</span>}
       {preview && <Lightbox src={preview} onClose={() => setPreview(null)} />}
     </div>
   )

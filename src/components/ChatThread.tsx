@@ -75,7 +75,7 @@ export function ChatThread({
                 >
                   <p className="whitespace-pre-wrap text-[14px] leading-[1.35]">{msg.text}</p>
                   <div className={`mt-0.5 flex items-center justify-end gap-1 ${mine ? 'text-muted' : 'text-faint'}`}>
-                    <span className="text-[10.5px]">{time}</span>
+                    <span className="text-[11px]">{time}</span>
                     {mine && <Checks size={14} weight="bold" className={msg.read ? 'text-[#53bdeb]' : 'text-muted'} />}
                   </div>
                 </div>

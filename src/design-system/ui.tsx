@@ -214,7 +214,7 @@ export function Stepper({
     <div className="inline-flex items-center gap-2 rounded-pill border border-border bg-surface py-1.5 pl-2 pr-3">
       <button
         onClick={() => onChange(Math.max(min, value - 1))}
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-screen text-body active:scale-90 disabled:opacity-30"
+        className="relative tap-pad-sm flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-screen text-body active:scale-90 disabled:opacity-30"
         disabled={value <= min}
         aria-label="decrease"
       >
@@ -234,7 +234,7 @@ export function Stepper({
       {suffix && <span className="shrink-0 font-display text-[13px] font-semibold text-muted">{suffix}</span>}
       <button
         onClick={() => onChange(Math.min(max, value + 1))}
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-screen text-body active:scale-90 disabled:opacity-30"
+        className="relative tap-pad-sm flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-screen text-body active:scale-90 disabled:opacity-30"
         disabled={value >= max}
         aria-label="increase"
       >

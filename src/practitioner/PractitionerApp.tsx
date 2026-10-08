@@ -72,6 +72,7 @@ import { CalendarScreen } from './Calendar'
 import { PatientSearchSheet, PatientDetailScreen, AddPatientSheet, InvoiceSheet } from './PatientSearch'
 import { TodayGrid } from './TodayGrid'
 import { PatientQuickView } from './PatientQuickView'
+import { FollowUpsScreen } from './FollowUpsScreen'
 // Lazy — Jitsi's SDK is ~116KB and should only load on the rare screen
 // that actually starts a video call, not on every app boot.
 const VideoConsult = lazy(() => import('../video/VideoConsult').then((m) => ({ default: m.VideoConsult })))
@@ -286,12 +287,12 @@ export function PractitionerApp() {
       <div className="flex h-full flex-col">
         {/* pinned top bar */}
         <div className="flex items-center gap-3 px-[18px] pb-2 pt-[var(--app-top)]">
-          <Pressable as="div" hap="tick" scale={0.94} onClick={() => setSwitchOpen(true)} className="cursor-pointer">
+          <Pressable as="div" hap="tick" scale={0.94} onClick={() => setSwitchOpen(true)} className="relative tap-pad-sm cursor-pointer">
             <Avatar initials={doctor.initials} size={38} />
           </Pressable>
           <div className="min-w-0 flex-1">
             <div className="truncate font-display text-[15px] font-bold text-ink">{headerDisplayName(doctor.name)}</div>
-            <div className="truncate text-[11px] text-faint">{new Date().toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })} · Chiplun clinic</div>
+            <div className="truncate text-[12px] text-faint">{new Date().toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })} · Chiplun clinic</div>
           </div>
           <Pressable ariaLabel="search patients" hap="tick" onClick={() => setSearchOpen(true)} className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
             <MagnifyingGlass size={17} className="text-body" />
@@ -299,7 +300,7 @@ export function PractitionerApp() {
           <Pressable ariaLabel="notifications" hap="tick" onClick={() => goTab('inbox')} className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
             <Bell size={18} className="text-body" />
             {unread > 0 && (
-              <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-white">{unread}</span>
+              <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[11px] font-bold text-white">{unread}</span>
             )}
           </Pressable>
         </div>
@@ -316,7 +317,7 @@ export function PractitionerApp() {
               ) : (
                 <PullToRefresh onRefresh={refresh} className="h-full px-[18px] pb-[120px] pt-2">
                   {tab === 'today' && <TodayGrid openCase={(id) => openOverlay({ kind: 'case', patientId: id })} goRx={goToRx} startVideo={(apptId) => openOverlay({ kind: 'video', appointmentId: apptId })} onQuickBill={() => setBillSearchOpen(true)} onInstantMeeting={() => setInstantMeetingOpen(true)} />}
-                  {tab === 'followups' && <FollowupsScreen openCompare={(id) => openOverlay({ kind: 'compare', patientId: id })} openCase={(id) => openOverlay({ kind: 'case', patientId: id })} goRx={goToRx} />}
+                  {tab === 'followups' && <FollowUpsScreen openCompare={(id) => openOverlay({ kind: 'compare', patientId: id })} openCase={(id) => openOverlay({ kind: 'case', patientId: id })} goRx={goToRx} />}
                   {tab === 'rx' && <QuickRxScreen patientId={rxPatientId} onPatientPicked={setRxPatientId} />}
                   {tab === 'inbox' && <InboxScreen onOpenPatient={(id) => openOverlay({ kind: 'patient-detail', patientId: id })} onOpenChat={(id, name) => openOverlay({ kind: 'chat', patientId: id, patientName: name })} />}
                 </PullToRefresh>
@@ -456,7 +457,7 @@ function ProfileSheet({ open, onClose }: { open: boolean; onClose: () => void })
             </div>
           )}
           {doctor.registrationNo && (
-            <div className="text-[11px] text-faint">Reg. {doctor.registrationNo}</div>
+            <div className="text-[12px] text-faint">Reg. {doctor.registrationNo}</div>
           )}
         </div>
       </div>
@@ -466,7 +467,7 @@ function ProfileSheet({ open, onClose }: { open: boolean; onClose: () => void })
           <div key={s.label} className="rounded-[14px] border border-border bg-surface px-2 py-3 text-center">
             <s.icon size={18} weight="fill" className="mx-auto text-brand" />
             <div className="mt-1 font-display text-[16px] font-bold text-ink">{s.value}</div>
-            <div className="text-[11px] text-faint">{s.label}</div>
+            <div className="text-[12px] text-faint">{s.label}</div>
           </div>
         ))}
       </div>
@@ -493,71 +494,6 @@ function ProfileSheet({ open, onClose }: { open: boolean; onClose: () => void })
         <span className="text-[14px] font-semibold text-danger">Sign out</span>
       </Pressable>
     </BottomSheet>
-  )
-}
-
-// ── FOLLOW-UPS ──
-function FollowupsScreen({ openCompare, openCase, goRx }: { openCompare: (id: string) => void; openCase: (id: string) => void; goRx: (id: string) => void }) {
-  const patients = useClinic((s) => s.patients)
-  const appointments = useClinic((s) => s.appointments)
-  const [peekPatientId, setPeekPatientId] = useState<string | null>(null)
-  const rows = useMemo(() => {
-    return patients
-      .filter((p) => p.currentRemedy)
-      .map((p) => {
-        const nextAppt = appointments.find((a) => a.patientId === p.id && a.status === 'Upcoming')
-        return {
-          id: p.id,
-          name: p.name,
-          when: nextAppt ? `Due ${formatDayLabel(nextAppt.date)} · ${nextAppt.time}` : `Last seen ${p.lastSeen}`,
-          remedy: p.currentRemedy!,
-          overdue: !nextAppt,
-          i: p.initials,
-        }
-      })
-      .sort((a, b) => (a.overdue === b.overdue ? 0 : a.overdue ? -1 : 1))
-  }, [patients, appointments])
-  const overdueCount = rows.filter((r) => r.overdue).length
-  return (
-    <div className="space-y-4">
-      <div>
-        <div className="font-display text-[20px] font-bold text-ink">Follow-ups due</div>
-        <div className="text-[13px] text-muted">{rows.length} {rows.length === 1 ? 'patient' : 'patients'}{overdueCount > 0 ? ` · ${overdueCount} need scheduling` : ''}</div>
-      </div>
-      {rows.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-          <div className="flex h-14 w-14 items-center justify-center rounded-[18px] bg-tint">
-            <ArrowsClockwise size={24} className="text-faint" />
-          </div>
-          <div className="mt-4 font-display text-[16px] font-semibold text-ink">No follow-ups pending</div>
-          <div className="mt-1 text-[13px] text-muted">Patients with active remedies will appear here<br/>when they need a check-in.</div>
-        </div>
-      ) : (
-      <motion.div variants={listContainer} initial="hidden" animate="show" className="space-y-2.5">
-        {rows.map((r) => (
-          <motion.div key={r.id} variants={listItem}>
-            <Pressable as="div" hap="tick" scale={0.99} onClick={() => openCompare(r.id)} className="flex w-full cursor-pointer items-center gap-3 rounded-[20px] border border-border bg-surface px-3.5 py-3 shadow-card">
-              <Avatar initials={r.i} size={40} />
-              <div className="flex-1">
-                <div
-                  onClick={(e) => { e.stopPropagation(); haptic('tick'); setPeekPatientId(r.id) }}
-                  className="font-display text-[14px] font-semibold text-ink underline decoration-border-dash decoration-1 underline-offset-2"
-                >
-                  {r.name}
-                </div>
-                <div className="text-[12px] text-muted">{r.remedy}</div>
-              </div>
-              <div className="text-right">
-                <div className={`text-[12px] font-semibold ${r.overdue ? 'text-danger' : 'text-body'}`}>{r.when}</div>
-                <div className="text-[12px] font-semibold text-brand">Compare →</div>
-              </div>
-            </Pressable>
-          </motion.div>
-        ))}
-      </motion.div>
-      )}
-      <PatientQuickView patientId={peekPatientId} onClose={() => setPeekPatientId(null)} onOpenCase={openCase} onPrescribe={goRx} />
-    </div>
   )
 }
 
@@ -710,9 +646,9 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
           <div className="font-display text-[20px] font-bold text-ink">Quick prescription</div>
           <div className="text-[13px] text-muted">Choose who you're prescribing for.</div>
         </div>
-        <div className="flex items-center gap-2 rounded-pill border border-border bg-surface px-3.5 py-2">
+        <div className="flex items-center gap-2 rounded-pill border border-border bg-surface px-3.5 py-3">
           <MagnifyingGlass size={16} className="text-faint" />
-          <input value={pickerQuery} onChange={(e) => setPickerQuery(e.target.value)} placeholder="Search patients" className="-my-2 w-full bg-transparent py-2 text-[13px] outline-none placeholder:text-faint" data-selectable="true" />
+          <input value={pickerQuery} onChange={(e) => setPickerQuery(e.target.value)} placeholder="Search patients" className="-my-3 w-full bg-transparent py-3 text-[13px] outline-none placeholder:text-faint" data-selectable="true" />
         </div>
         <div className="space-y-2">
           {matches.map((p) => (
@@ -750,9 +686,9 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
 
       <div>
         <Label>Remedy</Label>
-        <div className="mt-2 flex items-center gap-2 rounded-pill border border-border bg-surface px-3.5 py-2">
+        <div className="mt-2 flex items-center gap-2 rounded-pill border border-border bg-surface px-3.5 py-3">
           <MagnifyingGlass size={16} className="text-faint" />
-          <input value={remedy} onChange={(e) => setRemedy(e.target.value)} placeholder="Type or select a remedy" className="-my-2 w-full bg-transparent py-2 text-[13px] outline-none placeholder:text-faint" data-selectable="true" />
+          <input value={remedy} onChange={(e) => setRemedy(e.target.value)} placeholder="Type or select a remedy" className="-my-3 w-full bg-transparent py-3 text-[13px] outline-none placeholder:text-faint" data-selectable="true" />
         </div>
         <div className="mt-2.5 flex flex-wrap gap-2">
           {(remedy || showAllRemedies ? list : list.slice(0, 8)).map((r) => (
@@ -965,7 +901,7 @@ function QuickInvestigationScreen({ patientId, onBack }: { patientId: string; on
   return (
     <div className="flex h-full flex-col bg-screen">
       <div className="px-[18px] pb-2 pt-[var(--app-top)]">
-        <Pressable ariaLabel="back" hap="tick" onClick={onBack} className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
+        <Pressable ariaLabel="back" hap="tick" onClick={onBack} className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
           <CaretLeft size={18} className="text-body" />
         </Pressable>
         <div className="mt-1 font-display text-[18px] font-bold text-ink">Investigations</div>
@@ -995,7 +931,7 @@ function QuickInvestigationScreen({ patientId, onBack }: { patientId: string; on
                   className="flex w-full items-center justify-between gap-3 rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-left"
                 >
                   <span className="text-[13px] font-semibold text-ink">{test}</span>
-                  <span className="shrink-0 text-[11px] text-faint">{category}</span>
+                  <span className="shrink-0 text-[12px] text-faint">{category}</span>
                 </Pressable>
               ))}
               {canAddCustom && (
@@ -1063,7 +999,7 @@ function ChatOverlay({ patientId, patientName, onBack }: { patientId: string; pa
     <div className="flex h-full flex-col bg-screen">
       {/* WhatsApp-style green header */}
       <div className="flex items-center gap-3 bg-brand px-3 pb-3 pt-[var(--app-top)]">
-        <Pressable ariaLabel="back" hap="tick" onClick={onBack} className="flex h-9 w-9 items-center justify-center">
+        <Pressable ariaLabel="back" hap="tick" onClick={onBack} className="relative tap-pad-sm flex h-9 w-9 items-center justify-center">
           <CaretLeft size={20} weight="bold" className="text-white" />
         </Pressable>
         <div className="flex h-[38px] w-[38px] items-center justify-center rounded-full bg-white/20 font-display text-[14px] font-semibold text-white">
@@ -1071,7 +1007,7 @@ function ChatOverlay({ patientId, patientName, onBack }: { patientId: string; pa
         </div>
         <div className="flex-1">
           <div className="font-display text-[16px] font-semibold text-white">{patientName}</div>
-          <div className="text-[11px] text-white/70">Patient</div>
+          <div className="text-[12px] text-white/70">Patient</div>
         </div>
       </div>
       <div className="min-h-0 flex-1">
@@ -1127,10 +1063,10 @@ function InboxScreen({ onOpenPatient, onOpenChat }: { onOpenPatient: (id: string
 
       {/* Chats / Alerts toggle */}
       <div className="flex gap-2">
-        <Pressable hap="tick" onClick={() => setView('chats')} className={`flex-1 rounded-pill py-2.5 text-center text-[13px] font-semibold transition ${view === 'chats' ? 'bg-brand text-screen' : 'border border-border bg-surface text-body'}`}>
+        <Pressable hap="tick" onClick={() => setView('chats')} className={`relative tap-pad-y4 flex-1 rounded-pill py-2.5 text-center text-[13px] font-semibold transition ${view === 'chats' ? 'bg-brand text-screen' : 'border border-border bg-surface text-body'}`}>
           Chats{totalUnread > 0 ? ` (${totalUnread})` : ''}
         </Pressable>
-        <Pressable hap="tick" onClick={() => setView('alerts')} className={`flex-1 rounded-pill py-2.5 text-center text-[13px] font-semibold transition ${view === 'alerts' ? 'bg-brand text-screen' : 'border border-border bg-surface text-body'}`}>
+        <Pressable hap="tick" onClick={() => setView('alerts')} className={`relative tap-pad-y4 flex-1 rounded-pill py-2.5 text-center text-[13px] font-semibold transition ${view === 'alerts' ? 'bg-brand text-screen' : 'border border-border bg-surface text-body'}`}>
           Alerts{unreadNotifs > 0 ? ` (${unreadNotifs})` : ''}
         </Pressable>
       </div>
@@ -1170,7 +1106,7 @@ function InboxScreen({ onOpenPatient, onOpenChat }: { onOpenPatient: (id: string
                           {preview}
                         </div>
                         {c.unread > 0 && (
-                          <span className="flex h-[20px] min-w-[20px] shrink-0 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-bold text-white">{c.unread}</span>
+                          <span className="flex h-[20px] min-w-[20px] shrink-0 items-center justify-center rounded-full bg-brand px-1 text-[11px] font-bold text-white">{c.unread}</span>
                         )}
                       </div>
                     </div>
@@ -1210,7 +1146,7 @@ function InboxScreen({ onOpenPatient, onOpenChat }: { onOpenPatient: (id: string
                         <div className="flex-1">
                           <div className={`font-display text-[14px] font-semibold ${!n.read ? 'text-ink' : 'text-body'}`}>{n.title}</div>
                           <div className="text-[12px] leading-snug text-muted" data-selectable="true">{n.message}</div>
-                          <div className="mt-1 text-[11px] text-faint">{n.time}</div>
+                          <div className="mt-1 text-[12px] text-faint">{n.time}</div>
                           {n.pending && (
                             <div className="mt-2 flex gap-2">
                               <Pressable hap="success" onClick={(e) => { e?.stopPropagation(); const ho = handoffs.find((h) => h.status === 'pending'); if (ho) accept(ho.id) }} className="rounded-pill bg-brand px-3.5 py-1.5 text-[12.5px] font-semibold text-screen">Accept</Pressable>
@@ -1402,7 +1338,7 @@ function TabBar({ tab, onChange, inboxCount }: { tab: Tab; onChange: (t: Tab) =>
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.5 }}
                     transition={springSnappy}
-                    className="absolute right-1.5 top-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold leading-none text-white ring-2 ring-surface"
+                    className="absolute right-1.5 top-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[11px] font-bold leading-none text-white ring-2 ring-surface"
                   >
                     <TickNumber value={Math.min(badge, 99)} />{badge > 99 ? '+' : ''}
                   </motion.span>

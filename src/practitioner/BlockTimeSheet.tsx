@@ -101,7 +101,7 @@ export function BlockTimeSheet({
         <Label>Start time</Label>
         <div className="mt-2 flex flex-wrap gap-1.5 max-h-[110px] overflow-y-auto">
           {TIME_OPTIONS.map((h) => (
-            <Chip key={h} selected={startHour === h} onClick={() => { haptic('select'); setStartHour(h); checkConflict(h, durationMin) }} className="text-[11px]">
+            <Chip key={h} selected={startHour === h} onClick={() => { haptic('select'); setStartHour(h); checkConflict(h, durationMin) }} className="text-[12px]">
               {fmtClock(h)}
             </Chip>
           ))}
@@ -111,13 +111,13 @@ export function BlockTimeSheet({
       <div className="mt-3">
         <Label>Duration</Label>
         <div className="mt-1.5 flex items-center gap-3">
-          <Pressable ariaLabel="decrease duration" hap="tick" onClick={() => { const d = Math.max(15, durationMin - 15); setDurationMin(d); checkConflict(startHour, d) }} className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
+          <Pressable ariaLabel="decrease duration" hap="tick" onClick={() => { const d = Math.max(15, durationMin - 15); setDurationMin(d); checkConflict(startHour, d) }} className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
             <Minus size={15} />
           </Pressable>
           <div className="min-w-[64px] text-center font-display text-[16px] font-bold text-ink">
             {durationMin >= 60 ? `${Math.floor(durationMin / 60)}h${durationMin % 60 ? ` ${durationMin % 60}m` : ''}` : `${durationMin}m`}
           </div>
-          <Pressable ariaLabel="increase duration" hap="tick" onClick={() => { const d = Math.min(240, durationMin + 15); setDurationMin(d); checkConflict(startHour, d) }} className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
+          <Pressable ariaLabel="increase duration" hap="tick" onClick={() => { const d = Math.min(240, durationMin + 15); setDurationMin(d); checkConflict(startHour, d) }} className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
             <Plus size={15} />
           </Pressable>
         </div>
@@ -147,7 +147,7 @@ export function BlockTimeSheet({
               ariaLabel={`${c.key} color`}
               hap="select"
               onClick={() => setColor(c.key)}
-              className="flex h-9 w-9 items-center justify-center rounded-full"
+              className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full"
               style={{ backgroundColor: c.swatch }}
             >
               {color === c.key && <Check size={16} weight="bold" className="text-white" />}

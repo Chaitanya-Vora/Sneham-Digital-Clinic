@@ -271,7 +271,7 @@ export function TodayGrid({
                   className="flex w-full items-center gap-2 rounded-[8px] px-1.5 py-1 text-left"
                 >
                   <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-ink">{p?.name ?? 'Patient'}</span>
-                  <span className="shrink-0 text-[11px] text-amber-text">{rx.remedy} {rx.potency}</span>
+                  <span className="shrink-0 text-[12px] text-amber-text">{rx.remedy} {rx.potency}</span>
                 </Pressable>
               )
             })}
@@ -286,7 +286,7 @@ export function TodayGrid({
         <div className="flex min-w-0 items-center gap-2">
           <Label className="whitespace-nowrap">Today's schedule</Label>
           {todayOnlyAppts.length > 0 && (
-            <span className="flex shrink-0 items-center gap-1.5 text-[11px] font-semibold text-muted max-[339px]:hidden">
+            <span className="flex shrink-0 items-center gap-1.5 text-[12px] font-semibold text-muted max-[339px]:hidden">
               <DayProgress done={todayOnlyAppts.filter((a) => a.status === 'Seen').length} total={todayOnlyAppts.length} className="hidden w-9 min-[390px]:inline-block" />
               <span className="tabular-nums">{todayOnlyAppts.filter((a) => a.status === 'Seen').length}/{todayOnlyAppts.length}</span>
             </span>
@@ -300,7 +300,7 @@ export function TodayGrid({
                   key={m}
                   hap="tick"
                   onClick={() => setViewMode(m)}
-                  className={`relative tap-pad-y flex items-center gap-1 rounded-pill px-3 py-1 text-[12px] font-semibold transition ${viewMode === m ? 'bg-brand text-screen' : 'text-muted'}`}
+                  className={`relative tap-pad-y flex items-center gap-1 rounded-pill px-3 py-1.5 text-[12px] font-semibold transition ${viewMode === m ? 'bg-brand text-screen' : 'text-muted'}`}
                 >
                   {m === 'mine' ? <UserIcon size={12} weight={viewMode === m ? 'fill' : 'regular'} /> : <UsersThree size={12} weight={viewMode === m ? 'fill' : 'regular'} />}
                   {m === 'mine' ? 'Mine' : 'Everyone'}
@@ -620,7 +620,7 @@ function DayGridView({ appts, timeBlocks, patients, practitioners, myId, activeA
           return (
             <div key={h} className="flex border-b border-border last:border-b-0" style={{ minHeight: `${rowHeight}px` }}>
               {/* time label */}
-              <div className="flex w-[54px] shrink-0 items-start justify-end border-r border-border px-2 pt-1.5 text-[11px] font-medium text-faint">
+              <div className="flex w-[54px] shrink-0 items-start justify-end border-r border-border px-2 pt-1.5 text-[12px] font-medium text-faint">
                 {fmtHour(h)}
               </div>
 
@@ -654,7 +654,7 @@ function DayGridView({ appts, timeBlocks, patients, practitioners, myId, activeA
                       style={{ top: `${startOffset}px`, height: `${blockHeight}px` }}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <span className={`text-[11px] font-medium ${style.text}`}>{b.reason}</span>
+                      <span className={`text-[12px] font-medium ${style.text}`}>{b.reason}</span>
                       <span className="flex-1" />
                       <Pressable hap="tick" onClick={() => onRemoveBlock(b.id)} className={`${style.text} opacity-60 hover:opacity-100`}>
                         <XCircle size={14} />
@@ -697,24 +697,24 @@ function DayGridView({ appts, timeBlocks, patients, practitioners, myId, activeA
                               {p.name}
                             </span>
                             {a.type === 'Video' && <VideoCamera size={11} weight="fill" className="shrink-0 text-brand" />}
-                            {!isMine && <Badge tone="neutral" className="!px-1.5 !py-0 !text-[9px]">{prFind(a.practitionerId)?.name ?? 'Team'}</Badge>}
+                            {!isMine && <Badge tone="neutral" className="!px-1.5 !py-0 !text-[11px]">{prFind(a.practitionerId)?.name ?? 'Team'}</Badge>}
                           </div>
-                          <div className="truncate text-[11px] text-muted">{a.time} · {a.reason ?? ''}</div>
+                          <div className="truncate text-[12px] text-muted">{a.time} · {a.reason ?? ''}</div>
                         </div>
                         <div className="flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
                           {canStart && (
-                            <Pressable hap="impact" onClick={() => onStartConsult(a.id)} className="relative tap-pad-y flex items-center gap-0.5 rounded-pill bg-brand px-2 py-1 text-[11px] font-semibold text-screen">
-                              <Play size={9} weight="fill" /> Start
+                            <Pressable hap="impact" onClick={() => onStartConsult(a.id)} className="relative tap-pad-y flex items-center gap-1 rounded-pill bg-brand px-2.5 py-1.5 text-[12px] font-semibold text-screen">
+                              <Play size={10} weight="fill" /> Start
                             </Pressable>
                           )}
                           {isActive && isMine && (
-                            <Pressable hap="tick" onClick={() => onEndConsult(a.id)} className="relative tap-pad-y flex items-center gap-1 rounded-pill bg-danger px-2 py-1 text-[11px] font-semibold text-white">
+                            <Pressable hap="tick" onClick={() => onEndConsult(a.id)} className="relative tap-pad-y flex items-center gap-1 rounded-pill bg-danger px-2.5 py-1.5 text-[12px] font-semibold text-white">
                               <span className="h-1.5 w-1.5 animate-breathe rounded-full bg-white" />
                               End · <span className="tabular-nums"><LiveElapsed apptId={a.id} /></span>
                             </Pressable>
                           )}
                           {!isSeen && !isActive && isMine && (
-                            <Pressable hap="tick" onClick={() => onSelectForReschedule(a.id)} className="relative tap-pad-sm rounded-full p-1 text-faint hover:bg-raised">
+                            <Pressable hap="tick" onClick={() => onSelectForReschedule(a.id)} className="relative tap-pad rounded-full p-2 text-faint hover:bg-raised">
                               <DotsSixVertical size={13} weight="bold" />
                             </Pressable>
                           )}
@@ -785,7 +785,7 @@ function ListView({
             <Pressable as="div" hap="tick" scale={0.99} onClick={() => onOpenCase(p.id)} className={`flex cursor-pointer items-center gap-3 rounded-[20px] border border-border bg-surface px-3.5 py-3 shadow-card ${isSeen ? 'opacity-60' : ''}`}>
               <div className="text-center">
                 <div className="font-display text-[13px] font-bold text-ink">{a.time.replace(' AM', '').replace(' PM', '')}</div>
-                <div className="text-[11px] text-faint">{a.durationMin}m</div>
+                <div className="text-[12px] text-faint">{a.durationMin}m</div>
               </div>
               <Avatar initials={p.initials} size={38} />
               <div className="min-w-0 flex-1">
@@ -808,12 +808,12 @@ function ListView({
                   <Badge tone={a.status === 'In consult' ? 'green' : a.status === 'New' ? 'amber' : a.status === 'Waiting' ? 'amber' : 'neutral'}>{a.status}</Badge>
                 )}
                 {canStart && (
-                  <Pressable hap="impact" onClick={() => onStartConsult(a.id)} className="relative tap-pad-y4 flex items-center gap-1 rounded-pill bg-brand px-2.5 py-1 text-[11px] font-semibold text-screen">
+                  <Pressable hap="impact" onClick={() => onStartConsult(a.id)} className="relative tap-pad-y flex items-center gap-1 rounded-pill bg-brand px-3 py-1.5 text-[12px] font-semibold text-screen">
                     <Play size={10} weight="fill" /> Start
                   </Pressable>
                 )}
                 {canStart && (
-                  <Pressable hap="tick" onClick={() => onNoShow(a.id)} className="text-[11px] font-medium text-faint">No-show</Pressable>
+                  <Pressable hap="tick" onClick={() => onNoShow(a.id)} className="relative tap-pad-y py-1.5 text-[12px] font-medium text-faint">No-show</Pressable>
                 )}
               </div>
             </Pressable>

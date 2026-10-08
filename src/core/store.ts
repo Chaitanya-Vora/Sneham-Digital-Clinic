@@ -257,7 +257,9 @@ interface ClinicState {
   startConsult: (appointmentId: string) => void
   endConsult: (appointmentId: string) => void
   markNoShow: (appointmentId: string) => void
-  scheduleFollowUp: (input: { patientId: string; practitionerId: string; time: string; date: string; type: 'In person' | 'Video'; reason: string }) => void
+  // Returns the ids it created, so a caller can offer Undo (cancel the booking and
+  // take back the patient's notification).
+  scheduleFollowUp: (input: { patientId: string; practitionerId: string; time: string; date: string; type: 'In person' | 'Video'; reason: string }) => { appointmentId: string; notificationId: string }
   updateAppointmentStatus: (id: string, status: Appointment['status']) => void
   updateAppointment: (id: string, patch: Partial<Pick<Appointment, 'time' | 'date' | 'type' | 'reason' | 'practitionerId'>>) => void
   rescheduleAppointment: (id: string, time: string, date?: string) => void
@@ -1335,6 +1337,7 @@ export const useClinic = create<ClinicState>()(
         }))
         writeThrough(insertAppointment(appt), 'Appointment may not have saved.')
         writeThrough(insertNotification(notif, resolveNotificationOwner(get().patients, get().practitioners, { patientId: input.patientId })), 'The patient may not have been notified of this follow-up.')
+        return { appointmentId: appt.id, notificationId: notif.id }
       },
 
       updateAppointmentStatus: (id, status) => {

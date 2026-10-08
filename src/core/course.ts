@@ -91,6 +91,9 @@ export interface QueueRow {
   bucket: Bucket
 }
 
+/** A row that is actually waiting on the doctor: the course has ended or ends this week. */
+export const isDue = (r: QueueRow) => r.bucket !== 'later'
+
 export const bucketOf = (c: CourseStatus): Bucket => (c.state === 'ended' ? 'overdue' : c.state === 'endsSoon' ? 'soon' : 'later')
 
 /** Patients on a remedy, split into those who still need a follow-up date and

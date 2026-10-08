@@ -7,7 +7,7 @@ import { Badge, BottomSheet, Button, Card, Chip, Label } from '../design-system/
 import { Pressable } from '../design-system/Pressable'
 import { haptic } from '../design-system/haptics'
 import { useToast } from '../design-system/toast'
-import { FollowUpSheet } from './TodayGrid'
+import { FollowUpSheet } from './FollowUpSheet'
 import { AttachmentComposer, AttachmentList } from '../components/FollowUpAttachments'
 import { uploadOutcomeAttachments, type AttachmentDraft } from '../core/db'
 import { useShallow } from 'zustand/react/shallow'

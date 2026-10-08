@@ -19,10 +19,9 @@ export function toISO(d: Date): ISODate {
   return `${y}-${m}-${day}`
 }
 
-/** A follow-up offered by name: one of the three quick choices below, or "N days"
- *  when the doctor types her own number (see `customFollowUpPreset`). */
+/** A follow-up named by its length: "N days" (see `customFollowUpPreset`); the older
+ *  "1 week" / "2 weeks" / "1 month" names still resolve. */
 export type FollowUpPreset = string
-export const FOLLOW_UP_PRESETS: FollowUpPreset[] = ['1 week', '2 weeks', '1 month']
 const NAMED_PRESET_DAYS: Record<string, number> = { '1 week': 7, '2 weeks': 14, '1 month': 30 }
 
 /** The furthest out a typed follow-up can be — a year is already beyond any sensible plan. */

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { formatDayLabel, toISO, todayISO, addDaysISO, fromISO, firstAvailableMorningSlot, MAX_FOLLOW_UP_DAYS } from '../core/day'
+import { formatDayLabel, todayISO, addDaysISO, followUpPresetDate, firstAvailableMorningSlot } from '../core/day'
+import { FollowUpSheet } from './FollowUpSheet'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   CaretLeft,
@@ -268,8 +269,6 @@ export function PatientDetailScreen({
   const [followUpOpen, setFollowUpOpen] = useState(false)
   const [billing, setBilling] = useState<{ appointmentId?: string; existingInvoice?: Invoice } | null>(null)
   // null = showing the preset list; a date string = the "Custom" picker is open
-  const [customDate, setCustomDate] = useState<string | null>(null)
-  const [customDays, setCustomDays] = useState('7') // the same custom date, as a number of days from today
   const [actionsOpen, setActionsOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [exporting, setExporting] = useState(false)
@@ -343,21 +342,6 @@ export function PatientDetailScreen({
     haptic('success')
     toast({ title: `Follow-up scheduled · ${formatDayLabel(isoDate)} · ${time}` })
     setFollowUpOpen(false)
-    setCustomDate(null)
-  }
-
-  const handleScheduleFollowUp = (label: string) => {
-    if (label === 'Custom') {
-      // Don't auto-book — hand the doctor a date picker defaulted to a week out.
-      haptic('tick')
-      setCustomDate(toISO(new Date(Date.now() + 7 * 86400000)))
-      setCustomDays('7')
-      return
-    }
-    const daysMap: Record<string, number> = { 'In 1 week': 7, 'In 2 weeks': 14, 'In 1 month': 30 }
-    const daysAhead = daysMap[label] ?? 7
-    const target = new Date(Date.now() + daysAhead * 86400000)
-    bookFollowUp(toISO(target))
   }
 
   return (
@@ -740,90 +724,20 @@ export function PatientDetailScreen({
       <div className="absolute inset-x-0 bottom-0 z-10 px-[18px]" style={{ paddingBottom: 'var(--app-bottom)' }}>
         <Pressable
           hap="impact"
-          onClick={() => { setCustomDate(null); setFollowUpOpen(true) }}
+          onClick={() => setFollowUpOpen(true)}
           className="flex w-full items-center justify-center gap-2 rounded-pill bg-brand py-3 font-display text-[15px] font-semibold text-white shadow-float"
         >
           <CalendarPlus size={18} weight="fill" /> Schedule follow-up
         </Pressable>
       </div>
 
-      {/* follow-up bottom sheet */}
-      <BottomSheet open={followUpOpen} onClose={() => { setFollowUpOpen(false); setCustomDate(null) }}>
-        {customDate === null ? (
-          <>
-            <div className="font-display text-[17px] font-bold text-ink">Schedule follow-up</div>
-            <div className="mt-0.5 text-[12.5px] text-muted">Pick a time for {patient.name}.</div>
-            <div className="mt-3 space-y-2">
-              {['In 1 week', 'In 2 weeks', 'In 1 month', 'Custom'].map((opt) => (
-                <Pressable
-                  key={opt}
-                  as="div"
-                  hap="tick"
-                  scale={0.98}
-                  onClick={() => handleScheduleFollowUp(opt)}
-                  className="flex cursor-pointer items-center gap-3 rounded-[16px] border border-border bg-surface px-4 py-3"
-                >
-                  <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-tint text-brand">
-                    <CalendarPlus size={18} />
-                  </div>
-                  <div className="flex-1 text-[14px] font-semibold text-ink">{opt}</div>
-                  <span className="text-faint">&rsaquo;</span>
-                </Pressable>
-              ))}
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="font-display text-[17px] font-bold text-ink">Pick a date</div>
-            <div className="mt-0.5 text-[12.5px] text-muted">Follow-up for {patient.name}.</div>
-            <div className="mt-3">
-              <Label>After how many days?</Label>
-              <div className="mt-1.5 flex items-center gap-2">
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  min={1}
-                  max={MAX_FOLLOW_UP_DAYS}
-                  value={customDays}
-                  onChange={(e) => {
-                    setCustomDays(e.target.value)
-                    const n = Number(e.target.value)
-                    if (Number.isInteger(n) && n >= 1 && n <= MAX_FOLLOW_UP_DAYS) setCustomDate(addDaysISO(todayISO(), n))
-                  }}
-                  placeholder="10"
-                  aria-label="Number of days until the follow-up"
-                  className="w-24 rounded-[14px] border border-border bg-surface px-3.5 py-2.5 text-[15px] font-semibold text-ink outline-none focus:border-green-border"
-                  data-selectable="true"
-                />
-                <span className="text-[14px] text-body">days</span>
-              </div>
-            </div>
-            <div className="mt-3">
-              <Label>Or pick the date</Label>
-              <input
-                type="date"
-                value={customDate}
-                min={todayISO()}
-                onChange={(e) => {
-                  const v = e.target.value
-                  setCustomDate(v)
-                  if (v) setCustomDays(String(Math.round((fromISO(v).getTime() - fromISO(todayISO()).getTime()) / 86400000)))
-                }}
-                className="mt-1.5 w-full rounded-[14px] border border-border bg-surface px-3.5 py-2.5 text-[13px] text-body outline-none focus:border-green-border"
-                data-selectable="true"
-              />
-            </div>
-            <div className="mt-4 flex gap-2">
-              <Pressable hap="tick" onClick={() => setCustomDate(null)} className="flex-1 rounded-pill border border-border bg-surface py-2.5 text-center text-[14px] font-semibold text-body">
-                Back
-              </Pressable>
-              <Pressable hap="success" onClick={() => bookFollowUp(customDate)} className="flex-1 rounded-pill bg-brand py-2.5 text-center text-[14px] font-semibold text-screen">
-                Confirm
-              </Pressable>
-            </div>
-          </>
-        )}
-      </BottomSheet>
+      {/* follow-up bottom sheet — the same one offered after a consult */}
+      <FollowUpSheet
+        open={followUpOpen}
+        patientName={patient.name}
+        onClose={() => setFollowUpOpen(false)}
+        onSelect={(preset) => bookFollowUp(followUpPresetDate(preset))}
+      />
 
       <BottomSheet open={cancelRx.open} onClose={() => setCancelRx((c) => ({ ...c, open: false }))}>
         <div className="flex flex-col items-center py-2 text-center">

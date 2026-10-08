@@ -11,7 +11,7 @@ import { useToast } from '../design-system/toast'
 import { haptic } from '../design-system/haptics'
 import { CaseFieldEditor, useCaseProgress, useCaseSaveStatus } from '../components/CaseFields'
 import { CaseTemplateEditorModal } from '../web/CaseTemplateEditor'
-import { FollowUpSheet } from './TodayGrid'
+import { FollowUpSheet } from './FollowUpSheet'
 import { useShallow } from 'zustand/react/shallow'
 
 export function MobileCaseSheet({

@@ -42,8 +42,8 @@ export function RefillReminder({ on, onToggle, days, onDays, supported }: Refill
             </div>
           ) : (
             <>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                {RESTOCK_DAY_CHIPS.map((d) => <Chip key={d} selected={days === d} onClick={() => onDays(d)}>{d} days</Chip>)}
+              <div className="mt-2 flex gap-2">
+                {RESTOCK_DAY_CHIPS.map((d) => <Chip key={d} selected={days === d} onClick={() => onDays(d)} className="flex-1 !px-0 text-center">{d}</Chip>)}
               </div>
               <div className="mt-3 flex items-center justify-between gap-3">
                 <span className="text-[12.5px] text-muted">Or any number</span>

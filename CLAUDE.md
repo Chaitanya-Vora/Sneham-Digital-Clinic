@@ -165,9 +165,9 @@ This section used to list 39 "critical bugs" from a one-time early audit and was
 
 ### Still genuinely open
 
-**Small tap targets.** 69 occurrences of 36px-or-smaller controls (`h-9 w-9`, `h-8 w-8`, `h-7 w-7`, `h-6 w-6`) across 19 files — below the 44px minimum touch-target guidance (Apple HIG / Android Material). Real examples: `src/practitioner/PractitionerApp.tsx:253,256,878` (search/notifications/back buttons at 36px), `src/practitioner/PatientQuickView.tsx:48,60`. This is a real, product-wide pass, not a quick fix — touches 19 files.
+**Type scale defined but unused.** `tailwind.config.js` has a real named scale (`hero`/`h1`/`h2`/`h3`/`paragraph`/`small`/`label`/`micro`), but nothing in `src/` actually uses it — zero hits for `text-hero`, `text-h1`, etc. One-off `text-[Npx]` sizes are used throughout instead. (1.5.0 set a floor — nothing below 11px, read text 12px on the phone — but did not migrate to the named scale.) A real, product-wide pass, not a one-liner.
 
-**Type scale defined but unused.** `tailwind.config.js` has a real named scale (`hero`/`h1`/`h2`/`h3`/`paragraph`/`small`/`label`/`micro`), but nothing in `src/` actually uses it — zero hits for `text-hero`, `text-h1`, etc. 26 distinct one-off `text-[Npx]` sizes are used throughout instead. The scale exists to migrate to; the migration itself hasn't happened. Also a real, product-wide pass, not a one-liner.
+**Tap targets (done in 1.5.0 for the phone apps).** Measured with a DOM audit that includes the invisible `tap-pad*` ring: the five practitioner tabs, the new profile / prescription editor / calendar, the case sheet, invoice sheet and the patient app tabs have no control under 44px. Shared `Chip`, `Toggle`, `Stepper`, `Button` md now carry the hit area. Inside horizontally-scrolling rows an invisible ring would be clipped, so those controls are physically 44px tall. The web console (desktop) was not part of this pass.
 
 ### Fixed this session
 - `faint` text color contrast raised from ~2.9:1 to ~4.5:1 against the app's own backgrounds (was failing WCAG AA) — `tailwind.config.js`.
@@ -199,3 +199,18 @@ npm run android:apks   # builds both patient + practitioner APKs
 - `VITE_SUPABASE_URL` — Supabase project URL
 - `VITE_SUPABASE_ANON_KEY` — Supabase anon key
 - `VITE_ANTHROPIC_API_KEY` — if needed for any AI features
+
+
+---
+
+## 1.5.0 — what changed (2026-10-08)
+
+- **Follow-ups recall queue** (`src/practitioner/FollowUpsScreen.tsx`, web: `src/web/FollowUpQueue.tsx`): who is due comes from the prescribed course (`src/core/course.ts`, tested by `scripts/test-course.mjs`), booking is one tap with Undo (`src/core/useFollowUpBooking.ts`). The dashboard "Needs attention", the Patients "Follow-ups due" tab and the phone header all use the same definition (`isDue`).
+- **Patient profile** (`src/practitioner/PatientProfile.tsx` + `profile/*`): ring = course progress, one "Next step" card (`core/nextStep.ts`), dock, snapshot, and a Journey grouped by remedy course with a response strip (`core/journey.ts#buildEpisodes`, `profile/EpisodeJourney.tsx`). Bills live only in the Billing tab.
+- **Calendar** (`src/practitioner/Calendar.tsx`, `calendar/CalendarCanvas.tsx`, `calendar/Agenda.tsx`, `core/calendarGrid.ts`): week and month are one grid; the bar under each date is visits vs capacity (working hours from `practitionerSettings`, minus blocked time); weekly off-days are hatched.
+- **Prescription privacy** ("don't reveal the remedy"): the doctor always records the real remedy; `Prescription.hideRemedy` + `slipLabel` (migration `supabase/migration_v49_prescription_privacy.sql`) decide what the PATIENT gets. One set of rules in `src/core/rxPrivacy.ts` (tested by `scripts/test-rx-privacy.mjs`) is used by the printed ℞ box, the dose line, WhatsApp/e-mail text, the notification, dose reminders and the patient app (`patientSafeRx`, `patientSafeDose`, `currentRemedyForPatient`, `remedyTextForPatient`). Hide is ON by default for every new prescription. The DB columns are only written when hiding, and the app probes for them (`store.rxPrivacySupported`); if they are missing the editor shows "Show" with a note and publishing a hidden Rx throws `RX_PRIVACY_UNAVAILABLE` instead of leaking the name. Old patient-app versions do not know the flag and will still show names until updated (OTA or new APK).
+- **Phone prescription editor** is a full-screen overlay (`Overlay.kind === 'rx'`, `src/practitioner/QuickRx.tsx`); the Rx tab is only the patient picker.
+- **Cancelling an appointment tells the patient** (`store.cancelAppointment`); Undo withdraws the notice. Reversible actions use Undo toasts; cancel appointment / remove team member use the in-app `confirmDialog` (`design-system/confirm.tsx`) instead of `window.confirm`.
+- **Web dashboard**: four tiles + "Needs attention" (follow-ups to book, refill reminders, unread messages, payments due), schedule rows use `design-system/PopoverMenu`.
+- **Sign-in / sign-up / reset / first-run** share `src/auth/AuthKit.tsx` (welcome band, inline errors, password strength, no dead buttons; copy follows the app: patient vs practitioner). The sign-up form no longer asks to confirm the password (show/hide eye instead). No pre-selected sex, city stays empty if left empty.
+- Dev only: `window.__clinic` exposes the store in `npm run dev` (compiled out of builds) for browser tests.

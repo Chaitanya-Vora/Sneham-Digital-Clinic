@@ -254,6 +254,15 @@ export interface Prescription {
   // separate from remindersEnabled above (which is the patient's own
   // daily take-your-dose reminders).
   restockReminderEnabled?: boolean
+  // Many homeopaths do not tell the patient which remedy they are taking. When
+  // true, nothing the patient receives or sees names it — the printed slip, the
+  // WhatsApp/email text, the patient app, the notification and the dose
+  // reminders — while the doctor's own screens keep the real name for her
+  // records, reminders and follow-ups. `slipLabel` is whatever she chooses to
+  // write on the slip instead (her shorthand, e.g. "SU 1M" or "Bottle 1").
+  // Default: false (the name is shown). See migration_v49.
+  hideRemedy?: boolean
+  slipLabel?: string
 }
 
 // A set of investigations (lab tests / scans) the practitioner is asking

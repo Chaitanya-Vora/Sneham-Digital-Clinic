@@ -1,56 +1,83 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { CaretLeft, CaretRight, CaretDown, Plus, DotsThree, Check, XCircle, CalendarBlank, NotePencil } from '@phosphor-icons/react'
+import { CaretDown, Plus, DotsThree, Check, XCircle, CalendarBlank, CalendarPlus, NotePencil, Prohibit } from '@phosphor-icons/react'
 import { Card, Avatar, Badge, BottomSheet, Label } from '../design-system/ui'
-import { DayProgress } from '../design-system/DayProgress'
 import { Pressable } from '../design-system/Pressable'
-import { Phone, FakeTabBar } from './kit'
+import { CalendarCanvas, type CalendarMode } from '../practitioner/calendar/CalendarCanvas'
+import { EMPTY_LOAD, addDaysTo, sameDay, shiftMonth, shiftWeek, type DayLoad } from '../core/calendarGrid'
+import { toISO, type ISODate } from '../core/day'
+import { Phone, FakeTabBar, FrameToast, type FrameToastData } from './kit'
 
-// The Calendar tab as a calm agenda. The title collapses as the list scrolls,
-// the week is a plain strip (no box, no arrows — swipe), the owner's doctor
-// filter is one small chip, and the day is ONE card of hairline-separated rows
-// instead of a tall card per appointment.
+// Calendar v2: week and month are ONE grid. Month view folds out of the week
+// strip (and back), the bar under each date shows how full the day is, and the
+// agenda below follows whichever day is selected — without leaving month view.
 type Status = 'Upcoming' | 'In consult' | 'Seen' | 'Cancelled'
 interface A { id: string; time: string; ap: string; name: string; i: string; meta: string; status: Status }
-const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+interface Closure { reason: string }
 
-const THU: A[] = [
-  { id: '1', time: '9:00', ap: 'AM', name: 'Aruna Sawant', i: 'AS', meta: 'In person · 30 min · Follow-up', status: 'Seen' },
-  { id: '2', time: '9:30', ap: 'AM', name: 'Kavya Madressa', i: 'KM', meta: 'In person · 30 min · Follow-up', status: 'Cancelled' },
-  { id: '3', time: '11:00', ap: 'AM', name: 'Nilofer Kaskar', i: 'NK', meta: 'Video · 30 min · Tell dose', status: 'In consult' },
-  { id: '4', time: '11:00', ap: 'AM', name: 'Tasneem Jawadwala', i: 'TJ', meta: 'Video · 30 min · FU', status: 'Cancelled' },
-  { id: '5', time: '12:00', ap: 'PM', name: 'Nilesh Irakshetti', i: 'NI', meta: 'In person · 30 min · Follow-up', status: 'Upcoming' },
-  { id: '6', time: '7:00', ap: 'PM', name: 'Vishwa Bhalekar', i: 'VB', meta: 'In person · 30 min · FU', status: 'Upcoming' },
-]
-const FRI: A[] = [
-  { id: '7', time: '10:00', ap: 'AM', name: 'Meera Iyer', i: 'MI', meta: 'In person · 30 min · Follow-up', status: 'Upcoming' },
-  { id: '8', time: '6:00', ap: 'PM', name: 'Rohit Menon', i: 'RM', meta: 'In person · 30 min · FU', status: 'Upcoming' },
-]
-const MON: A[] = [{ id: '9', time: '10:30', ap: 'AM', name: 'Husaina Jalali', i: 'HJ', meta: 'Video · 30 min · FU', status: 'Upcoming' }]
+const PEOPLE = ['Aruna Sawant', 'Kavya Madressa', 'Nilofer Kaskar', 'Tasneem Jawadwala', 'Nilesh Irakshetti', 'Vishwa Bhalekar', 'Meera Iyer', 'Rohit Menon', 'Husaina Jalali', 'Sana Qureshi', 'Dev Patil', 'Anjali Rao']
+const TIMES: [string, string][] = [['9:00', 'AM'], ['9:30', 'AM'], ['10:00', 'AM'], ['10:30', 'AM'], ['11:00', 'AM'], ['12:00', 'PM'], ['4:00', 'PM'], ['4:30', 'PM'], ['5:00', 'PM'], ['6:00', 'PM'], ['7:00', 'PM']]
+const initials = (n: string) => n.split(' ').map((x) => x[0]).join('')
+const CAPACITY = 8
+
+function buildDay(d: Date, today: Date): { list: A[]; closure?: Closure } {
+  const dow = d.getDay()
+  const diff = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() - new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()) / 86400000)
+  if (diff === 4) return { list: [], closure: { reason: 'Clinic closed · Diwali' } }
+  if (dow === 0) return { list: [] }
+  const seed = d.getDate() * 7 + d.getMonth() * 13
+  let n = ((seed * 37) % 7) + 1
+  if (diff === 1) n = 10
+  if (diff === 2 || diff === 9) n = 0
+  if (diff > 14 && seed % 3 === 0) n = 0
+  const list: A[] = Array.from({ length: n }, (_, k) => {
+    const [time, ap] = TIMES[(k + seed) % TIMES.length]
+    const name = PEOPLE[(seed + k * 5) % PEOPLE.length]
+    const status: Status = diff < 0 ? (k === 2 ? 'Cancelled' : 'Seen') : diff === 0 ? (k === 0 ? 'Seen' : k === 1 ? 'In consult' : 'Upcoming') : 'Upcoming'
+    return { id: `${toISO(d)}-${k}`, time, ap, name, i: initials(name), meta: `${k % 3 === 1 ? 'Video' : 'In person'} · 30 min · ${k % 4 === 0 ? 'First visit' : 'Follow-up'}`, status }
+  })
+  const clock = (a: A) => ((Number(a.time.split(':')[0]) % 12) + (a.ap === 'PM' ? 12 : 0)) * 60 + Number(a.time.split(':')[1])
+  list.sort((a, b) => clock(a) - clock(b))
+  return { list }
+}
 
 export function CalendarLab() {
-  const today = new Date()
-  const monday = useMemo(() => { const d = new Date(today); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d }, [])
-  const days = useMemo(() => Array.from({ length: 7 }, (_, i) => { const d = new Date(monday); d.setDate(monday.getDate() + i); return d }), [monday])
-  const todayIdx = (today.getDay() + 6) % 7
-  const [sel, setSel] = useState(todayIdx)
-  const [view, setView] = useState<'week' | 'month'>('week')
-  const [collapsed, setCollapsed] = useState(false)
+  const today = useMemo(() => new Date(), [])
+  const [selected, setSelected] = useState(today)
+  const [mode, setMode] = useState<CalendarMode>('week')
   const [showCancelled, setShowCancelled] = useState(false)
   const [menuFor, setMenuFor] = useState<A | null>(null)
   const [confirmFor, setConfirmFor] = useState<A | null>(null)
+  const [addOpen, setAddOpen] = useState(false)
+  const [toast, setToast] = useState<FrameToastData | null>(null)
+  const closeToast = useCallback(() => setToast(null), [])
+  const say = (title: string, message?: string) => setToast({ id: Date.now(), title, message })
 
-  const byIdx = (i: number): A[] => (i === todayIdx ? THU : i === (todayIdx + 1) % 7 ? FRI : i === 0 ? MON : [])
-  const agenda = byIdx(sel)
-  const live = agenda.filter((a) => a.status !== 'Cancelled')
-  const cancelled = agenda.filter((a) => a.status === 'Cancelled')
-  const d = days[sel]
+  // The loads for the visible month and its neighbours (what the grid shows).
+  const loads = useMemo(() => {
+    const m = new Map<ISODate, DayLoad>()
+    for (let d = addDaysTo(new Date(selected.getFullYear(), selected.getMonth(), 1), -7); d < addDaysTo(new Date(selected.getFullYear(), selected.getMonth() + 1, 1), 7); d = addDaysTo(d, 1)) {
+      const { list, closure } = buildDay(d, today)
+      const live = list.filter((a) => a.status !== 'Cancelled')
+      m.set(toISO(d), { count: live.length, done: live.filter((a) => a.status === 'Seen').length, blocked: !!closure })
+    }
+    return m
+  }, [selected, today])
+
+  const { list, closure } = useMemo(() => buildDay(selected, today), [selected, today])
+  const live = list.filter((a) => a.status !== 'Cancelled')
+  const cancelled = list.filter((a) => a.status === 'Cancelled')
+  const isPast = toISO(selected) < toISO(today)
+  const load = loads.get(toISO(selected)) ?? EMPTY_LOAD
+
+  const page = (dir: -1 | 1) => setSelected((s) => (mode === 'week' ? shiftWeek(s, dir) : shiftMonth(s, dir)))
+  const pick = (d: Date) => { setSelected(d) }
 
   const row = (a: A, first: boolean, dim = false) => (
     <div key={a.id} className={`flex items-center gap-3 px-3.5 py-3 ${first ? '' : 'border-t border-border'} ${a.status === 'In consult' ? 'bg-tint-pale' : ''} ${dim ? 'opacity-55' : ''}`}>
       <div className="w-[46px] shrink-0">
         <div className="font-display text-[14px] font-bold leading-none text-ink">{a.time}</div>
-        <div className="mt-0.5 text-[10.5px] font-medium text-faint">{a.ap}</div>
+        <div className="mt-0.5 text-[11px] font-medium text-faint">{a.ap}</div>
       </div>
       <Avatar initials={a.i} size={36} />
       <div className="min-w-0 flex-1">
@@ -67,63 +94,56 @@ export function CalendarLab() {
     </div>
   )
 
+  const dayName = selected.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })
+  const rel = sameDay(selected, today) ? 'Today' : sameDay(selected, addDaysTo(today, 1)) ? 'Tomorrow' : sameDay(selected, addDaysTo(today, -1)) ? 'Yesterday' : null
+
   return (
     <div className="flex flex-wrap items-start gap-8">
-      <Phone label="Calm agenda" note="Scroll the list: the title collapses. Tap a day, tap ⋯ on a row." height={820}>
-        <div className="h-full overflow-y-auto no-scrollbar" onScroll={(e) => setCollapsed(e.currentTarget.scrollTop > 10)}>
-          <div className="sticky top-0 z-20 bg-screen/95 px-[18px] pb-2 pt-[var(--app-top)] backdrop-blur-md">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className={`font-display font-bold leading-tight text-ink transition-all duration-200 ${collapsed ? 'text-[17px]' : 'text-[26px]'}`}>Calendar</div>
-                <div className={`overflow-hidden text-[13px] text-muted transition-all duration-200 ${collapsed ? 'max-h-0 opacity-0' : 'max-h-6 opacity-100'}`}>
-                  {d.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}
-                </div>
-              </div>
+      <Phone label="Calendar v2 — week ⇄ month" note="Tap the month name, the handle, or drag the handle. Tap any day; swipe sideways." height={820}>
+        <div className="h-full overflow-y-auto no-scrollbar">
+          <div className={`z-20 px-[18px] pb-1 pt-[var(--app-top)] ${mode === 'week' ? 'sticky top-0 bg-screen/95 backdrop-blur-md' : 'relative'}`}>
+            <div className="mb-3 flex items-center justify-between">
+              <div className="font-display text-[13px] font-semibold uppercase tracking-label text-faint">Schedule</div>
               <div className="flex items-center gap-2">
                 <button className="flex items-center gap-1.5 rounded-pill border border-border bg-surface py-1 pl-1 pr-2.5 text-[12.5px] font-semibold text-body">
                   <Avatar initials="NB" size={22} /> You <CaretDown size={12} weight="bold" className="text-faint" />
                 </button>
-                <Pressable ariaLabel="Add" hap="tick" className="relative tap-pad flex h-9 w-9 items-center justify-center rounded-full bg-brand text-screen shadow-float">
+                <Pressable ariaLabel="Add" hap="tick" onClick={() => setAddOpen(true)} className="relative tap-pad flex h-9 w-9 items-center justify-center rounded-full bg-brand text-screen shadow-float">
                   <Plus size={17} weight="bold" />
                 </Pressable>
               </div>
             </div>
-            <div className="mt-3 flex items-center justify-between">
-              <div className="inline-flex rounded-pill border border-border bg-surface p-0.5">
-                {(['week', 'month'] as const).map((v) => (
-                  <button key={v} onClick={() => setView(v)} className={`rounded-pill px-3.5 py-1 text-[12.5px] font-semibold transition ${view === v ? 'bg-brand text-screen' : 'text-muted'}`}>{v === 'week' ? 'Week' : 'Month'}</button>
-                ))}
-              </div>
-              <div className="flex items-center gap-1 text-[12.5px] font-semibold text-muted">
-                <CaretLeft size={14} weight="bold" className="text-faint" />
-                {days[0].getDate()} {days[0].toLocaleDateString('en-IN', { month: 'short' })} – {days[6].getDate()} {days[6].toLocaleDateString('en-IN', { month: 'short' })}
-                <CaretRight size={14} weight="bold" className="text-faint" />
-              </div>
-            </div>
-            <div className="mt-2 flex gap-1">
-              {days.map((dd, i) => {
-                const on = i === sel
-                const isToday = i === todayIdx
-                const list = byIdx(i).filter((a) => a.status !== 'Cancelled')
-                return (
-                  <Pressable key={i} hap="tick" onClick={() => setSel(i)} className={`relative flex flex-1 flex-col items-center gap-1 rounded-[14px] py-2 transition-colors ${on ? 'bg-brand' : ''}`}>
-                    <span className={`text-[11px] font-medium ${on ? 'text-white/80' : isToday ? 'text-brand' : 'text-muted'}`}>{DAY_NAMES[i]}</span>
-                    <span className={`font-display text-[16px] font-bold ${on ? 'text-white' : isToday ? 'text-brand' : 'text-ink'}`}>{dd.getDate()}</span>
-                    {list.length > 0 ? <DayProgress done={list.filter((a) => a.status === 'Seen').length} total={list.length} onDark={on} className="w-5" /> : <span className="h-[5px]" />}
-                  </Pressable>
-                )
-              })}
-            </div>
+            <CalendarCanvas selected={selected} today={today} mode={mode} loads={loads} capacity={CAPACITY} onSelect={pick} onMode={setMode} onPage={page} onToday={() => setSelected(today)} />
           </div>
 
-          <div className="px-[18px] pb-[130px] pt-3">
-            {agenda.length === 0 ? (
-              <div className="flex flex-col items-center py-14 text-center">
-                <div className="flex h-14 w-14 items-center justify-center rounded-[18px] bg-tint"><CalendarBlank size={24} className="text-faint" /></div>
-                <div className="mt-4 font-display text-[16px] font-semibold text-ink">A free day</div>
-                <div className="mt-1 text-[13px] text-muted">Nothing booked for this day.</div>
+          <div className="px-[18px] pb-[130px] pt-2">
+            <div className="mb-2 flex items-baseline justify-between">
+              <div>
+                <div className="font-display text-[17px] font-bold text-ink">{rel ?? dayName.split(',')[0]}{rel && <span className="font-body text-[13px] font-normal text-muted"> · {dayName}</span>}{!rel && <span className="font-body text-[13px] font-normal text-muted"> · {selected.getDate()} {selected.toLocaleDateString('en-IN', { month: 'short' })}</span>}</div>
               </div>
-            ) : (
+              <div className="text-[12.5px] font-semibold text-muted">{load.count > CAPACITY ? <span className="text-amber-text">{load.count} visits · over capacity</span> : load.count > 0 ? `${load.count} visit${load.count === 1 ? '' : 's'}` : ''}</div>
+            </div>
+
+            {closure && (
+              <div className="mb-3 flex items-center gap-3 rounded-[18px] border border-dashed border-border-dash bg-surface px-4 py-3.5">
+                <div className="hatch flex h-10 w-10 items-center justify-center rounded-[12px] text-faint"><span className="flex h-full w-full items-center justify-center rounded-[12px] bg-surface/70 text-ink"><Prohibit size={18} /></span></div>
+                <div>
+                  <div className="font-display text-[14px] font-semibold text-ink">{closure.reason}</div>
+                  <div className="text-[12px] text-muted">Blocked all day — nobody can book it</div>
+                </div>
+              </div>
+            )}
+
+            {list.length === 0 && !closure ? (
+              <div className="flex flex-col items-center py-12 text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-[18px] bg-tint"><CalendarBlank size={24} className="text-faint" /></div>
+                <div className="mt-4 font-display text-[16px] font-semibold text-ink">{isPast ? 'No visits that day' : selected.getDay() === 0 ? 'Sunday — clinic day off' : 'A free day'}</div>
+                <div className="mt-1 text-[13px] text-muted">{isPast ? 'Nothing was booked.' : 'Nothing booked yet.'}</div>
+                {!isPast && (
+                  <Pressable hap="tick" onClick={() => say('Book a visit', `${dayName} — opens the booking sheet`)} className="mt-4 flex items-center gap-1.5 rounded-pill bg-brand px-4 py-2.5 text-[13.5px] font-semibold text-screen shadow-float"><CalendarPlus size={16} weight="bold" /> Book a visit on this day</Pressable>
+                )}
+              </div>
+            ) : list.length > 0 && (
               <>
                 <Label className="mb-2">{live.length} appointment{live.length === 1 ? '' : 's'}{cancelled.length ? ` · ${cancelled.length} cancelled` : ''}</Label>
                 <Card className="overflow-hidden">{live.map((a, i) => row(a, i === 0))}</Card>
@@ -140,13 +160,23 @@ export function CalendarLab() {
           </div>
         </div>
         <FakeTabBar active="calendar" />
+        <FrameToast toast={toast} onClose={closeToast} />
 
+        <BottomSheet open={addOpen} onClose={() => setAddOpen(false)}>
+          <div className="mb-3 font-display text-[16px] font-bold text-ink">Add to {selected.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}</div>
+          {[{ label: 'Book a visit', icon: CalendarPlus }, { label: 'Block time', icon: Prohibit }].map((x) => (
+            <Pressable key={x.label} as="div" hap="tick" scale={0.98} onClick={() => { setAddOpen(false); say(x.label, 'Opens for the selected day') }} className="mb-2 flex cursor-pointer items-center gap-3 rounded-[16px] border border-border bg-surface px-4 py-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-[12px] bg-tint text-brand"><x.icon size={20} /></div>
+              <div className="flex-1 text-[14px] font-semibold text-ink">{x.label}</div>
+            </Pressable>
+          ))}
+        </BottomSheet>
         <BottomSheet open={menuFor !== null} onClose={() => setMenuFor(null)}>
           <div className="flex items-center gap-3">
             <Avatar initials={menuFor?.i ?? ''} size={40} />
             <div>
               <div className="font-display text-[16px] font-bold text-ink">{menuFor?.name}</div>
-              <div className="text-[12.5px] text-muted">{menuFor?.time} {menuFor?.ap} · {dayLabelFor(d)}</div>
+              <div className="text-[12.5px] text-muted">{menuFor?.time} {menuFor?.ap} · {selected.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}</div>
             </div>
           </div>
           <div className="mt-4 space-y-2">
@@ -169,24 +199,25 @@ export function CalendarLab() {
             <div className="mt-1 text-[13px] text-muted">{confirmFor?.name} · {confirmFor?.time} {confirmFor?.ap}</div>
             <div className="mt-4 flex w-full gap-2">
               <Pressable hap="tick" onClick={() => setConfirmFor(null)} className="flex-1 rounded-pill border border-border bg-surface py-2.5 text-center text-[14px] font-semibold text-body">Keep it</Pressable>
-              <Pressable hap="impact" onClick={() => setConfirmFor(null)} className="flex-1 rounded-pill bg-danger py-2.5 text-center text-[14px] font-semibold text-white">Cancel it</Pressable>
+              <Pressable hap="impact" onClick={() => { setConfirmFor(null); say('Appointment cancelled') }} className="flex-1 rounded-pill bg-danger py-2.5 text-center text-[14px] font-semibold text-white">Cancel it</Pressable>
             </div>
           </div>
         </BottomSheet>
       </Phone>
-      <div className="max-w-[330px] pt-10 text-[14px] leading-relaxed text-body">
-        <p className="font-display text-[15px] font-semibold text-ink">Why this shape</p>
+
+      <div className="max-w-[340px] pt-10 text-[14px] leading-relaxed text-body">
+        <p className="font-display text-[15px] font-semibold text-ink">How week and month fit together</p>
         <ul className="mt-2 list-disc space-y-2 pl-5">
-          <li><span className="font-semibold text-ink">The header shrinks from ≈45% of the screen to ≈20%</span> — and to a single title line once she scrolls.</li>
-          <li><span className="font-semibold text-ink">One card, hairline rows.</span> Each appointment is about 64 px instead of 95, so five or six fit on screen.</li>
-          <li><span className="font-semibold text-ink">Status appears only when it matters</span> (in consult, seen). No "Upcoming" pill on every row.</li>
-          <li><span className="font-semibold text-ink">Cancelled ones fold away</span> under "Show 2 cancelled".</li>
-          <li><span className="font-semibold text-ink">Edit and Cancel live behind ⋯</span> — a 44 px target — and Cancel keeps the app's own confirmation.</li>
-          <li>The doctor filter (owner only) is one chip; the week arrows are a swipe.</li>
+          <li><span className="font-semibold text-ink">One grid, two sizes.</span> Month view is the same strip, unfolded: the other weeks slide open under the selected one and fold away again. The selected day never moves.</li>
+          <li><span className="font-semibold text-ink">Tapping a day stays put.</span> In month view the agenda below changes to that day — no jump to another screen. (The old month grid sent you back to week view.)</li>
+          <li><span className="font-semibold text-ink">A bar under every date</span> shows how full the day is: empty = nothing, green = booked, <span className="font-semibold text-amber-text">amber = more visits than a day holds</span>, hatched = clinic closed. Find a free day at a glance.</li>
+          <li><span className="font-semibold text-ink">Arrows / swipe</span> go a week at a time in week view and a month at a time in month view (31 Jan → 28 Feb handled). <span className="font-semibold text-ink">Today</span> appears whenever you've wandered away.</li>
+          <li><span className="font-semibold text-ink">Month footer:</span> "N visits this month · M free days ahead".</li>
+          <li><span className="font-semibold text-ink">Free day → one button:</span> "Book a visit on this day". Past days say so instead.</li>
+          <li>In week view the strip stays pinned while the agenda scrolls; in month view it scrolls away, giving the agenda the screen.</li>
         </ul>
+        <p className="mt-5 text-[12.5px] text-muted">Try: tap October, then tap a Sunday, tomorrow (amber — 10 visits), and the hatched day four days from now.</p>
       </div>
     </div>
   )
 }
-
-function dayLabelFor(d: Date) { return d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }) }

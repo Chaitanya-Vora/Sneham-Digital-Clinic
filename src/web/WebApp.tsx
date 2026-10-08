@@ -2787,6 +2787,14 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
   // directly it stops auto-updating — her words win.
   const [bodyText, setBodyText] = useState('')
   const [bodyTouched, setBodyTouched] = useState(false)
+  // Her standard instructions go into the box that PRINTS (the preparation note is
+  // only shown to the patient in the app). It replaces the auto-filled dose line, and
+  // is added below anything she has already written rather than overwriting it.
+  const insertStandardInstructions = () => {
+    const typed = bodyTouched && bodyText.trim() !== ''
+    setBodyTouched(true)
+    setBodyText(!typed ? STANDARD_MEDICINE_INSTRUCTIONS : bodyText.includes(STANDARD_MEDICINE_INSTRUCTIONS) ? bodyText : `${bodyText.trim()}\n\n${STANDARD_MEDICINE_INSTRUCTIONS}`)
+  }
   useEffect(() => {
     if (bodyTouched) return
     if (!remedy.trim()) { setBodyText(''); return }
@@ -3084,14 +3092,19 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
           <div>
             <div className="flex items-center justify-between">
               <Label>Prescription · exactly as it will print</Label>
-              {bodyTouched && (
-                <button
-                  onClick={() => setBodyTouched(false)}
-                  className="text-[11px] font-semibold text-brand"
-                >
-                  Reset to auto-filled
+              <div className="flex items-center gap-3">
+                {bodyTouched && (
+                  <button
+                    onClick={() => setBodyTouched(false)}
+                    className="text-[11px] font-semibold text-brand"
+                  >
+                    Reset to auto-filled
+                  </button>
+                )}
+                <button type="button" onClick={insertStandardInstructions} className="text-[11.5px] font-semibold text-brand hover:text-accent-deep">
+                  Insert standard instructions
                 </button>
-              )}
+              </div>
             </div>
             <textarea
               value={bodyText}
@@ -3108,9 +3121,6 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
           <div>
             <div className="flex items-center justify-between">
               <Label>Preparation · in plain language for the patient</Label>
-              <button type="button" onClick={() => setPrep(STANDARD_MEDICINE_INSTRUCTIONS)} className="text-[11.5px] font-semibold text-brand hover:text-accent-deep">
-                Insert standard instructions
-              </button>
             </div>
             <textarea
               value={prep}

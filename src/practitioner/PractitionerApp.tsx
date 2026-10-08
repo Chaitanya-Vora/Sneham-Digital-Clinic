@@ -609,6 +609,16 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
     setBodyText(doseLine)
   }, [remedy, potency, dose, rep, duration, bodyTouched])
 
+  // Her standard instructions go into the box that PRINTS (the preparation note is
+  // only shown to the patient in the app). It replaces the auto-filled dose line, and
+  // is added below anything she has already written rather than overwriting it.
+  const insertStandardInstructions = () => {
+    haptic('tick')
+    const typed = bodyTouched && bodyText.trim() !== ''
+    setBodyTouched(true)
+    setBodyText(!typed ? STANDARD_MEDICINE_INSTRUCTIONS : bodyText.includes(STANDARD_MEDICINE_INSTRUCTIONS) ? bodyText : `${bodyText.trim()}\n\n${STANDARD_MEDICINE_INSTRUCTIONS}`)
+  }
+
   const remedyList = doctor?.remedyList ?? []
   const list = useMemo(() => {
     const q = remedy.toLowerCase()
@@ -809,7 +819,12 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
       </div>
 
       <div>
-        <Label>Prescription · exactly as it will print</Label>
+        <div className="flex items-center justify-between">
+          <Label>Prescription · exactly as it will print</Label>
+          <Pressable hap="none" onClick={insertStandardInstructions} className="text-[11.5px] font-semibold text-brand">
+            Insert standard instructions
+          </Pressable>
+        </div>
         <textarea
           value={bodyText}
           onChange={(e) => { setBodyText(e.target.value); setBodyTouched(true) }}
@@ -824,12 +839,7 @@ function QuickRxScreen({ patientId, onPatientPicked }: { patientId: string | nul
       </div>
 
       <div>
-        <div className="flex items-center justify-between">
-          <Label>Preparation note</Label>
-          <Pressable hap="tick" onClick={() => setPrep(STANDARD_MEDICINE_INSTRUCTIONS)} className="text-[11.5px] font-semibold text-brand">
-            Insert standard instructions
-          </Pressable>
-        </div>
+        <Label>Preparation note · shown to the patient in the app</Label>
         <textarea value={prep} onChange={(e) => setPrep(e.target.value)} rows={3} placeholder="e.g. Dissolve under the tongue at night, 15 minutes away from food or drink." data-selectable="true" className="mt-2 w-full rounded-[14px] border border-border bg-surface px-3.5 py-2.5 text-[13px] leading-relaxed text-body outline-none focus:border-green-border" />
       </div>
 

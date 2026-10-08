@@ -205,11 +205,11 @@ export function WebCalendar({ onOpenPatient, focusPractitionerId }: { onOpenPati
                 const who = patients.find((p) => p.id === a.patientId)?.name
                 const ok = await confirmDialog({
                   title: 'Cancel this appointment?',
-                  message: `${who ? `${who} · ` : ''}${a.time}. The slot becomes free again.`,
+                  message: `${who ? `${who} · ` : ''}${a.time}. The slot becomes free again and ${who ? who.split(' ')[0] : 'the patient'} is told in the app.`,
                   confirmLabel: 'Cancel appointment', cancelLabel: 'Keep it', icon: <XCircle size={28} weight="fill" />,
                 })
                 if (!ok) return
-                useClinic.getState().updateAppointmentStatus(a.id, 'Cancelled')
+                useClinic.getState().cancelAppointment(a.id)
                 toast({ title: 'Appointment cancelled', message: `${a.time} slot is now free.` })
               }}
               onAddSlot={(hour) => setModalRequest({ mode: 'add', date: toISO(selectedDate), hour })}

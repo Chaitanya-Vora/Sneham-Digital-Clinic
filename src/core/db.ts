@@ -419,7 +419,25 @@ function toAppPrescription(r: any): Prescription {
     remindersEnabled: r.reminders_enabled,
     reminderTimes: r.reminder_times ?? [],
     restockReminderEnabled: r.restock_reminder_enabled ?? false,
+    hideRemedy: r.hide_remedy ?? false,
+    slipLabel: r.slip_label ?? undefined,
   }
+}
+
+// The privacy columns (migration v49) are only sent when the remedy is being hidden, so
+// everything keeps working on a database that has not been updated yet. If she asks to hide
+// it and the columns are missing the write fails — it is never saved with the name showing.
+export function rxPrivacyColumns(p: { hideRemedy?: boolean; slipLabel?: string }, wasHidden = false): Record<string, unknown> {
+  if (p.hideRemedy) return { hide_remedy: true, slip_label: p.slipLabel?.trim() ? p.slipLabel.trim() : null }
+  return wasHidden ? { hide_remedy: false, slip_label: null } : {}
+}
+
+/** Does the database have the "hide remedy" columns? true / false, or null when we could not tell (offline). */
+export async function probeRxPrivacy(): Promise<boolean | null> {
+  const { error } = await supabase.from('prescriptions').select('hide_remedy').limit(1)
+  if (!error) return true
+  if (error.code === '42703' || /hide_remedy/i.test(error.message)) return false
+  return null
 }
 
 function toDbPrescription(p: Prescription) {
@@ -443,6 +461,7 @@ function toDbPrescription(p: Prescription) {
     reminders_enabled: p.remindersEnabled,
     reminder_times: p.reminderTimes,
     restock_reminder_enabled: p.restockReminderEnabled ?? false,
+    ...rxPrivacyColumns(p),
   }
 }
 

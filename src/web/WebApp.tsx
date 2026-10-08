@@ -66,7 +66,7 @@ import { followUpQueue, isDue } from '../core/course'
 import { PopoverMenu } from '../design-system/PopoverMenu'
 import { ownerLabel, ownerTone, isMine, isUnassigned, isAssignedToOthers, activeCoveringHandoff } from '../core/assignment'
 import { getSections, CASE_TEMPLATES } from '../core/caseTemplate'
-import { useClinic, CASE_RETAKE_APPT_MARKER, type PublishRxInput } from '../core/store'
+import { useClinic, CASE_RETAKE_APPT_MARKER, RX_PRIVACY_UNAVAILABLE, type PublishRxInput } from '../core/store'
 import { useAuth } from '../auth/AuthProvider'
 import type { Appointment, Patient, Potency, Repetition, RxTemplate, Invoice, InvoiceLineItem, PaymentMode, ChatMessage, ReferralSource, Role, EditableRole, RolePermissionSet, AssignmentRules, PractitionerSettings, CaseVisit } from '../core/types'
 import { isOneOffRepetition } from '../core/types'
@@ -94,6 +94,9 @@ import { CommandPalette, type Command } from './CommandPalette'
 import { WebCalendar } from './WebCalendar'
 import { AppointmentModal, type AppointmentModalRequest } from './AppointmentModal'
 import { FollowUpQueue } from './FollowUpQueue'
+import { NameOnSlip } from '../components/NameOnSlip'
+import { SlipBox } from '../components/SlipPreview'
+import { cleanSlipLabel, lastSlipLabel, mentionsRemedy, messageFallback, rememberSlipLabel, slipLine } from '../core/rxPrivacy'
 import { useShallow } from 'zustand/react/shallow'
 // Lazy — Jitsi's SDK is ~116KB and should only load on the rare screen
 // that actually starts a video call, not on every console load.
@@ -708,11 +711,11 @@ function TodayView({ onOpenPatient, onStartVideo, onOpenCalendarForPractitioner,
                         onSelect: async () => {
                           const ok = await confirmDialog({
                             title: 'Cancel this appointment?',
-                            message: `${p?.name ?? 'The patient'} · ${a.time}. The slot becomes free again.`,
+                            message: `${p?.name ?? 'The patient'} · ${a.time}. The slot becomes free again and ${p?.name?.split(' ')[0] ?? 'the patient'} is told in the app.`,
                             confirmLabel: 'Cancel appointment', cancelLabel: 'Keep it', icon: <XCircle size={28} weight="fill" />,
                           })
                           if (!ok) return
-                          useClinic.getState().updateAppointmentStatus(a.id, 'Cancelled')
+                          useClinic.getState().cancelAppointment(a.id)
                           toast({ title: 'Appointment cancelled', message: `${p?.name ?? 'Patient'}'s ${a.time} slot is now free.` })
                         },
                       },
@@ -1539,6 +1542,7 @@ function PrescriptionsOverview({ onOpenPatient, onWriteFor }: { onOpenPatient: (
                 <div className="w-[150px] text-[12px] text-muted">{r.repetition}</div>
                 {r.status === 'draft' && <Badge tone="amber">Draft</Badge>}
                 {r.status === 'cancelled' && <Badge tone="danger">Cancelled</Badge>}
+                {r.hideRemedy && <span title="The patient is not told the remedy" className="flex shrink-0 items-center gap-1 text-[12px] font-medium text-muted"><Lock size={12} weight="fill" /> Hidden{r.slipLabel ? ` · ${r.slipLabel}` : ''}</span>}
                 <div className="flex flex-wrap justify-end gap-1">
                   {r.sharedVia.map((c) => <Badge key={c} tone="neutral">{c}</Badge>)}
                 </div>
@@ -1686,11 +1690,11 @@ function FollowUpsOverview({ onOpenFollowUp }: { onOpenFollowUp: (id: string) =>
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
-                        useClinic.getState().updateAppointmentStatus(a.id, 'Cancelled')
+                        const undo = useClinic.getState().cancelAppointment(a.id)
                         toast({
                           title: 'Follow-up cancelled',
-                          message: `${pt?.name ?? 'Patient'} · ${formatDayLabel(a.date)}`,
-                          action: { label: 'Undo', onClick: () => useClinic.getState().updateAppointmentStatus(a.id, 'Upcoming') },
+                          message: `${pt?.name ?? 'Patient'} · ${formatDayLabel(a.date)} — told in the app.`,
+                          ...(undo ? { action: { label: 'Undo', onClick: () => { const s = useClinic.getState(); s.updateAppointmentStatus(a.id, undo.previousStatus); s.dismissNotification(undo.notificationId) } } } : {}),
                         })
                       }}
                       className="rounded-full p-1.5 text-faint transition hover:bg-danger/10 hover:text-danger"
@@ -2513,6 +2517,7 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
                     <div className="flex-1">
                       <div className={`font-display text-[14px] font-semibold text-ink ${isCancelled ? 'line-through' : ''}`}>{r.remedy} {r.potency}</div>
                       <div className="text-[12px] text-muted">{r.repetition} · {r.doseGlobules} globules{r.durationDays ? ` · ${r.durationDays} days` : ''}</div>
+                      {r.hideRemedy && <div className="mt-0.5 flex items-center gap-1 text-[11.5px] font-medium text-faint"><Lock size={11} weight="fill" /> Hidden from {patient.name.split(' ')[0]}{r.slipLabel ? ` · slip says ${r.slipLabel}` : ''}</div>}
                     </div>
                     {isDraft && <Badge tone="amber">Draft</Badge>}
                     {isCancelled && <Badge tone="danger">Cancelled</Badge>}
@@ -2836,6 +2841,7 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
   const publishDraft = useClinic((s) => s.publishDraftPrescription)
   const updatePractitioner = useClinic((s) => s.updatePractitioner)
   const scheduleFollowUp = useClinic((s) => s.scheduleFollowUp)
+  const privacy = useClinic((s) => s.rxPrivacySupported)
   const toast = useToast()
 
   // The remedy field is the actual value — typing always works, chips below
@@ -2870,6 +2876,17 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
   // directly it stops auto-updating — her words win.
   const [bodyText, setBodyText] = useState('')
   const [bodyTouched, setBodyTouched] = useState(false)
+  // "Don't reveal the remedy": the remedy is always recorded, but by default the patient is not told
+  // it — the slip, messages, app and reminders carry her own wording instead (core/rxPrivacy.ts).
+  // Showing the name is a deliberate choice each time.
+  const [hide, setHide] = useState(true)
+  const [label, setLabel] = useState(() => lastSlipLabel())
+  const hideEffective = hide && privacy !== false
+  const rxLike = useMemo(
+    () => ({ remedy: remedy.trim(), potency, doseGlobules: dose, repetition: rep, durationDays: isOneOffRepetition(rep) ? null : duration, hideRemedy: hideEffective, slipLabel: cleanSlipLabel(label) }),
+    [remedy, potency, dose, rep, duration, hideEffective, label],
+  )
+  const leak = hideEffective && remedy.trim() ? (mentionsRemedy(bodyText, remedy) ?? mentionsRemedy(prep, remedy)) : null
   // Her standard instructions go into the box that PRINTS (the preparation note is
   // only shown to the patient in the app). It replaces the auto-filled dose line, and
   // is added below anything she has already written rather than overwriting it.
@@ -2880,12 +2897,8 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
   }
   useEffect(() => {
     if (bodyTouched) return
-    if (!remedy.trim()) { setBodyText(''); return }
-    const doseLine = isOneOffRepetition(rep)
-      ? `${remedy} ${potency} — ${dose} globules, ${rep.toLowerCase()}`
-      : `${remedy} ${potency} — ${dose} globules, ${rep}${duration ? `, ${duration} days` : ''}`
-    setBodyText(doseLine)
-  }, [remedy, potency, dose, rep, duration, bodyTouched])
+    setBodyText(remedy.trim() ? slipLine(rxLike) : '')
+  }, [rxLike, bodyTouched, remedy])
 
   // Pre-fill from an existing draft when opening one for continued editing
   // — mirrors applyTemplate's bulk-field-set above.
@@ -2901,6 +2914,8 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
     setBodyTouched(!!draft.bodyText)
     setChannels(draft.sharedVia.filter((c) => c !== 'Patient app'))
     setRestockReminder(draft.restockReminderEnabled ?? false)
+    setHide(draft.hideRemedy ?? false) // a draft keeps the choice she made when she saved it
+    if (draft.slipLabel) setLabel(draft.slipLabel)
   }, [draft?.id])
 
   const [templatesOpen, setTemplatesOpen] = useState(false)
@@ -2958,7 +2973,7 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
     if (channels.includes(c)) { toggleChannel(c); return }
     if (!patient) return
     if (!remedy.trim()) { toast({ title: 'Enter a remedy first' }); return }
-    const message = `Prescription from ${CLINIC_DETAILS.doctorName} for ${patient.name}:\n${bodyText.trim() || `${remedy} ${potency}`}${prep.trim() ? `\nPreparation: ${prep.trim()}` : ''}`
+    const message = `Prescription from ${CLINIC_DETAILS.doctorName} for ${patient.name}:\n${bodyText.trim() || messageFallback(rxLike)}${prep.trim() ? `\nPreparation: ${prep.trim()}` : ''}`
     let sent = true
     if (c === 'WhatsApp') sent = shareViaWhatsApp(patient.phone, message)
     else if (c === 'SMS') sent = shareViaSms(patient.phone, message)
@@ -2987,9 +3002,18 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
       sharedVia: ['Patient app', ...channels],
       origin: 'web',
       restockReminderEnabled: restockReminder,
+      hideRemedy: hideEffective,
+      slipLabel: hideEffective ? cleanSlipLabel(label) : undefined,
     }
-    const rx = draftId ? publishDraft(draftId, payload) : publish(payload)
+    let rx
+    try {
+      rx = draftId ? publishDraft(draftId, payload) : publish(payload)
+    } catch (e) {
+      if (e instanceof Error && e.message === RX_PRIVACY_UNAVAILABLE) { toast({ title: 'Couldn’t hide the name', message: 'The database update for this has not been applied yet. Switch the name to Show, or apply the update first.' }); return }
+      throw e
+    }
     if (!rx) return // draft vanished from under us (e.g. cancelled elsewhere) — bail quietly
+    if (hideEffective) rememberSlipLabel(label)
 
     // Publishing books the review too — a course that ends without anyone
     // checking back on it is the exact gap a follow-up reminder exists to
@@ -3036,9 +3060,16 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
       sharedVia: channels, // no 'Patient app' — nothing has been sent yet
       origin: 'web',
       restockReminderEnabled: restockReminder,
+      hideRemedy: hideEffective,
+      slipLabel: hideEffective ? cleanSlipLabel(label) : undefined,
     }
-    if (draftId) updateDraft(draftId, payload)
-    else saveDraft(payload)
+    try {
+      if (draftId) updateDraft(draftId, payload)
+      else saveDraft(payload)
+    } catch (e) {
+      if (e instanceof Error && e.message === RX_PRIVACY_UNAVAILABLE) { toast({ title: 'Couldn’t hide the name', message: 'The database update for this has not been applied yet. Switch the name to Show, or apply the update first.' }); return }
+      throw e
+    }
     toast({ title: draftId ? 'Draft updated' : 'Draft saved', message: `${remedy} ${potency} is saved with ${patient?.name}'s file — not sent yet.` })
     onDone()
   }
@@ -3100,7 +3131,10 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
         {/* form */}
         <Card className="space-y-5 p-5">
           <div>
-            <Label>Remedy</Label>
+            <div className="flex items-center justify-between gap-2">
+              <Label>Remedy</Label>
+              <span className="flex items-center gap-1 text-[12px] font-semibold text-muted"><Lock size={11} weight="fill" /> {hideEffective ? 'Only you see this' : 'Shown to the patient'}</span>
+            </div>
             <div className="mt-2 flex items-center gap-2 rounded-pill border border-border bg-surface px-3.5 py-2">
               <MagnifyingGlass size={15} className="text-faint" />
               <input
@@ -3144,6 +3178,10 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
                 <Chip key={p} selected={p === potency} onClick={() => setPotency(p)} className="min-w-[64px] text-center">{p}</Chip>
               ))}
             </div>
+          </div>
+
+          <div className="rounded-[14px] border border-border bg-surface px-4 py-3.5">
+            <NameOnSlip hide={hideEffective} onHide={setHide} label={label} onLabel={setLabel} supported={privacy} />
           </div>
 
           <div className="flex gap-6">
@@ -3199,6 +3237,12 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
             <p className="mt-1.5 text-[11.5px] text-faint">
               This is the only thing that prints. The fields above are just a quick way to fill it in and still drive dose reminders — write over them freely.
             </p>
+            {leak && (
+              <div className="mt-2 flex items-start gap-2 rounded-[12px] border border-amber-border bg-amber-tint px-3 py-2.5 text-[12.5px] leading-snug text-amber-text">
+                <Warning size={15} weight="fill" className="mt-0.5 shrink-0" />
+                <span>Your text still says “{leak}” — the patient would see it. Edit it, or switch the name to Show.</span>
+              </div>
+            )}
           </div>
 
           <div>
@@ -3222,6 +3266,7 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
             </div>
             <div className="space-y-3 p-5">
               <div className="text-[12px] text-muted">{patient.name} · {patient.age} {patient.sex[0]} · {patient.wsCode} · {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+              <SlipBox rx={rxLike} instructions="" showInstructions={false} />
               <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-ink">{bodyText || 'Start typing the prescription, or fill in a remedy below to auto-fill it.'}</p>
               <div>
                 <Label>Preparation</Label>
@@ -3276,7 +3321,7 @@ function PrescriptionWriter({ patientId, draftId, onDone }: { patientId: string;
               <button onClick={async () => {
                 if (!remedy.trim()) { toast({ title: 'Enter a remedy first' }); return }
                 const nowIso = new Date().toISOString()
-                const rx = { id: crypto.randomUUID(), patientId: patient.id, practitionerId: doctor?.id ?? '', remedy: remedy.trim(), potency: potency as any, doseGlobules: dose, repetition: rep as any, durationDays: duration, preparation: prep, bodyText: bodyText.trim() || undefined, status: 'published' as const, publishedAt: nowIso, createdAt: nowIso, updatedAt: nowIso, sharedVia: [], remindersEnabled: false, reminderTimes: [] }
+                const rx = { id: crypto.randomUUID(), patientId: patient.id, practitionerId: doctor?.id ?? '', remedy: remedy.trim(), potency: potency as any, doseGlobules: dose, repetition: rep as any, durationDays: duration, preparation: prep, bodyText: bodyText.trim() || undefined, status: 'published' as const, publishedAt: nowIso, createdAt: nowIso, updatedAt: nowIso, sharedVia: [], remindersEnabled: false, reminderTimes: [], hideRemedy: hideEffective, slipLabel: hideEffective ? cleanSlipLabel(label) : undefined }
                 await (await import('../core/pdfExport')).exportPrescriptionPdf(rx, patient).catch((e) => {
                   console.error('PDF export failed', e)
                   toast({ title: 'PDF export failed', message: e instanceof Error ? e.message : 'Please try again.' })

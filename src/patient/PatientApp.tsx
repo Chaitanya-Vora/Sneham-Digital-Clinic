@@ -48,6 +48,7 @@ import { AppInfoRow } from '../components/AppInfo'
 import { useToast } from '../design-system/toast'
 import { ChatThread } from '../components/ChatThread'
 import { getDocumentUrl } from '../core/db'
+import { currentRemedyForPatient, patientSafeDose, patientSafeRx, remedyForPatientOr, remedyTextForPatient } from '../core/rxPrivacy'
 import { useShallow } from 'zustand/react/shallow'
 
 type Tab = 'home' | 'appointments' | 'prescriptions' | 'profile'
@@ -120,8 +121,12 @@ export function PatientApp() {
   const ME = patient?.id ?? ''
   // Only published prescriptions — a draft or cancelled one must be
   // invisible here, not merely unlabelled (see selPublishedPrescriptionsFor).
-  const prescriptions = useClinic(useShallow((s) => s.prescriptions.filter((r) => r.patientId === ME && r.status === 'published')))
-  const doses = useClinic(useShallow((s) => s.doseReminders.filter((d) => d.patientId === ME)))
+  const publishedRx = useClinic(useShallow((s) => s.prescriptions.filter((r) => r.patientId === ME && r.status === 'published')))
+  // When the doctor has chosen not to reveal a remedy, every screen below gets the version with only
+  // her own wording on it — never the real name (core/rxPrivacy.ts).
+  const prescriptions = useMemo(() => publishedRx.map(patientSafeRx), [publishedRx])
+  const rawDoses = useClinic(useShallow((s) => s.doseReminders.filter((d) => d.patientId === ME)))
+  const doses = useMemo(() => rawDoses.map((d) => patientSafeDose(d, publishedRx)), [rawDoses, publishedRx])
   const notifs = useClinic(useShallow((s) => s.notifications.filter((n) => n.surface === 'patient')))
   const toggleDose = useClinic((s) => s.toggleDoseLogged)
   const setRemindersEnabled = useClinic((s) => s.setRemindersEnabled)
@@ -240,7 +245,7 @@ export function PatientApp() {
               <ProfileDetail title="Medical basics" back={() => setPushed(null)} onRefresh={refresh}>
                 <div className="space-y-3">
                   <ReadOnlyField label="Chief complaint" value={patient.chiefComplaint} />
-                  <ReadOnlyField label="Current remedy" value={patient.currentRemedy || 'None'} />
+                  <ReadOnlyField label="Current remedy" value={currentRemedyForPatient(patient.currentRemedy, publishedRx) || 'None'} />
                   <ReadOnlyField label="Allergies" value={patient.allergies || 'None recorded'} />
                   <ReadOnlyField label="Regular medication" value={patient.regularMedication || 'None recorded'} />
                 </div>
@@ -764,7 +769,7 @@ function RxScreen({ prescriptions, onToggleReminders, goDoses, onRefresh }: any)
                 <div className="flex-1">
                   <div className="font-display text-[17px] font-bold text-ink">{rx.remedy}</div>
                   <div className="mt-1 flex flex-wrap gap-1.5">
-                    <Badge tone="amber">{rx.potency}</Badge>
+                    {rx.potency && <Badge tone="amber">{rx.potency}</Badge>}
                     <Badge tone="green">{rx.doseGlobules} globules</Badge>
                   </div>
                 </div>
@@ -810,8 +815,8 @@ function RxScreen({ prescriptions, onToggleReminders, goDoses, onRefresh }: any)
                   hap="tick"
                   onClick={async () => {
                     const shareData = {
-                      title: `Prescription: ${rx.remedy} ${rx.potency}`,
-                      text: `My prescription from Sneham Digital Clinic: ${rx.remedy} ${rx.potency}, ${rx.repetition}`,
+                      title: `Prescription: ${`${rx.remedy} ${rx.potency}`.trim()}`,
+                      text: `My prescription from Sneham Digital Clinic: ${`${rx.remedy} ${rx.potency}`.trim()}, ${rx.repetition}`,
                     }
                     if (Capacitor.isNativePlatform()) {
                       // navigator.share is undefined in a Capacitor WebView —
@@ -949,6 +954,8 @@ function usePastVisits(patientId: string) {
   const appointments = useClinic(useShallow((s) => s.appointments.filter((a) => a.patientId === patientId && (a.status === 'Seen' || isPastISO(a.date)))))
   const practitioners = useClinic((s) => s.practitioners)
   const outcomes = useClinic(useShallow((s) => s.outcomes.filter((o) => o.patientId === patientId)))
+  // A visit's remedy is the doctor's own record — masked here when that prescription is hidden from the patient.
+  const rxs = useClinic(useShallow((s) => s.prescriptions.filter((r) => r.patientId === patientId && r.status !== 'draft')))
 
   return useMemo(() =>
     appointments.map((apt, i) => {
@@ -961,11 +968,11 @@ function usePastVisits(patientId: string) {
         time: apt.time,
         doctor: docName,
         type: apt.type,
-        remedy: outcome?.remedy ?? null,
+        remedy: remedyTextForPatient(outcome?.remedy, rxs),
         outcome: outcome?.outcome ?? null,
       }
     }),
-  [appointments, practitioners, outcomes])
+  [appointments, practitioners, outcomes, rxs])
 }
 
 const outcomeTone = (o: string) => {
@@ -1379,7 +1386,15 @@ function DataPrivacyScreen({ back, onRefresh }: { back: () => void; onRefresh: (
   const messages = useClinic(useShallow((s) => s.messages.filter((m) => m.patientId === patient?.id)))
 
   const handleExport = async () => {
-    const data = { patient, prescriptions, appointments, doses, messages, exportedAt: new Date().toISOString() }
+    // The export is the patient's own copy — it carries only what she may see, like every screen does.
+    const data = {
+      patient: patient ? { ...patient, currentRemedy: currentRemedyForPatient(patient.currentRemedy, prescriptions) } : patient,
+      prescriptions: prescriptions.map(patientSafeRx),
+      appointments,
+      doses: doses.map((d) => patientSafeDose(d, prescriptions)),
+      messages,
+      exportedAt: new Date().toISOString(),
+    }
     const json = JSON.stringify(data, null, 2)
     const fileName = `sneham-export-${patient?.name?.replace(/\s+/g, '-') ?? 'patient'}.json`
 
@@ -1572,7 +1587,7 @@ function CheckInScreen({ back, onRefresh, patientId }: { back: () => void; onRef
           <Card className="flex items-center gap-3 px-4 py-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-[12px] bg-tint text-brand"><Flask size={20} weight="fill" /></div>
             <div>
-              <div className="text-[14px] font-semibold text-ink">{rx.remedy} {rx.potency}</div>
+              <div className="text-[14px] font-semibold text-ink">{remedyForPatientOr(rx, 'Your prescription')}</div>
               <div className="text-[12px] text-muted">{rx.repetition}</div>
             </div>
           </Card>

@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { CaretLeft, DotsThreeVertical, Phone } from '@phosphor-icons/react'
 import { CourseRing } from '../../design-system/CourseRing'
 import { Pressable } from '../../design-system/Pressable'
+import { haptic } from '../../design-system/haptics'
 import { TickNumber } from '../../design-system/feedback'
 import { WhatsAppIcon } from '../../design-system/BrandIcons'
 import type { CourseStatus } from '../../core/course'
@@ -21,7 +22,6 @@ export interface ProfileHeroProps {
   adherence: number | null // % of doses logged this cycle, or null when there are none
   onBack: () => void
   onMore: () => void
-  onCall?: () => void
   onWhatsApp?: () => void
 }
 
@@ -67,7 +67,7 @@ export function ProfileHero(p: ProfileHeroProps) {
           <div className="text-[12px] text-white/60">{p.idLabel}</div>
           {p.phone && (
             <div className="mt-2 flex items-center gap-2">
-              <RoundBtn label="call" onClick={p.onCall} className="bg-white/15 text-screen"><Phone size={16} weight="fill" /></RoundBtn>
+              <a href={`tel:${p.phone}`} aria-label="call" onClick={() => haptic('tick')} className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full bg-white/15 text-screen"><Phone size={16} weight="fill" /></a>
               <RoundBtn label="message on whatsapp" onClick={p.onWhatsApp} className="bg-[#25D366]"><WhatsAppIcon size={18} color="#fff" /></RoundBtn>
             </div>
           )}
@@ -77,7 +77,7 @@ export function ProfileHero(p: ProfileHeroProps) {
       <div className="relative mt-6 grid grid-cols-[1fr_1.3fr_1fr] gap-2">
         <Stat label="Visits" value={<TickNumber value={p.visits} />} />
         <Stat label="Last seen" value={p.lastSeen} small />
-        <Stat label="Doses taken" value={p.adherence === null ? '—' : <><TickNumber value={p.adherence} />%</>} />
+        <Stat label="Doses" value={p.adherence === null ? '—' : <><TickNumber value={p.adherence} />%</>} />
       </div>
     </div>
   )

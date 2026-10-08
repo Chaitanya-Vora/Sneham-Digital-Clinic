@@ -126,7 +126,7 @@ export function ProfileLab() {
           <ProfileHero
             name="Ananya Rao" initials="AR" meta="34 yrs · Female · Chiplun" idLabel="Patient ID WS-1042" phone="9876543210"
             course={course} visits={seenCount} lastSeen={lastSeen} adherence={course.state === 'none' ? null : 86}
-            onBack={() => say('Back to patients')} onMore={() => setMenu(true)} onCall={() => say('Calls 98765 43210')} onWhatsApp={() => say('Opens WhatsApp')}
+            onBack={() => say('Back to patients')} onMore={() => setMenu(true)} onWhatsApp={() => say('Opens WhatsApp')}
           />
           <div className="px-[18px] pb-10">
             <NextStepCard step={view} />

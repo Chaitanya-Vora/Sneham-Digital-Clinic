@@ -157,6 +157,8 @@ export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatien
   const scheduleFollowUp = useClinic((s) => s.scheduleFollowUp)
   const updateAppointment = useClinic((s) => s.updateAppointment)
   const updateAppointmentStatus = useClinic((s) => s.updateAppointmentStatus)
+  const cancelAppointment = useClinic((s) => s.cancelAppointment)
+  const dismissNotification = useClinic((s) => s.dismissNotification)
   const allTimeBlocks = useClinic((s) => s.timeBlocks)
   const addTimeBlock = useClinic((s) => s.addTimeBlock)
   const removeTimeBlock = useClinic((s) => s.removeTimeBlock)
@@ -313,9 +315,14 @@ export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatien
   }
 
   function handleCancelAppt(apptId: string) {
-    updateAppointmentStatus(apptId, 'Cancelled')
+    const appt = useClinic.getState().appointments.find((a) => a.id === apptId)
+    const undo = cancelAppointment(apptId)
     haptic('impact')
-    toast({ title: 'Appointment cancelled' })
+    toast({
+      title: 'Appointment cancelled',
+      message: `${patientMap.get(appt?.patientId ?? '')?.name ?? 'The patient'} has been told.`,
+      ...(undo ? { action: { label: 'Undo', onClick: () => { updateAppointmentStatus(apptId, undo.previousStatus); dismissNotification(undo.notificationId) } } } : {}),
+    })
     setCancelApptId(null)
   }
 

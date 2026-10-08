@@ -40,14 +40,16 @@ export function ClinicalSnapshot({ complaint, allergies, medication, care, onEdi
           <div className="mt-0.5 text-[14px] leading-snug text-ink">{medication}</div>
         </div>
       )}
-      <Pressable as="div" hap="tick" scale={0.99} onClick={onOpenCare} className="relative -mx-1 mt-3 flex cursor-pointer items-center gap-2.5 rounded-[14px] border-t border-border px-1 pt-3">
-        <Avatar initials={care.initials} size={30} />
-        <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-semibold text-ink">Care team</div>
-          <div className="truncate text-[12px] text-muted">{care.line}</div>
-        </div>
-        <CaretRight size={15} className="text-faint" />
-      </Pressable>
+      <div className="mt-3 border-t border-border pt-1.5">
+        <Pressable as="div" hap="tick" scale={0.99} onClick={onOpenCare} className="relative -mx-1 flex cursor-pointer items-center gap-2.5 rounded-[12px] px-1 py-1.5">
+          <Avatar initials={care.initials} size={30} />
+          <div className="min-w-0 flex-1">
+            <div className="text-[13px] font-semibold text-ink">Care team</div>
+            <div className="truncate text-[12px] text-muted">{care.line}</div>
+          </div>
+          <CaretRight size={15} className="text-faint" />
+        </Pressable>
+      </div>
       {care.coverage && (
         <div className="mt-2.5 flex items-center gap-2 rounded-[12px] border border-green-border bg-tint px-3 py-2 text-[12px] text-ink-deep">
           <Handshake size={15} weight="fill" className="shrink-0 text-brand" /> {care.coverage}

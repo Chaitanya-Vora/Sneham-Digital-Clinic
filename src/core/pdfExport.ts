@@ -4,6 +4,7 @@ import { Capacitor } from '@capacitor/core'
 import type { Prescription, Patient, InvestigationOrder, Invoice, Outcome } from './types'
 import { CLINIC_DETAILS } from './letterheadAssets'
 import { invoiceTotal, invoiceBalance, numberToWordsIndian, buildUpiLink } from './billing'
+import { boxContent } from './rxPrivacy'
 import {
   COLOR, LEFT, RIGHT, CONTENT_W, PAGE_W, PAGE_H, RX_LAYOUT, FORM_LAYOUT, type Layout,
   createDesignDoc, drawRxSign, setFace, put, textWidth, hline, box, drawMasthead, drawTitle, drawDate, drawField, drawFooter,
@@ -151,7 +152,9 @@ export async function exportPrescriptionPdf(rx: Prescription, patient: Patient, 
   drawField(doc, { label: 'SEX', value: patient.sex, x1: 429, x2: RIGHT, labelBase: 145, lineY: 164.5, track: L.labelTrack })
   const diagLine = drawField(doc, { label: 'DIAGNOSIS / CASE', value: patient.chiefComplaint || '', x1: 45, x2: RIGHT, labelBase: 179.4, lineY: 199, track: L.labelTrack })
 
-  const boxBottom = drawRemedyBox(doc, diagLine + 12.5, rx.remedy, String(rx.potency ?? ''))
+  // When the doctor has chosen not to reveal the remedy, the box carries only her own wording.
+  const named = boxContent(rx)
+  const boxBottom = drawRemedyBox(doc, diagLine + 12.5, named.remedy, named.potency)
 
   setFace(doc, 'head', 9.2, COLOR.blue)
   const headBase = boxBottom + 20.5

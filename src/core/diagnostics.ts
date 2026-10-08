@@ -123,6 +123,13 @@ export function initDiagnostics() {
     vvTimer = setTimeout(() => diag('viewport', viewportInfo()), 200)
   })
 
+  // TEST: does a long-press paste actually reach the page? Records only the kind of field and how
+  // many characters arrived — never the text itself.
+  const fieldName = (t: EventTarget | null) => (t instanceof HTMLElement ? `${t.tagName.toLowerCase()}${(t as HTMLInputElement).type ? `:${(t as HTMLInputElement).type}` : ''}` : '?')
+  document.addEventListener('paste', (e) => diag('paste', `paste event in ${fieldName(e.target)} chars=${(e.clipboardData?.getData('text') ?? '').length}`), true)
+  document.addEventListener('beforeinput', (e) => { if ((e as InputEvent).inputType === 'insertFromPaste') diag('paste', `beforeinput insertFromPaste in ${fieldName(e.target)}`) }, true)
+  document.addEventListener('contextmenu', (e) => diag('contextmenu', `long-press menu event in ${fieldName(e.target)}`), true)
+
   // Errors (messages are scrubbed of ids/emails/long numbers).
   window.addEventListener('error', (e) => diag('error', e.message))
   window.addEventListener('unhandledrejection', (e) => diag('rejection', String((e.reason && (e.reason.message || e.reason)) ?? 'unknown')))

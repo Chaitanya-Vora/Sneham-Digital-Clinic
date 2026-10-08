@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useDeferredValue } from 'react'
 import { WhatsAppIcon } from '../design-system/BrandIcons'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
@@ -101,6 +101,9 @@ function headerDisplayName(name: string) {
 
 export function PractitionerApp() {
   const [tab, setTab] = useState<Tab>('today')
+  // The tab bar follows the tap at once; the screen behind it is built a moment later in small slices, so a
+  // tap never freezes the phone for the ~55ms it takes to build a whole screen (seen in the diagnostics).
+  const shownTab = useDeferredValue(tab)
   useEffect(() => { diag('tab', tab); sampleFrames(`tab ${tab}`, 1500) }, [tab])
   const [dir, setDir] = useState(1)
   // Overlay navigation as one atomic value — current screen, what's
@@ -293,8 +296,8 @@ export function PractitionerApp() {
 
         <div className="relative flex-1 overflow-clip">
           <AnimatePresence custom={dir} initial={false}>
-            <GuardedMotionDiv key={tab} className="absolute inset-0" custom={dir} variants={tabVariants} initial="enter" animate="center" exit="exit" transition={{ duration: testFlag('nofade') ? 0 : 0.15 }} {...swipe}>
-              {tab === 'calendar' ? (
+            <GuardedMotionDiv key={shownTab} className="absolute inset-0" custom={dir} variants={tabVariants} initial="enter" animate="center" exit="exit" transition={{ duration: testFlag('nofade') ? 0 : 0.15 }} {...swipe}>
+              {shownTab === 'calendar' ? (
                 <CalendarScreen
                   onOpenPatient={(id) => openOverlay({ kind: 'patient-detail', patientId: id })}
                   openCase={(id) => openOverlay({ kind: 'case', patientId: id })}
@@ -302,10 +305,10 @@ export function PractitionerApp() {
                 />
               ) : (
                 <PullToRefresh onRefresh={refresh} className="h-full px-[18px] pb-[120px] pt-2">
-                  {tab === 'today' && <TodayGrid openCase={(id) => openOverlay({ kind: 'case', patientId: id })} goRx={goToRx} startVideo={(apptId) => openOverlay({ kind: 'video', appointmentId: apptId })} onQuickBill={() => setBillSearchOpen(true)} onInstantMeeting={() => setInstantMeetingOpen(true)} />}
-                  {tab === 'followups' && <FollowUpsScreen openCompare={(id) => openOverlay({ kind: 'compare', patientId: id })} openCase={(id) => openOverlay({ kind: 'case', patientId: id })} goRx={goToRx} />}
-                  {tab === 'rx' && <QuickRxPicker onPick={(id) => openOverlay({ kind: 'rx', patientId: id })} />}
-                  {tab === 'inbox' && <InboxScreen onOpenPatient={(id) => openOverlay({ kind: 'patient-detail', patientId: id })} onOpenChat={(id, name) => openOverlay({ kind: 'chat', patientId: id, patientName: name })} />}
+                  {shownTab === 'today' && <TodayGrid openCase={(id) => openOverlay({ kind: 'case', patientId: id })} goRx={goToRx} startVideo={(apptId) => openOverlay({ kind: 'video', appointmentId: apptId })} onQuickBill={() => setBillSearchOpen(true)} onInstantMeeting={() => setInstantMeetingOpen(true)} />}
+                  {shownTab === 'followups' && <FollowUpsScreen openCompare={(id) => openOverlay({ kind: 'compare', patientId: id })} openCase={(id) => openOverlay({ kind: 'case', patientId: id })} goRx={goToRx} />}
+                  {shownTab === 'rx' && <QuickRxPicker onPick={(id) => openOverlay({ kind: 'rx', patientId: id })} />}
+                  {shownTab === 'inbox' && <InboxScreen onOpenPatient={(id) => openOverlay({ kind: 'patient-detail', patientId: id })} onOpenChat={(id, name) => openOverlay({ kind: 'chat', patientId: id, patientName: name })} />}
                 </PullToRefresh>
               )}
             </GuardedMotionDiv>

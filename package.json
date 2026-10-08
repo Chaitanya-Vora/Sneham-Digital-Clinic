@@ -1,7 +1,7 @@
 {
   "name": "sneham-digital-clinic",
   "private": true,
-  "version": "1.5.2-test",
+  "version": "1.5.2-test2",
   "type": "module",
   "scripts": {
     "dev": "vite",

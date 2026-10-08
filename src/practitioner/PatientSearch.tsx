@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useDeferredValue } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useDeferredValue } from 'react'
 import { formatDayLabel, todayISO, addDaysISO, followUpPresetDate, firstAvailableMorningSlot } from '../core/day'
 import { sampleFrames, testFlag } from '../core/diagnostics'
 import { FollowUpSheet } from './FollowUpSheet'
@@ -70,6 +70,36 @@ function lastSeenTimestamp(label: string): number {
   return 0
 }
 
+// One result row. Memoised on purpose: opening or closing the quick-view peek changes state in the sheet
+// that owns this list, and re-drawing 100+ unchanged rows each time froze the phone for a moment.
+const SearchRow = memo(function SearchRow({ p, i, light, onPick }: { p: Patient; i: number; light: boolean; onPick: (id: string) => void }) {
+  const lateRow = light && i >= 8
+  const Wrap = lateRow ? 'div' : motion.div
+  return (
+    <Wrap {...(lateRow ? { style: { contentVisibility: 'auto', containIntrinsicSize: 'auto 72px' } } : { variants: listItem })}>
+      <Pressable
+        as="div"
+        hap="tick"
+        scale={0.99}
+        onClick={() => onPick(p.id)}
+        className="flex cursor-pointer items-center gap-3 rounded-[20px] border border-border bg-surface px-3.5 py-3 shadow-card"
+      >
+        <Avatar initials={p.initials} size={40} />
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-display text-[14px] font-semibold text-ink">{p.name}</div>
+          <div className="truncate text-[12px] text-muted">
+            {p.age}y &middot; {p.chiefComplaint}
+          </div>
+        </div>
+        <div className="flex flex-col items-end gap-1">
+          {p.currentRemedy && <Badge tone="green">{p.currentRemedy}</Badge>}
+          <span className="text-[12px] text-faint">{p.lastSeen}</span>
+        </div>
+      </Pressable>
+    </Wrap>
+  )
+})
+
 // ─────────────────────────────────────────────────────────────
 // 1. PatientSearchSheet — full-screen search overlay
 // ─────────────────────────────────────────────────────────────
@@ -100,6 +130,10 @@ export function PatientSearchSheet({
   // first screenful of rows fades in one by one — rows further down appear without their own animation and
   // are only drawn when scrolled to. Looks the same; off = exactly as before.
   const light = testFlag('lightsearch')
+  // Latest behaviour, reachable through one never-changing function, so the memoised rows are not re-drawn.
+  const pickRef = useRef<(id: string) => void>(() => {})
+  pickRef.current = (id) => { if (quickView) setPeekPatientId(id); else { onSelect(id); onClose() } }
+  const onPick = useCallback((id: string) => pickRef.current(id), [])
   const deferredQuery = useDeferredValue(query)
   const shownQuery = light ? deferredQuery : query
 
@@ -183,36 +217,7 @@ export function PatientSearchSheet({
           {/* results */}
           <div className="flex-1 overflow-y-auto px-[18px] pb-[var(--app-bottom)]">
             <motion.div variants={listContainer} initial="hidden" animate="show" className="space-y-2">
-              {filtered.map((p, i) => {
-                const lateRow = light && i >= 8
-                const Wrap = lateRow ? 'div' : motion.div
-                return (
-                <Wrap key={p.id} {...(lateRow ? { style: { contentVisibility: 'auto', containIntrinsicSize: 'auto 72px' } } : { variants: listItem })}>
-                  <Pressable
-                    as="div"
-                    hap="tick"
-                    scale={0.99}
-                    onClick={() => {
-                      if (quickView) setPeekPatientId(p.id)
-                      else { onSelect(p.id); onClose() }
-                    }}
-                    className="flex cursor-pointer items-center gap-3 rounded-[20px] border border-border bg-surface px-3.5 py-3 shadow-card"
-                  >
-                    <Avatar initials={p.initials} size={40} />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate font-display text-[14px] font-semibold text-ink">{p.name}</div>
-                      <div className="truncate text-[12px] text-muted">
-                        {p.age}y &middot; {p.chiefComplaint}
-                      </div>
-                    </div>
-                    <div className="flex flex-col items-end gap-1">
-                      {p.currentRemedy && <Badge tone="green">{p.currentRemedy}</Badge>}
-                      <span className="text-[12px] text-faint">{p.lastSeen}</span>
-                    </div>
-                  </Pressable>
-                </Wrap>
-                )
-              })}
+              {filtered.map((p, i) => <SearchRow key={p.id} p={p} i={i} light={light} onPick={onPick} />)}
               {filtered.length === 0 && (
                 <div className="py-12 text-center text-[13px] text-muted">No patients found.</div>
               )}

@@ -85,6 +85,7 @@ export function AppInfoRow() {
         <>
           <TestSwitch flag="noblur" label="Test: no blur effects" note="Turns off the see-through blur behind bars and sheets." />
           <TestSwitch flag="nofade" label="Test: no screen fade" note="Switches tabs instantly instead of fading." />
+          <TestSwitch flag="lightsearch" label="Test: lighter search" note="Search list follows your typing in small slices and draws fewer rows at once." />
         </>
       )}
       <div className="mt-1.5 text-[11.5px] text-faint">If something feels off, tap Diagnostics and send it over — it holds timings and screen names only, never patient information.</div>

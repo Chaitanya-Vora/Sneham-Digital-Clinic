@@ -121,7 +121,7 @@ export function PractitionerApp() {
   const overlayTransformRef = useRef<HTMLDivElement>(null)
   const overlay = overlayNav.current
   const overlayEpoch = useGhostSweep(!!overlayNav.current)
-  useEffect(() => { diag('overlay', overlayNav.current?.kind ?? 'none') }, [overlayNav.current?.kind])
+  useEffect(() => { diag('overlay', overlayNav.current?.kind ?? 'none'); sampleFrames(`overlay ${overlayNav.current?.kind ?? 'closed'}`, 1200) }, [overlayNav.current?.kind])
   const overlayDir = overlayNav.dir
   const [switchOpen, setSwitchOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)

@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useDeferredValue } from 'react'
 import { formatDayLabel, todayISO, addDaysISO, followUpPresetDate, firstAvailableMorningSlot } from '../core/day'
+import { sampleFrames, testFlag } from '../core/diagnostics'
 import { FollowUpSheet } from './FollowUpSheet'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
@@ -95,21 +96,34 @@ export function PatientSearchSheet({
   const inputRef = useRef<HTMLInputElement>(null)
   const sheetTransformRef = useRef<HTMLDivElement>(null)
   const [peekPatientId, setPeekPatientId] = useState<string | null>(null)
+  // TEST switch ("lighter search"): the list follows typing a moment later in small slices, and only the
+  // first screenful of rows fades in one by one — rows further down appear without their own animation and
+  // are only drawn when scrolled to. Looks the same; off = exactly as before.
+  const light = testFlag('lightsearch')
+  const deferredQuery = useDeferredValue(query)
+  const shownQuery = light ? deferredQuery : query
 
+  const wasOpen = useRef(false)
   useEffect(() => {
     if (open) {
       setQuery('')
       setTimeout(() => inputRef.current?.focus(), 120)
+      sampleFrames(`search open${light ? ' (light)' : ''}`, 1500)
+    } else if (wasOpen.current) {
+      sampleFrames(`search close${light ? ' (light)' : ''}`, 1500)
     }
+    wasOpen.current = open
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
+  useEffect(() => { if (open && query) sampleFrames(`search typing${light ? ' (light)' : ''}`, 1000) }, [query]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtered = useMemo(() => {
-    if (!query.trim()) {
+    if (!shownQuery.trim()) {
       return [...patients]
         .sort((a, b) => lastSeenTimestamp(b.lastSeen) - lastSeenTimestamp(a.lastSeen))
         .slice(0, 5)
     }
-    const q = query.toLowerCase()
+    const q = shownQuery.toLowerCase()
     return patients.filter(
       (p) =>
         p.name.toLowerCase().includes(q) ||
@@ -117,7 +131,7 @@ export function PatientSearchSheet({
         p.chiefComplaint.toLowerCase().includes(q) ||
         (p.currentRemedy?.toLowerCase().includes(q) ?? false),
     )
-  }, [query, patients])
+  }, [shownQuery, patients])
 
   return (
     <AnimatePresence>
@@ -169,8 +183,11 @@ export function PatientSearchSheet({
           {/* results */}
           <div className="flex-1 overflow-y-auto px-[18px] pb-[var(--app-bottom)]">
             <motion.div variants={listContainer} initial="hidden" animate="show" className="space-y-2">
-              {filtered.map((p) => (
-                <motion.div key={p.id} variants={listItem}>
+              {filtered.map((p, i) => {
+                const lateRow = light && i >= 8
+                const Wrap = lateRow ? 'div' : motion.div
+                return (
+                <Wrap key={p.id} {...(lateRow ? { style: { contentVisibility: 'auto', containIntrinsicSize: 'auto 72px' } } : { variants: listItem })}>
                   <Pressable
                     as="div"
                     hap="tick"
@@ -193,8 +210,9 @@ export function PatientSearchSheet({
                       <span className="text-[12px] text-faint">{p.lastSeen}</span>
                     </div>
                   </Pressable>
-                </motion.div>
-              ))}
+                </Wrap>
+                )
+              })}
               {filtered.length === 0 && (
                 <div className="py-12 text-center text-[13px] text-muted">No patients found.</div>
               )}

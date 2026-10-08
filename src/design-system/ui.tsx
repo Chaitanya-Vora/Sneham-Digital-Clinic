@@ -3,11 +3,12 @@
 // Used by all three surfaces. Pills, chips, toggles, cards, frames.
 // ─────────────────────────────────────────────────────────────
 import { AnimatePresence, motion, type PanInfo } from 'framer-motion'
-import { useRef, type ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { Minus, Plus, UsersThree } from '@phosphor-icons/react'
 import { haptic } from './haptics'
 import { springSnappy } from './motion'
 import { GuardedLayer } from './presence'
+import { sampleFrames } from '../core/diagnostics'
 
 // ── Button ──
 type BtnVariant = 'primary' | 'accent' | 'ghost' | 'quiet' | 'danger'
@@ -345,6 +346,9 @@ export function BottomSheet({
   children: ReactNode
 }) {
   const sheetRef = useRef<HTMLDivElement>(null)
+  // Test builds: write one line on how smooth each opening and closing was.
+  const seenOnce = useRef(false)
+  useEffect(() => { if (seenOnce.current) sampleFrames(open ? 'sheet open' : 'sheet close', 1200); seenOnce.current = true }, [open])
   const onDragEnd = (_: unknown, info: PanInfo) => {
     if (info.offset.y > 110 || info.velocity.y > 520) {
       haptic('impact')

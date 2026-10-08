@@ -55,7 +55,7 @@ function viewportInfo(): string {
 
 // ── Test tools (only offered in test builds): a frame sampler that sees small hitches the
 // freeze log below cannot, and two switches to turn off effects suspected of causing them. ──
-export type TestFlag = 'noblur' | 'nofade'
+export type TestFlag = 'noblur' | 'nofade' | 'lightsearch'
 export function testFlag(name: TestFlag): boolean {
   try { return localStorage.getItem(`sneham-test-${name}`) === '1' } catch { return false }
 }
@@ -70,10 +70,10 @@ export function setTestFlag(name: TestFlag, on: boolean) {
 
 // Watches the screen for a short window and writes one line: how many frames took longer than
 // 25ms (a visible hitch on a 90/120Hz phone) and the worst one. Only runs for the window asked.
-let sampling = false
+const sampling = new Set<string>()
 export function sampleFrames(label: string, ms = 1500) {
-  if (sampling || typeof document === 'undefined' || document.visibilityState !== 'visible') return
-  sampling = true
+  if (sampling.has(label) || typeof document === 'undefined' || document.visibilityState !== 'visible') return
+  sampling.add(label)
   const t0 = performance.now()
   let last = t0, worst = 0, slow = 0, frames = 0
   const step = (now: number) => {
@@ -82,7 +82,7 @@ export function sampleFrames(label: string, ms = 1500) {
     frames++
     if (frames > 1) { if (dt > worst) worst = dt; if (dt > 25) slow++ }
     if (now - t0 < ms) requestAnimationFrame(step)
-    else { sampling = false; diag('frames', `${label}: ${frames} frames, ${slow} slow(>25ms), worst ${Math.round(worst)}ms`) }
+    else { sampling.delete(label); diag('frames', `${label}: ${frames} frames, ${slow} slow(>25ms), worst ${Math.round(worst)}ms`) }
   }
   requestAnimationFrame(step)
 }

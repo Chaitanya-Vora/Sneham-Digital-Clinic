@@ -22,7 +22,7 @@ const btnVariants: Record<BtnVariant, string> = {
 }
 const btnSizes = {
   sm: 'text-[13px] px-3.5 py-2',
-  md: 'text-[14px] px-5 py-3',
+  md: 'text-[14px] px-5 py-3 lg:py-2.5',
   lg: 'text-[15px] px-6 py-3',
 }
 export function Button({
@@ -232,7 +232,7 @@ export function Stepper({
           const n = Math.round(Number(e.target.value))
           if (Number.isFinite(n)) onChange(Math.min(max, Math.max(min, n)))
         }}
-        className="h-11 w-12 border-none bg-transparent text-center font-display font-semibold text-ink outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        className="h-11 lg:h-auto w-12 border-none bg-transparent text-center font-display font-semibold text-ink outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
       />
       {suffix && <span className="shrink-0 font-display text-[13px] font-semibold text-muted">{suffix}</span>}
       <button

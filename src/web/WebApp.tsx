@@ -356,7 +356,7 @@ export function WebApp() {
                   <n.icon size={19} weight={active ? 'fill' : 'regular'} />
                   <span className="flex-1 text-left">{n.label}</span>
                   {n.id === 'messages' && unreadMessages > 0 && (
-                    <span className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-danger px-1 text-[11px] font-bold text-white">{unreadMessages}</span>
+                    <span className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-white">{unreadMessages}</span>
                   )}
                   {locked && <Lock size={13} className="text-faint" />}
                 </span>
@@ -404,7 +404,7 @@ export function WebApp() {
             >
               <Bell size={17} className="text-body" />
               {unread > 0 && (
-                <span className="notif-pulse absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[11px] font-bold text-white">
+                <span className="notif-pulse absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-white">
                   {unread}
                 </span>
               )}
@@ -1791,7 +1791,7 @@ function MessagesView({ initialPatientId, onOpenPatient }: { initialPatientId: s
                         {preview}
                       </span>
                       {c.unread > 0 && (
-                        <span className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-brand px-1 text-[11px] font-bold text-white">{c.unread}</span>
+                        <span className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-bold text-white">{c.unread}</span>
                       )}
                     </div>
                   </div>
@@ -1897,7 +1897,7 @@ function WebChatThread({ patientId }: { patientId: string }) {
               <div key={msg.id}>
                 {showDivider && (
                   <div className="mb-3 flex items-center justify-center">
-                    <span className="rounded-pill bg-surface px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-faint">{thisDay}</span>
+                    <span className="rounded-pill bg-surface px-3 py-1 text-[10.5px] font-semibold uppercase tracking-wider text-faint">{thisDay}</span>
                   </div>
                 )}
                 <div className={`flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
@@ -1977,7 +1977,7 @@ function ProgressChart({ points }: { points: { date: string; value: number }[] }
           />
         ))}
       </svg>
-      <div className="mt-1 flex items-center justify-between text-[11px] text-faint">
+      <div className="mt-1 flex items-center justify-between text-[10.5px] text-faint">
         <span>{shortDate(points[0].date)}</span>
         {n > 1 && <span>{shortDate(points[n - 1].date)}</span>}
       </div>
@@ -2640,7 +2640,7 @@ function PatientDetail({ patientId, onPrescribe, onOrderInvestigations, onCaseSh
                       <div className="absolute -left-[29px] flex h-6 w-6 items-center justify-center rounded-full border-2 border-border bg-surface">
                         <Icon size={12} weight="fill" className={dotColor} />
                       </div>
-                      <div className="text-[11px] font-semibold text-faint">{new Date(ev.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })} · {kindLabel(ev.kind)}</div>
+                      <div className="text-[10px] font-semibold text-faint">{new Date(ev.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })} · {kindLabel(ev.kind)}</div>
                       <div className="mt-0.5 flex items-center gap-2">
                         <span className="text-[13px] font-semibold text-ink">{ev.title}</span>
                         <Badge tone={ev.tone}>{kindLabel(ev.kind)}</Badge>

@@ -42,7 +42,8 @@ t('empty day has no bar', g.loadBar(0, 8).fill === 0)
 t('half-full day fills half', g.loadBar(4, 8).fill === 0.5 && !g.loadBar(4, 8).over)
 t('exactly full is not over', g.loadBar(8, 8).fill === 1 && !g.loadBar(8, 8).over)
 t('more than capacity is over and capped at full', g.loadBar(10, 8).over && g.loadBar(10, 8).fill === 1)
-t('zero capacity never divides by zero', g.loadBar(3, 0).fill === 0)
+t('a visit on a day with no working hours shows a full bar but is not "over"', g.loadBar(3, 0).fill === 1 && !g.loadBar(3, 0).over)
+t('no visits, no bar — whatever the capacity', g.loadBar(0, 0).fill === 0 && g.loadBar(0, 5).fill === 0)
 
 const loads = new Map([
   ['2026-10-08', { count: 6, done: 2, blocked: false }],
@@ -55,5 +56,18 @@ t('summary finds the busiest day', s.busiest === '2026-10-09')
 // Free = Mon–Sat, today or later, nothing booked, not blocked. Oct 8..31: 24 days; Sundays 11,18,25 (3) out; booked 8,9 out; blocked 12 out.
 t('free days exclude Sundays, booked and blocked days, and the past', s.freeDays === 24 - 3 - 2 - 1)
 
+// ── working hours → capacity ──
+const hours = { workingDays: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'], morningStart: '09:00', morningEnd: '13:00', eveningStart: '16:00', eveningEnd: '19:00' }
+const thu = D(2026, 10, 8), sun = D(2026, 10, 11)
+t('a working day holds 14 half-hour slots (9–1 and 4–7)', g.dayCapacity(thu, hours, []).slots === 14 && g.dayCapacity(thu, hours, []).working)
+t('a day she does not work holds none', g.dayCapacity(sun, hours, []).slots === 0 && !g.dayCapacity(sun, hours, []).working)
+t('a one-hour block takes two slots', g.dayCapacity(thu, hours, [{ startHour: 10, durationMin: 60 }]).slots === 12)
+t('a block outside working hours costs nothing', g.dayCapacity(thu, hours, [{ startHour: 14, durationMin: 60 }]).slots === 14)
+t('a block straddling the lunch break only counts its working part', g.dayCapacity(thu, hours, [{ startHour: 12, durationMin: 120 }]).slots === 12) // 12–13 inside
+t('blocks that cover everything leave nothing (and never go negative)', g.dayCapacity(thu, hours, [{ startHour: 8, durationMin: 240 }, { startHour: 12, durationMin: 240 }, { startHour: 15, durationMin: 240 }]).slots === 0)
+t('overlapping quarter-hour block rounds the slots down', g.dayCapacity(thu, hours, [{ startHour: 9, durationMin: 15 }]).slots === 13)
+t('dayName and isWorkingDay agree', g.dayName(thu) === 'Thursday' && g.isWorkingDay(thu, hours) && !g.isWorkingDay(sun, hours))
+const s2 = g.monthSummary(new Map(), 2026, 9, D(2026, 10, 8), (d) => g.isWorkingDay(d, { workingDays: ['Monday', 'Tuesday', 'Wednesday'] }))
+t('free days follow her own working days (Mon/Tue/Wed from 8 to 31 Oct: 12,13,14,19,20,21,26,27,28)', s2.freeDays === 9)
 console.log(failed ? `\n${failed} FAILED` : '\nall passed')
 process.exit(failed ? 1 : 0)

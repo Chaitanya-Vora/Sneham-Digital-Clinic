@@ -1,4 +1,5 @@
 import { toISO, type ISODate } from './day'
+import { minutesOfDay } from './clock'
 
 // Date arithmetic for the Calendar tab's week and month views. Everything is
 // Monday-first (the clinic's week) and works on local calendar days, never on
@@ -29,16 +30,57 @@ export function shiftMonth(d: Date, n: number): Date {
 }
 export const shiftWeek = (d: Date, n: number) => addDaysTo(d, 7 * n)
 
-export interface DayLoad { count: number; done: number; blocked: boolean }
+export interface DayLoad {
+  count: number        // visits booked (cancelled ones are not counted)
+  done: number         // of those, already seen
+  blocked: boolean     // the clinic is off / blocked that day — nothing can be booked
+  capacity?: number    // visits the day holds (working hours minus blocked time); the screen's default when absent
+}
 export const EMPTY_LOAD: DayLoad = { count: 0, done: 0, blocked: false }
 
 /** How full a day is, for the bar under its number. */
 export function loadBar(count: number, capacity: number): { fill: number; over: boolean } {
-  if (count <= 0 || capacity <= 0) return { fill: 0, over: false }
+  if (count <= 0) return { fill: 0, over: false }
+  // A visit booked on a day with no working hours is not "over capacity" — it is just there.
+  if (capacity <= 0) return { fill: 1, over: false }
   return { fill: Math.min(1, count / capacity), over: count > capacity }
 }
 
-export function monthSummary(loads: Map<ISODate, DayLoad>, year: number, month: number, today: Date) {
+// ── working hours → how many visits a day holds ──
+export interface WorkingHours {
+  workingDays: string[]   // "Monday" …
+  morningStart: string; morningEnd: string   // "09:00" "13:00"
+  eveningStart: string; eveningEnd: string
+}
+export const SLOT_MINUTES = 30
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+export const dayName = (d: Date) => DAY_NAMES[d.getDay()]
+export const isWorkingDay = (d: Date, hours: Pick<WorkingHours, 'workingDays'>) => hours.workingDays.includes(dayName(d))
+
+/**
+ * Visits a day holds: its working hours in half-hour slots, less whatever is blocked
+ * (lunch, admin, leave). A day she does not work holds none.
+ */
+export function dayCapacity(d: Date, hours: WorkingHours, blocks: { startHour: number; durationMin: number }[]): { working: boolean; slots: number } {
+  if (!isWorkingDay(d, hours)) return { working: false, slots: 0 }
+  const sessions = [
+    [minutesOfDay(hours.morningStart), minutesOfDay(hours.morningEnd)],
+    [minutesOfDay(hours.eveningStart), minutesOfDay(hours.eveningEnd)],
+  ].filter(([a, b]) => b > a)
+  let open = 0
+  let blocked = 0
+  for (const [a, b] of sessions) {
+    open += b - a
+    for (const blk of blocks) {
+      const from = Math.max(a, blk.startHour * 60)
+      const to = Math.min(b, blk.startHour * 60 + blk.durationMin)
+      if (to > from) blocked += to - from
+    }
+  }
+  return { working: true, slots: Math.max(0, Math.floor((open - Math.min(blocked, open)) / SLOT_MINUTES)) }
+}
+
+export function monthSummary(loads: Map<ISODate, DayLoad>, year: number, month: number, today: Date, isOpenDay: (d: Date) => boolean = (d) => (d.getDay() + 6) % 7 <= 5) {
   let visits = 0
   let freeDays = 0
   let busiest: ISODate | null = null
@@ -49,8 +91,7 @@ export function monthSummary(loads: Map<ISODate, DayLoad>, year: number, month: 
     const l = loads.get(iso) ?? EMPTY_LOAD
     visits += l.count
     if (l.count > busiestCount) { busiestCount = l.count; busiest = iso }
-    const weekday = (d.getDay() + 6) % 7 // 0 = Mon … 6 = Sun
-    if (l.count === 0 && !l.blocked && weekday <= 5 && iso >= todayIso) freeDays++ // Mon–Sat, still ahead
+    if (l.count === 0 && !l.blocked && isOpenDay(d) && iso >= todayIso) freeDays++ // a working day, still ahead, nothing booked
   }
   return { visits, freeDays, busiest }
 }

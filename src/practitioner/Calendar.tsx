@@ -1,52 +1,22 @@
 import { useMemo, useState, useCallback } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
-import {
-  CalendarBlank,
-  CalendarPlus,
-  CaretLeft,
-  CaretRight,
-  Clock,
-  VideoCamera,
-  MapPin,
-  Plus,
-  Prohibit,
-  XCircle,
-} from '@phosphor-icons/react'
-import { toISO, todayISO, formatDayLabel } from '../core/day'
+import { CalendarPlus, CaretDown, Plus, Prohibit, XCircle, Check } from '@phosphor-icons/react'
+import { toISO, todayISO, formatDayLabel, type ISODate } from '../core/day'
 import { useClinic } from '../core/store'
+import { addDaysTo, dayCapacity, isWorkingDay, shiftMonth, shiftWeek, type DayLoad } from '../core/calendarGrid'
+import { formatDecimalTime, minutesFromMidnight } from '../core/clock'
 import type { Appointment, Patient, TimeBlock } from '../core/types'
-import { Avatar, Badge, BottomSheet, Card, Chip, Label } from '../design-system/ui'
+import { Avatar, BottomSheet, Chip, Label } from '../design-system/ui'
 import { Pressable } from '../design-system/Pressable'
 import { haptic } from '../design-system/haptics'
-import { spring, springSoft, listContainer, listItem } from '../design-system/motion'
 import { PullToRefresh } from '../design-system/gestures'
-import { DayProgress } from '../design-system/DayProgress'
 import { useToast } from '../design-system/toast'
 import { PatientQuickView } from './PatientQuickView'
-import { BlockTimeSheet, blockColorStyle } from './BlockTimeSheet'
+import { BlockTimeSheet } from './BlockTimeSheet'
+import { CalendarCanvas, type CalendarMode } from './calendar/CalendarCanvas'
+import { Agenda } from './calendar/Agenda'
 import { useShallow } from 'zustand/react/shallow'
 
 // ── helpers ──
-
-function startOfWeek(d: Date): Date {
-  const day = d.getDay()
-  const diff = day === 0 ? -6 : 1 - day // Monday start
-  const m = new Date(d)
-  m.setDate(m.getDate() + diff)
-  m.setHours(0, 0, 0, 0)
-  return m
-}
-
-function isSameDay(a: Date, b: Date) {
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
-}
-
-function formatMonth(d: Date) {
-  return d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
-}
-
-const MONTH_NAMES_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const
 
 const BOOK_HOURS = Array.from({ length: 12 }, (_, i) => i + 8) // 8 AM – 7 PM
 
@@ -65,29 +35,8 @@ function parseHour(time: string): number {
   return h
 }
 
-function parseTime(time: string): number {
-  const m = time.match(/(\d+):(\d+)\s*(AM|PM)/i)
-  if (!m) return 9
-  let h = parseInt(m[1])
-  const min = parseInt(m[2])
-  if (m[3].toUpperCase() === 'PM' && h !== 12) h += 12
-  if (m[3].toUpperCase() === 'AM' && h === 12) h = 0
-  return h + min / 60
-}
-
-function formatDecimalTime(t: number): string {
-  const h = Math.floor(t)
-  const m = Math.round((t - h) * 60)
-  const ampm = h >= 12 ? 'PM' : 'AM'
-  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h
-  return `${h12}:${String(m).padStart(2, '0')} ${ampm}`
-}
-
-/** Groups the real appointment list by calendar date. This screen previously
- *  synthesised 2-5 appointments per weekday from a sine function, cloning real
- *  patients into invented slots — so the doctor saw a week of consultations
- *  that did not exist. Nothing here is generated: a day with no appointments
- *  reads as empty, because it is. */
+/** Groups the real appointment list by calendar date, each day in clock order. Nothing here is
+ *  generated: a day with no appointments reads as empty, because it is. */
 function groupByDate(appointments: Appointment[]): Map<string, Appointment[]> {
   const map = new Map<string, Appointment[]>()
   for (const a of appointments) {
@@ -95,42 +44,9 @@ function groupByDate(appointments: Appointment[]): Map<string, Appointment[]> {
     if (list) list.push(a)
     else map.set(a.date, [a])
   }
-  for (const list of map.values()) list.sort(byClockTime)
+  // "9:30 AM" sorts before "10:00 AM" — string order would not.
+  for (const list of map.values()) list.sort((a, b) => minutesFromMidnight(a.time) - minutesFromMidnight(b.time))
   return map
-}
-
-/** "9:30 AM" sorts before "10:00 AM" — string order would not. */
-function byClockTime(a: Appointment, b: Appointment) {
-  return minutesFromMidnight(a.time) - minutesFromMidnight(b.time)
-}
-
-function minutesFromMidnight(time: string): number {
-  const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(time.trim())
-  if (!m) return 0
-  let h = Number(m[1]) % 12
-  if (m[3].toUpperCase() === 'PM') h += 12
-  return h * 60 + Number(m[2])
-}
-
-// ── month grid helpers ──
-
-function getMonthGrid(year: number, month: number): (Date | null)[][] {
-  const first = new Date(year, month, 1)
-  const startDay = first.getDay() === 0 ? 6 : first.getDay() - 1 // Monday-based
-  const daysInMonth = new Date(year, month + 1, 0).getDate()
-  const rows: (Date | null)[][] = []
-  let row: (Date | null)[] = []
-
-  for (let i = 0; i < startDay; i++) row.push(null)
-  for (let d = 1; d <= daysInMonth; d++) {
-    row.push(new Date(year, month, d))
-    if (row.length === 7) { rows.push(row); row = [] }
-  }
-  if (row.length > 0) {
-    while (row.length < 7) row.push(null)
-    rows.push(row)
-  }
-  return rows
 }
 
 const refresh = async () => {
@@ -138,10 +54,9 @@ const refresh = async () => {
   if (s.userId) await s.hydrate(s.userId, '')
 }
 
-type ViewMode = 'week' | 'month'
-
-// ── main export ──
-
+// The Calendar tab. Week and month are ONE grid (calendar/CalendarCanvas): the month unfolds from the
+// week strip and folds back, a bar under every date shows how full the day is, and the agenda below
+// follows whichever day is selected — without leaving the view she is in.
 export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatient: (patientId: string) => void; openCase: (patientId: string) => void; goRx: (patientId: string) => void }) {
   const allAppointments = useClinic((s) => s.appointments)
   const patients = useClinic((s) => s.patients)
@@ -154,6 +69,7 @@ export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatien
   const ME = useClinic((s) => s.currentPractitionerId)
   const role = useClinic((s) => s.role)
   const team = useClinic(useShallow((s) => s.practitioners.filter((p) => p.status === 'active')))
+  const hours = useClinic((s) => s.practitionerSettings)
   const scheduleFollowUp = useClinic((s) => s.scheduleFollowUp)
   const updateAppointment = useClinic((s) => s.updateAppointment)
   const updateAppointmentStatus = useClinic((s) => s.updateAppointmentStatus)
@@ -166,30 +82,22 @@ export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatien
   const [peekPatientId, setPeekPatientId] = useState<string | null>(null)
   const [addChooserOpen, setAddChooserOpen] = useState(false)
   const [blockOpen, setBlockOpen] = useState(false)
+  const [doctorOpen, setDoctorOpen] = useState(false)
 
-  // Whose schedule is showing — null means "mine". Only the Owner gets the
-  // switcher (matches Today's Mine/Everyone, which is Owner-only too); a
-  // practitioner's own calendar is always just their own day otherwise.
+  // Whose schedule is showing — null means "mine". Only the Owner gets the switcher
+  // (matches Today's Mine/Everyone, which is Owner-only too).
   const [viewPractitionerId, setViewPractitionerId] = useState<string | null>(null)
   const scopedPractitionerId = role === 'Owner' && viewPractitionerId ? viewPractitionerId : ME
-  const appointments = useMemo(
-    () => allAppointments.filter((a) => a.practitionerId === scopedPractitionerId),
-    [allAppointments, scopedPractitionerId],
-  )
-  const timeBlocks = useMemo(
-    () => allTimeBlocks.filter((b) => b.practitionerId === scopedPractitionerId),
-    [allTimeBlocks, scopedPractitionerId],
-  )
+  const appointments = useMemo(() => allAppointments.filter((a) => a.practitionerId === scopedPractitionerId), [allAppointments, scopedPractitionerId])
+  const timeBlocks = useMemo(() => allTimeBlocks.filter((b) => b.practitionerId === scopedPractitionerId), [allTimeBlocks, scopedPractitionerId])
 
-  const today = useMemo(() => new Date(), [])
-  const [selectedDate, setSelectedDate] = useState(today)
-  const [view, setView] = useState<ViewMode>('week')
-  const [weekDir, setWeekDir] = useState(0)
-  const [monthDate, setMonthDate] = useState(today)
+  const todayKey = todayISO() // re-reads on every render, so a screen left open overnight moves on
+  const today = useMemo(() => new Date(), [todayKey])
+  const [selected, setSelected] = useState(today)
+  const [mode, setMode] = useState<CalendarMode>('week')
 
-  // Add / edit / cancel an appointment — the one place in the app that
-  // changes the schedule itself, deliberately kept off the Today tab
-  // (Today is for acting on what's already booked: start, end, join, collect).
+  // Add / edit / cancel an appointment — the one place in the app that changes the schedule itself,
+  // deliberately kept off the Today tab (Today is for acting on what is already booked).
   const [bookOpen, setBookOpen] = useState(false)
   const [editingApptId, setEditingApptId] = useState<string | null>(null)
   const [bookPatientId, setBookPatientId] = useState<string | null>(null)
@@ -200,87 +108,43 @@ export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatien
   const [bookReason, setBookReason] = useState('')
   const [cancelApptId, setCancelApptId] = useState<string | null>(null)
 
-  // Build a full week of mock data anchored to the selected date's week
-  const weekSchedule = useMemo(
-    () => groupByDate(appointments),
-    [appointments],
-  )
+  const byDate = useMemo(() => groupByDate(appointments), [appointments])
+  const blocksByDate = useMemo(() => {
+    const m = new Map<string, TimeBlock[]>()
+    for (const b of timeBlocks) m.set(b.date, [...(m.get(b.date) ?? []), b])
+    return m
+  }, [timeBlocks])
 
-  // Generate dots for month view — which days have appointments
-  const monthDots = useMemo(() => {
-    const dots = new Set<string>()
-    for (const a of appointments) {
-      if (a.date) dots.add(a.date)
+  // What each date's bar shows (for the visible month and a week either side).
+  const loads = useMemo(() => {
+    const m = new Map<ISODate, DayLoad>()
+    const from = addDaysTo(new Date(selected.getFullYear(), selected.getMonth(), 1), -7)
+    const to = addDaysTo(new Date(selected.getFullYear(), selected.getMonth() + 1, 1), 7)
+    for (let d = from; d < to; d = addDaysTo(d, 1)) {
+      const iso = toISO(d)
+      const live = (byDate.get(iso) ?? []).filter((a) => a.status !== 'Cancelled')
+      const cap = dayCapacity(d, hours, blocksByDate.get(iso) ?? [])
+      m.set(iso, { count: live.length, done: live.filter((a) => a.status === 'Seen').length, blocked: live.length === 0 && cap.slots === 0, capacity: cap.slots })
     }
-    return dots
-  }, [appointments])
+    return m
+  }, [byDate, blocksByDate, hours, selected.getFullYear(), selected.getMonth()]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const selectedKey = toISO(selectedDate)
-  const dayAppointments = weekSchedule.get(selectedKey) ?? []
-  const dayBlocks = useMemo(() => timeBlocks.filter((b) => b.date === selectedKey), [timeBlocks, selectedKey])
-  // One chronological agenda — blocks interleave with appointments by start
-  // time instead of being tacked on separately, so the day reads as one
-  // real schedule.
-  const dayAgenda = useMemo(() => {
-    const items: ({ kind: 'appt'; time: number; appt: Appointment } | { kind: 'block'; time: number; block: TimeBlock })[] = [
-      ...dayAppointments.map((appt) => ({ kind: 'appt' as const, time: parseTime(appt.time), appt })),
-      ...dayBlocks.map((block) => ({ kind: 'block' as const, time: block.startHour, block })),
-    ]
-    return items.sort((a, b) => a.time - b.time)
-  }, [dayAppointments, dayBlocks])
+  const selectedKey = toISO(selected)
+  const dayAppointments = byDate.get(selectedKey) ?? []
+  const dayBlocks = blocksByDate.get(selectedKey) ?? []
+  const cap = dayCapacity(selected, hours, dayBlocks)
+  const liveCount = dayAppointments.filter((a) => a.status !== 'Cancelled').length
 
-  const weekStart = startOfWeek(selectedDate)
-  const weekDays = useMemo(() => {
-    return Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(weekStart)
-      d.setDate(d.getDate() + i)
-      return d
-    })
-  }, [weekStart.getTime()])
-
-  const shiftWeek = useCallback((dir: number) => {
-    setWeekDir(dir)
-    setSelectedDate((prev) => {
-      const next = new Date(prev)
-      next.setDate(next.getDate() + dir * 7)
-      return next
-    })
+  const page = useCallback((dir: -1 | 1) => {
+    setSelected((s) => (mode === 'week' ? shiftWeek(s, dir) : shiftMonth(s, dir)))
     haptic('tick')
-  }, [])
-
-  const goToday = useCallback(() => {
-    setWeekDir(0)
-    setSelectedDate(today)
-    setMonthDate(today)
-    haptic('tick')
-  }, [today])
-
-  const selectDay = useCallback((d: Date) => {
-    setSelectedDate(d)
-    haptic('tick')
-  }, [])
-
-  const shiftMonth = useCallback((dir: number) => {
-    setMonthDate((prev) => {
-      const next = new Date(prev)
-      next.setMonth(next.getMonth() + dir)
-      return next
-    })
-    haptic('tick')
-  }, [])
-
-  const monthTapDay = useCallback((d: Date) => {
-    setSelectedDate(d)
-    setMonthDate(d)
-    setView('week')
-    haptic('tick')
-  }, [])
+  }, [mode])
 
   function openBookSheet() {
     setEditingApptId(null)
     setBookPatientId(null)
     setBookQuery('')
-    setBookDate(selectedKey)
+    setBookDate(selectedKey < todayISO() ? todayISO() : selectedKey)
     setBookHour(9)
     setBookType('In person')
     setBookReason('')
@@ -326,216 +190,74 @@ export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatien
     setCancelApptId(null)
   }
 
-  // Owner, looking at a colleague's day, taking one of their appointments
-  // onto her own schedule — e.g. covering while they're out.
-  function handleReassignToMe(apptId: string, patientName?: string) {
+  // Owner, looking at a colleague's day, taking one of their appointments onto her own schedule — e.g. covering while they're out.
+  function handleReassignToMe(a: Appointment) {
     if (!ME) return
-    updateAppointment(apptId, { practitionerId: ME })
+    updateAppointment(a.id, { practitionerId: ME })
     haptic('success')
-    toast({ title: 'Reassigned to you', message: patientName ? `${patientName}'s appointment now on your schedule.` : 'Appointment now on your schedule.' })
+    toast({ title: 'Reassigned to you', message: `${patientMap.get(a.patientId)?.name ?? 'The'} appointment is now on your schedule.` })
   }
 
+  function handleRemoveBlock(b: TimeBlock) {
+    removeTimeBlock(b.id)
+    haptic('tick')
+    toast({
+      title: 'Block removed',
+      message: `${b.reason} · ${formatDayLabel(b.date)}`,
+      action: { label: 'Undo', onClick: () => addTimeBlock({ practitionerId: b.practitionerId, date: b.date, startHour: b.startHour, durationMin: b.durationMin, reason: b.reason, color: b.color }) },
+    })
+  }
+
+  const viewing = team.find((p) => p.id === scopedPractitionerId)
+  const showDoctorChip = role === 'Owner' && team.length > 1
+
   return (
-    <div className="flex h-full flex-col bg-screen">
-      {/* header */}
-      <div className="px-[18px] pb-1 pt-2">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="font-display text-[20px] font-bold text-ink">Calendar</div>
-            <div className="text-[12px] text-muted">
-              {selectedDate.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' })}
-            </div>
-          </div>
+    <PullToRefresh onRefresh={refresh} className="h-full">
+      <div className={`z-20 px-[18px] pb-1 pt-1 ${mode === 'week' ? 'sticky top-0 bg-screen/95 backdrop-blur-md' : 'relative'}`}>
+        <div className="mb-3 flex items-center justify-between">
+          <div className="text-[12px] font-semibold uppercase tracking-label text-faint">Schedule</div>
           <div className="flex items-center gap-2">
-            {!isSameDay(selectedDate, today) && (
-              <Pressable hap="tick" onClick={goToday} className="rounded-pill bg-tint px-3 py-1.5 text-[12px] font-semibold text-brand">
-                Today
+            {showDoctorChip && (
+              <Pressable hap="tick" onClick={() => setDoctorOpen(true)} ariaLabel="Whose schedule" className="relative tap-pad-y flex items-center gap-1.5 rounded-pill border border-border bg-surface py-1 pl-1 pr-2.5 text-[12.5px] font-semibold text-body">
+                <Avatar initials={viewing?.initials ?? '??'} size={22} /> {scopedPractitionerId === ME ? 'You' : (viewing?.name ?? '').replace(/^Dr\.?\s*/i, '')} <CaretDown size={12} weight="bold" className="text-faint" />
               </Pressable>
             )}
-            <Pressable hap="tick" onClick={() => setAddChooserOpen(true)} className="relative tap-pad flex h-8 w-8 items-center justify-center rounded-full bg-brand text-screen">
-              <Plus size={16} weight="bold" />
+            <Pressable ariaLabel="Add" hap="tick" onClick={() => setAddChooserOpen(true)} className="relative tap-pad flex h-9 w-9 items-center justify-center rounded-full bg-brand text-screen shadow-float">
+              <Plus size={17} weight="bold" />
             </Pressable>
           </div>
         </div>
-
-        {/* segmented control */}
-        <div className="relative mt-3 flex rounded-[12px] border border-border bg-surface p-[3px]">
-          {(['week', 'month'] as const).map((v) => (
-            <Pressable
-              key={v}
-              hap="tick"
-              onClick={() => { setView(v); haptic('select') }}
-              className={`relative tap-pad-y z-10 flex-1 rounded-[10px] py-[7px] text-center text-[13px] font-semibold transition-colors ${view === v ? 'text-ink' : 'text-muted'}`}
-            >
-              {view === v && (
-                <motion.span
-                  layoutId="cal-segment"
-                  className="absolute inset-0 rounded-[10px] bg-tint-pale shadow-sm"
-                  transition={spring}
-                />
-              )}
-              <span className="relative">{v === 'week' ? 'Week' : 'Month'}</span>
-            </Pressable>
-          ))}
-        </div>
-
-        {/* whose schedule — Owner only, so everyone's day can line up for
-            comparison instead of everything blurring into one shared list */}
-        {role === 'Owner' && team.length > 1 && (
-          <div className="mt-3 flex gap-2 overflow-x-auto pb-0.5">
-            {team.map((p) => {
-              const isMe = p.id === ME
-              const selected = isMe ? !viewPractitionerId : viewPractitionerId === p.id
-              return (
-                <Pressable
-                  key={p.id}
-                  hap="select"
-                  onClick={() => setViewPractitionerId(isMe ? null : p.id)}
-                  className={`flex shrink-0 items-center gap-1.5 rounded-pill border px-3.5 py-3 text-[12.5px] font-semibold transition-colors ${
-                    selected ? 'border-brand bg-brand text-screen' : 'border-border bg-surface text-body'
-                  }`}
-                >
-                  <Avatar initials={p.initials} size={18} />
-                  {isMe ? 'You' : p.name.replace(/^Dr\.?\s*/i, '')}
-                </Pressable>
-              )
-            })}
-          </div>
-        )}
+        <CalendarCanvas
+          selected={selected}
+          today={today}
+          mode={mode}
+          loads={loads}
+          capacity={14}
+          isOpenDay={(d) => isWorkingDay(d, hours)}
+          onSelect={(d) => { setSelected(d); haptic('tick') }}
+          onMode={(m) => { setMode(m); haptic('select') }}
+          onPage={page}
+          onToday={() => { setSelected(today); haptic('tick') }}
+        />
       </div>
 
-      {/* view body */}
-      <div className="relative flex-1 overflow-hidden">
-        <AnimatePresence mode="popLayout" initial={false}>
-          {view === 'week' ? (
-            <motion.div
-              key="week"
-              className="absolute inset-0 flex flex-col"
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 20 }}
-              transition={springSoft}
-            >
-              {/* day strip */}
-              <div className="px-[18px] pb-2 pt-3">
-                <div className="flex items-center justify-between">
-                  <Pressable hap="tick" onClick={() => shiftWeek(-1)} className="relative tap-pad flex h-8 w-8 items-center justify-center rounded-full border border-border bg-surface">
-                    <CaretLeft size={16} className="text-body" />
-                  </Pressable>
-                  <div className="text-[13px] font-semibold text-muted">
-                    {weekDays[0].getDate()} {MONTH_NAMES_SHORT[weekDays[0].getMonth()]} – {weekDays[6].getDate()} {MONTH_NAMES_SHORT[weekDays[6].getMonth()]}
-                  </div>
-                  <Pressable hap="tick" onClick={() => shiftWeek(1)} className="relative tap-pad flex h-8 w-8 items-center justify-center rounded-full border border-border bg-surface">
-                    <CaretRight size={16} className="text-body" />
-                  </Pressable>
-                </div>
-
-                <div className="mt-3 flex gap-1">
-                  {weekDays.map((d) => {
-                    const selected = isSameDay(d, selectedDate)
-                    const isToday = isSameDay(d, today)
-                    return (
-                      <Pressable
-                        key={d.toISOString()}
-                        hap="tick"
-                        onClick={() => selectDay(d)}
-                        className={`relative flex flex-1 flex-col items-center gap-1 rounded-[14px] py-2 transition-colors ${selected ? 'bg-brand' : ''}`}
-                      >
-                        <span className={`text-[12px] font-medium ${selected ? 'text-white/80' : isToday ? 'text-brand' : 'text-muted'}`}>
-                          {DAY_NAMES[d.getDay() === 0 ? 6 : d.getDay() - 1]}
-                        </span>
-                        <span className={`font-display text-[16px] font-bold ${selected ? 'text-white' : isToday ? 'text-brand' : 'text-ink'}`}>
-                          {d.getDate()}
-                        </span>
-                        {/* the day's load: solid = seen, hatched = still to come */}
-                        {(() => {
-                          const day = (weekSchedule.get(toISO(d)) ?? []).filter((a) => a.status !== 'Cancelled')
-                          return day.length > 0 ? (
-                            <DayProgress done={day.filter((a) => a.status === 'Seen').length} total={day.length} onDark={selected} className="w-5" />
-                          ) : null
-                        })()}
-                        {selected && (
-                          <motion.span layoutId="day-pill" className="absolute inset-0 rounded-[14px] bg-brand" style={{ zIndex: -1 }} transition={spring} />
-                        )}
-                      </Pressable>
-                    )
-                  })}
-                </div>
-              </div>
-
-              {/* appointments list */}
-              <div className="flex-1 overflow-hidden">
-                <PullToRefresh onRefresh={refresh} className="h-full px-[18px] pb-[120px]">
-                  <AnimatePresence mode="wait">
-                    <motion.div
-                      key={selectedKey}
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -8 }}
-                      transition={springSoft}
-                    >
-                      {dayAgenda.length === 0 ? (
-                        <EmptyDay />
-                      ) : (
-                        <div className="space-y-1 pt-2">
-                          <Label className="mb-2">
-                            {dayAppointments.length} appointment{dayAppointments.length !== 1 ? 's' : ''}
-                            {dayBlocks.length > 0 ? ` · ${dayBlocks.length} blocked` : ''}
-                          </Label>
-                          <motion.div variants={listContainer} initial="hidden" animate="show" className="space-y-2.5">
-                            {dayAgenda.map((item) =>
-                              item.kind === 'appt' ? (
-                                (() => {
-                                  const a = item.appt
-                                  const canModify = a.status !== 'Seen' && a.status !== 'In consult' && a.status !== 'Cancelled'
-                                  return (
-                                    <motion.div key={a.id} variants={listItem}>
-                                      <AppointmentCard
-                                        appointment={a}
-                                        patient={patientMap.get(a.patientId)}
-                                        onTap={() => onOpenPatient(a.patientId)}
-                                        onEdit={canModify ? () => openEditSheet(a) : undefined}
-                                        onCancel={canModify ? () => setCancelApptId(a.id) : undefined}
-                                        onPeekPatient={() => setPeekPatientId(a.patientId)}
-                                        onReassign={canModify && viewPractitionerId && viewPractitionerId !== ME ? () => handleReassignToMe(a.id, patientMap.get(a.patientId)?.name) : undefined}
-                                      />
-                                    </motion.div>
-                                  )
-                                })()
-                              ) : (
-                                <motion.div key={item.block.id} variants={listItem}>
-                                  <BlockCard block={item.block} onRemove={() => removeTimeBlock(item.block.id)} />
-                                </motion.div>
-                              ),
-                            )}
-                          </motion.div>
-                        </div>
-                      )}
-                    </motion.div>
-                  </AnimatePresence>
-                </PullToRefresh>
-              </div>
-            </motion.div>
-          ) : (
-            <motion.div
-              key="month"
-              className="absolute inset-0 overflow-y-auto px-[18px] pb-[120px] pt-3"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              transition={springSoft}
-            >
-              <MonthGrid
-                monthDate={monthDate}
-                today={today}
-                selectedDate={selectedDate}
-                dots={monthDots}
-                onShift={shiftMonth}
-                onTapDay={monthTapDay}
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
+      <div className="px-[18px] pb-[130px] pt-2">
+        <Agenda
+          date={selected}
+          today={today}
+          appts={dayAppointments}
+          blocks={dayBlocks}
+          patients={patientMap}
+          viewingColleague={scopedPractitionerId !== ME}
+          load={{ count: liveCount, capacity: cap.slots, working: cap.working, closed: cap.working && cap.slots === 0 && liveCount === 0 }}
+          onOpen={onOpenPatient}
+          onPeek={setPeekPatientId}
+          onEdit={openEditSheet}
+          onCancel={(a) => setCancelApptId(a.id)}
+          onReassign={handleReassignToMe}
+          onRemoveBlock={handleRemoveBlock}
+          onBook={openBookSheet}
+        />
       </div>
 
       <BookApptSheet
@@ -567,18 +289,32 @@ export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatien
       />
       <PatientQuickView patientId={peekPatientId} onClose={() => setPeekPatientId(null)} onOpenCase={openCase} onPrescribe={goRx} />
 
+      <BottomSheet open={doctorOpen} onClose={() => setDoctorOpen(false)}>
+        <div className="font-display text-[17px] font-bold text-ink">Whose schedule</div>
+        <div className="mt-3 space-y-2">
+          {team.map((p) => {
+            const isMe = p.id === ME
+            const on = isMe ? !viewPractitionerId : viewPractitionerId === p.id
+            return (
+              <Pressable key={p.id} as="div" hap="select" scale={0.98} onClick={() => { setViewPractitionerId(isMe ? null : p.id); setDoctorOpen(false) }} className={`flex cursor-pointer items-center gap-3 rounded-[16px] border px-4 py-3 ${on ? 'border-green-border bg-tint' : 'border-border bg-surface'}`}>
+                <Avatar initials={p.initials} size={36} />
+                <div className="flex-1">
+                  <div className="text-[14px] font-semibold text-ink">{isMe ? 'You' : p.name}</div>
+                  <div className="text-[12px] text-muted">{p.specialty}</div>
+                </div>
+                {on && <Check size={18} weight="bold" className="text-brand" />}
+              </Pressable>
+            )
+          })}
+        </div>
+      </BottomSheet>
+
       <BottomSheet open={addChooserOpen} onClose={() => setAddChooserOpen(false)}>
         <div className="font-display text-[17px] font-bold text-ink">
-          {selectedDate.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' })}
+          {selected.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' })}
         </div>
         <div className="mt-3 space-y-2">
-          <Pressable
-            as="div"
-            hap="tick"
-            scale={0.98}
-            onClick={() => { setAddChooserOpen(false); openBookSheet() }}
-            className="flex cursor-pointer items-center gap-3 rounded-[16px] border border-border bg-surface px-4 py-3"
-          >
+          <Pressable as="div" hap="tick" scale={0.98} onClick={() => { setAddChooserOpen(false); openBookSheet() }} className="flex cursor-pointer items-center gap-3 rounded-[16px] border border-border bg-surface px-4 py-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-[12px] bg-tint text-brand"><CalendarPlus size={20} weight="fill" /></div>
             <div className="flex-1">
               <div className="text-[14px] font-semibold text-ink">Book appointment</div>
@@ -586,13 +322,7 @@ export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatien
             </div>
             <span className="text-faint">&rsaquo;</span>
           </Pressable>
-          <Pressable
-            as="div"
-            hap="tick"
-            scale={0.98}
-            onClick={() => { setAddChooserOpen(false); setBlockOpen(true) }}
-            className="flex cursor-pointer items-center gap-3 rounded-[16px] border border-border bg-surface px-4 py-3"
-          >
+          <Pressable as="div" hap="tick" scale={0.98} onClick={() => { setAddChooserOpen(false); setBlockOpen(true) }} className="flex cursor-pointer items-center gap-3 rounded-[16px] border border-border bg-surface px-4 py-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-[12px] bg-amber-tint text-amber-text"><Prohibit size={20} weight="fill" /></div>
             <div className="flex-1">
               <div className="text-[14px] font-semibold text-ink">Block time</div>
@@ -615,217 +345,7 @@ export function CalendarScreen({ onOpenPatient, openCase, goRx }: { onOpenPatien
           setBlockOpen(false)
         }}
       />
-    </div>
-  )
-}
-
-// ── month grid ──
-
-function MonthGrid({
-  monthDate, today, selectedDate, dots, onShift, onTapDay,
-}: {
-  monthDate: Date
-  today: Date
-  selectedDate: Date
-  dots: Set<string>
-  onShift: (dir: number) => void
-  onTapDay: (d: Date) => void
-}) {
-  const grid = useMemo(
-    () => getMonthGrid(monthDate.getFullYear(), monthDate.getMonth()),
-    [monthDate.getFullYear(), monthDate.getMonth()],
-  )
-
-  return (
-    <div>
-      {/* month header */}
-      <div className="flex items-center justify-between">
-        <Pressable hap="tick" onClick={() => onShift(-1)} className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
-          <CaretLeft size={16} className="text-body" />
-        </Pressable>
-        <div className="font-display text-[17px] font-bold text-ink">{formatMonth(monthDate)}</div>
-        <Pressable hap="tick" onClick={() => onShift(1)} className="relative tap-pad-sm flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
-          <CaretRight size={16} className="text-body" />
-        </Pressable>
-      </div>
-
-      {/* day headers */}
-      <div className="mt-4 grid grid-cols-7 gap-0">
-        {DAY_NAMES.map((d) => (
-          <div key={d} className="py-1 text-center text-[12px] font-semibold text-muted">{d}</div>
-        ))}
-      </div>
-
-      {/* date grid */}
-      <div className="mt-1">
-        {grid.map((row, ri) => (
-          <div key={ri} className="grid grid-cols-7 gap-0">
-            {row.map((d, ci) => {
-              if (!d) return <div key={ci} className="py-2" />
-              const key = toISO(d)
-              const isToday = isSameDay(d, today)
-              const isSelected = isSameDay(d, selectedDate)
-              const hasDot = dots.has(key)
-              return (
-                <Pressable
-                  key={ci}
-                  hap="tick"
-                  onClick={() => onTapDay(d)}
-                  className="flex flex-col items-center gap-0.5 py-2"
-                >
-                  <span
-                    className={`flex h-9 w-9 items-center justify-center rounded-full text-[14px] font-semibold transition-colors ${
-                      isSelected
-                        ? 'bg-brand font-bold text-white'
-                        : isToday
-                          ? 'border-2 border-brand text-brand'
-                          : 'text-ink'
-                    }`}
-                  >
-                    {d.getDate()}
-                  </span>
-                  {hasDot && !isSelected && (
-                    <span className="h-[5px] w-[5px] rounded-full bg-brand" />
-                  )}
-                  {isSelected && <span className="h-[5px] w-[5px] rounded-full bg-transparent" />}
-                  {!hasDot && !isSelected && <span className="h-[5px] w-[5px]" />}
-                </Pressable>
-              )
-            })}
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-4 rounded-[16px] border border-border bg-surface/50 px-4 py-3">
-        <div className="text-[12px] text-muted">Tap any day to see appointments in week view</div>
-      </div>
-    </div>
-  )
-}
-
-// ── block card (personal/business time, not a patient visit) ──
-
-function BlockCard({ block, onRemove }: { block: TimeBlock; onRemove: () => void }) {
-  const style = blockColorStyle(block.color)
-  return (
-    <div className={`flex items-center gap-3 rounded-[18px] border border-dashed px-4 py-3 ${style.border} ${style.bg}`}>
-      <div className="min-w-0 flex-1">
-        <div className={`text-[13.5px] font-semibold ${style.text}`}>{block.reason}</div>
-        <div className={`text-[11.5px] opacity-80 ${style.text}`}>
-          {formatDecimalTime(block.startHour)} – {formatDecimalTime(block.startHour + block.durationMin / 60)}
-        </div>
-      </div>
-      <Pressable ariaLabel="remove block" hap="tick" onClick={onRemove} className={`opacity-60 hover:opacity-100 ${style.text}`}>
-        <XCircle size={16} />
-      </Pressable>
-    </div>
-  )
-}
-
-// ── appointment card ──
-
-function AppointmentCard({
-  appointment: a,
-  patient: p,
-  onTap,
-  onEdit,
-  onCancel,
-  onPeekPatient,
-  onReassign,
-}: {
-  appointment: Appointment
-  patient: Patient | undefined
-  onTap: () => void
-  onEdit?: () => void
-  onCancel?: () => void
-  onPeekPatient?: () => void
-  onReassign?: () => void
-}) {
-  const statusTone = a.status === 'In consult' ? 'green' : a.status === 'New' ? 'amber' : a.status === 'Seen' ? 'neutral' : a.status === 'Waiting' ? 'amber' : 'neutral'
-
-  return (
-    <Pressable
-      as="div"
-      hap="tick"
-      scale={0.99}
-      onClick={onTap}
-      className="flex cursor-pointer items-center gap-3 rounded-[20px] border border-border bg-surface px-3.5 py-3 shadow-card"
-    >
-      <div className="text-center">
-        <div className="font-display text-[13px] font-bold text-ink">
-          {a.time.replace(' AM', '').replace(' PM', '')}
-        </div>
-        <div className="text-[12px] text-faint">
-          {a.time.includes('AM') ? 'AM' : 'PM'}
-        </div>
-      </div>
-      <Avatar initials={p?.initials ?? '??'} size={38} />
-      <div className="min-w-0 flex-1">
-        <div
-          onClick={onPeekPatient ? (e) => { e.stopPropagation(); haptic('tick'); onPeekPatient() } : undefined}
-          className={`truncate font-display text-[14px] font-semibold text-ink ${onPeekPatient ? 'underline decoration-border-dash decoration-1 underline-offset-2' : ''}`}
-        >
-          {p?.name ?? 'Unknown'}
-        </div>
-        <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-          <span className="flex items-center gap-0.5 text-[12px] text-muted">
-            {a.type === 'Video' ? <VideoCamera size={11} weight="fill" /> : <MapPin size={11} weight="fill" />}
-            {a.type}
-          </span>
-          <span className="text-[12px] text-faint">·</span>
-          <span className="text-[12px] text-muted">{a.durationMin}m</span>
-        </div>
-        {(a.tag || a.reason) && (
-          <div className="mt-0.5 truncate text-[12px] text-muted">{a.tag ?? a.reason}</div>
-        )}
-      </div>
-      <div className="flex flex-col items-end gap-1.5">
-        <Badge tone={statusTone}>{a.status}</Badge>
-        <div className="flex items-center gap-2.5">
-          {onEdit && (
-            <Pressable
-              hap="tick"
-              onClick={(e) => { e?.stopPropagation(); onEdit() }}
-              className="relative tap-pad px-2 py-2 text-[12px] font-medium text-brand"
-            >
-              Edit
-            </Pressable>
-          )}
-          {onCancel && (
-            <Pressable
-              hap="tick"
-              onClick={(e) => { e?.stopPropagation(); onCancel() }}
-              className="relative tap-pad px-2 py-2 text-[12px] font-medium text-danger/70"
-            >
-              Cancel
-            </Pressable>
-          )}
-          {onReassign && (
-            <Pressable
-              hap="tick"
-              onClick={(e) => { e?.stopPropagation(); onReassign() }}
-              className="relative tap-pad-text text-[12px] font-medium text-brand"
-            >
-              Reassign to me
-            </Pressable>
-          )}
-        </div>
-      </div>
-    </Pressable>
-  )
-}
-
-// ── empty state ──
-
-function EmptyDay() {
-  return (
-    <div className="flex flex-col items-center justify-center px-8 py-16 text-center">
-      <div className="flex h-16 w-16 items-center justify-center rounded-[20px] bg-tint-pale">
-        <CalendarBlank size={32} weight="thin" className="text-brand/40" />
-      </div>
-      <div className="mt-4 font-display text-[16px] font-semibold text-muted">No appointments</div>
-      <div className="mt-1 text-[13px] text-faint">This day is free. Enjoy the quiet.</div>
-    </div>
+    </PullToRefresh>
   )
 }
 
@@ -950,6 +470,7 @@ function CancelApptSheet({ open, appt, patient, onClose, onConfirm }: {
         <div className="flex h-14 w-14 items-center justify-center rounded-full bg-danger/10 text-danger"><XCircle size={28} weight="fill" /></div>
         <div className="mt-3 font-display text-[17px] font-bold text-ink">Cancel appointment?</div>
         <div className="mt-1 text-[13px] text-muted">{patient?.name} · {appt?.time}</div>
+        <div className="mt-2 px-4 text-[12.5px] leading-relaxed text-muted">The slot becomes free again and {patient?.name?.split(' ')[0] ?? 'the patient'} is told in the app.</div>
         <div className="mt-4 flex w-full gap-2">
           <Pressable hap="tick" onClick={onClose} className="flex-1 rounded-pill border border-border bg-surface py-2.5 text-center text-[14px] font-semibold text-body">Keep it</Pressable>
           <Pressable hap="impact" onClick={onConfirm} className="flex-1 rounded-pill bg-danger py-2.5 text-center text-[14px] font-semibold text-white">Cancel it</Pressable>

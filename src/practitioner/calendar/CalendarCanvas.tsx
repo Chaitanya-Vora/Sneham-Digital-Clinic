@@ -24,18 +24,19 @@ export interface CalendarCanvasProps {
   today: Date
   mode: CalendarMode
   loads: Map<ISODate, DayLoad>
-  capacity: number // visits that fill a day
+  capacity: number // visits that fill a day, for any day whose load does not say
+  isOpenDay?: (d: Date) => boolean // a day she works (for the "free days" count); Mon–Sat by default
   onSelect: (d: Date) => void
   onMode: (m: CalendarMode) => void
   onPage: (dir: -1 | 1) => void
   onToday: () => void
 }
 
-export function CalendarCanvas({ selected, today, mode, loads, capacity, onSelect, onMode, onPage, onToday }: CalendarCanvasProps) {
+export function CalendarCanvas({ selected, today, mode, loads, capacity, isOpenDay, onSelect, onMode, onPage, onToday }: CalendarCanvasProps) {
   const weeks = monthWeeks(selected.getFullYear(), selected.getMonth())
   const activeRow = Math.max(0, weeks.findIndex((w) => w.some((d) => sameDay(d, selected))))
   const dir = useRef<1 | -1>(1)
-  const summary = monthSummary(loads, selected.getFullYear(), selected.getMonth(), today)
+  const summary = monthSummary(loads, selected.getFullYear(), selected.getMonth(), today, isOpenDay)
   const away = !weeks.some((w) => w.some((d) => sameDay(d, today))) || !sameDay(selected, today)
 
   const page = (d: -1 | 1) => { dir.current = d; onPage(d) }
@@ -83,7 +84,7 @@ export function CalendarCanvas({ selected, today, mode, loads, capacity, onSelec
                     const isSel = sameDay(d, selected)
                     const isToday = sameDay(d, today)
                     const inMonth = d.getMonth() === selected.getMonth()
-                    const bar = loadBar(load.count, capacity)
+                    const bar = loadBar(load.count, load.capacity ?? capacity)
                     return (
                       <Pressable
                         key={iso}

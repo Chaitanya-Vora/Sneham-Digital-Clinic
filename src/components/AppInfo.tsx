@@ -3,7 +3,9 @@ import { Share } from '@capacitor/share'
 import { ShareNetwork } from '@phosphor-icons/react'
 import { Pressable } from '../design-system/Pressable'
 import { useToast } from '../design-system/toast'
-import { getDiagnosticsText, diag } from '../core/diagnostics'
+import { useState } from 'react'
+import { Toggle } from '../design-system/ui'
+import { getDiagnosticsText, diag, testFlag, setTestFlag, type TestFlag } from '../core/diagnostics'
 import { useUpdateStatus, applyLiveUpdateNow } from '../core/liveUpdate'
 
 declare const __APP_BUILD__: { version: string; sha: string; date: string; number: number }
@@ -15,6 +17,21 @@ function prettyDate(iso: string) {
 
 // Which build is this phone actually running? — plus a way to hand over what
 // the app recorded when something odd happened, with one tap.
+// TEST BUILD ONLY: two switches that turn off effects suspected of causing small hitches, so the
+// difference can be felt on the phone. Not shown in a normal build.
+function TestSwitch({ flag, label, note }: { flag: TestFlag; label: string; note: string }) {
+  const [on, setOn] = useState(() => testFlag(flag))
+  return (
+    <div className="mt-2.5 flex items-center justify-between gap-3 rounded-[12px] bg-amber-tint px-3 py-2">
+      <div className="min-w-0">
+        <div className="text-[12.5px] font-semibold text-amber-text">{label}</div>
+        <div className="text-[11.5px] text-amber-text/80">{note}</div>
+      </div>
+      <Toggle on={on} onChange={(v) => { setOn(v); setTestFlag(flag, v) }} label={label} />
+    </div>
+  )
+}
+
 export function AppInfoRow() {
   const toast = useToast()
   const b = __APP_BUILD__
@@ -63,6 +80,12 @@ export function AppInfoRow() {
         <div className="mt-2.5 rounded-[12px] bg-amber-tint px-3 py-2 text-[12.5px] font-medium text-amber-text">
           A newer version of the app is needed for the latest update — ask for the new app file.
         </div>
+      )}
+      {b.version.includes('test') && (
+        <>
+          <TestSwitch flag="noblur" label="Test: no blur effects" note="Turns off the see-through blur behind bars and sheets." />
+          <TestSwitch flag="nofade" label="Test: no screen fade" note="Switches tabs instantly instead of fading." />
+        </>
       )}
       <div className="mt-1.5 text-[11.5px] text-faint">If something feels off, tap Diagnostics and send it over — it holds timings and screen names only, never patient information.</div>
     </div>

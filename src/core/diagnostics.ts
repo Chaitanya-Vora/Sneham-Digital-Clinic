@@ -53,9 +53,45 @@ function viewportInfo(): string {
   return `inner=${innerWidth}x${innerHeight} vv=${vv ? `${Math.round(vv.width)}x${Math.round(vv.height)} off=${Math.round(vv.offsetTop)}` : 'n/a'} scroll=${Math.round(scrollX)},${Math.round(scrollY)}`
 }
 
+// ── Test tools (only offered in test builds): a frame sampler that sees small hitches the
+// freeze log below cannot, and two switches to turn off effects suspected of causing them. ──
+export type TestFlag = 'noblur' | 'nofade'
+export function testFlag(name: TestFlag): boolean {
+  try { return localStorage.getItem(`sneham-test-${name}`) === '1' } catch { return false }
+}
+export function applyTestFlags() {
+  document.documentElement.toggleAttribute('data-test-noblur', testFlag('noblur'))
+}
+export function setTestFlag(name: TestFlag, on: boolean) {
+  try { if (on) localStorage.setItem(`sneham-test-${name}`, '1'); else localStorage.removeItem(`sneham-test-${name}`) } catch { /* ignore */ }
+  applyTestFlags()
+  diag('test', `${name}=${on ? 'on' : 'off'}`)
+}
+
+// Watches the screen for a short window and writes one line: how many frames took longer than
+// 25ms (a visible hitch on a 90/120Hz phone) and the worst one. Only runs for the window asked.
+let sampling = false
+export function sampleFrames(label: string, ms = 1500) {
+  if (sampling || typeof document === 'undefined' || document.visibilityState !== 'visible') return
+  sampling = true
+  const t0 = performance.now()
+  let last = t0, worst = 0, slow = 0, frames = 0
+  const step = (now: number) => {
+    const dt = now - last
+    last = now
+    frames++
+    if (frames > 1) { if (dt > worst) worst = dt; if (dt > 25) slow++ }
+    if (now - t0 < ms) requestAnimationFrame(step)
+    else { sampling = false; diag('frames', `${label}: ${frames} frames, ${slow} slow(>25ms), worst ${Math.round(worst)}ms`) }
+  }
+  requestAnimationFrame(step)
+}
+
 export function initDiagnostics() {
   if (started) return
   started = true
+  applyTestFlags()
+  setTimeout(() => sampleFrames('launch', 8000), 0)
 
   // Was the last run closed normally, or did the system take it away?
   let prev: { s: string; t: number } | null = null
@@ -96,7 +132,7 @@ export function initDiagnostics() {
   try {
     new PerformanceObserver((list) => {
       for (const entry of list.getEntries() as unknown as Array<PerformanceEntry & { blockingDuration?: number; scripts?: Array<{ sourceURL?: string; sourceFunctionName?: string }> }>) {
-        if (entry.duration < 120 || longCount >= 60) continue
+        if (entry.duration < 50 || longCount >= 80) continue
         longCount++
         const src = (entry.scripts ?? []).slice(0, 2).map((s) => `${(s.sourceURL ?? '').split('/').pop()?.split('?')[0] ?? ''}:${s.sourceFunctionName ?? ''}`).join(' ')
         diag('long-frame', `${Math.round(entry.duration)}ms blocking=${Math.round(entry.blockingDuration ?? 0)} ${src}`)

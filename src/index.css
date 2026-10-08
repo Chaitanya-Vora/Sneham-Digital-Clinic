@@ -121,3 +121,6 @@
     transition: none !important;
   }
 }
+
+/* TEST BUILD ONLY switch (Profile → App version): turns off every blur effect so we can tell if they cause hitches. */
+html[data-test-noblur] * { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }

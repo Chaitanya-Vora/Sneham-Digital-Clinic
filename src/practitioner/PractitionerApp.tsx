@@ -51,7 +51,7 @@ import { GuardedMotionDiv, useGhostSweep } from '../design-system/presence'
 import { readResume, clearResume } from '../core/drafts'
 import { ToastHost } from '../design-system/toast'
 import { AppInfoRow } from '../components/AppInfo'
-import { diag } from '../core/diagnostics'
+import { diag, sampleFrames, testFlag } from '../core/diagnostics'
 import { App as CapApp } from '@capacitor/app'
 import { useToast } from '../design-system/toast'
 import { shareTextViaWhatsApp } from '../core/share'
@@ -101,7 +101,7 @@ function headerDisplayName(name: string) {
 
 export function PractitionerApp() {
   const [tab, setTab] = useState<Tab>('today')
-  useEffect(() => { diag('tab', tab) }, [tab])
+  useEffect(() => { diag('tab', tab); sampleFrames(`tab ${tab}`, 1500) }, [tab])
   const [dir, setDir] = useState(1)
   // Overlay navigation as one atomic value — current screen, what's
   // stacked underneath it (so Patient detail -> Case sheet -> Back returns
@@ -293,7 +293,7 @@ export function PractitionerApp() {
 
         <div className="relative flex-1 overflow-clip">
           <AnimatePresence custom={dir} initial={false}>
-            <GuardedMotionDiv key={tab} className="absolute inset-0" custom={dir} variants={tabVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.15 }} {...swipe}>
+            <GuardedMotionDiv key={tab} className="absolute inset-0" custom={dir} variants={tabVariants} initial="enter" animate="center" exit="exit" transition={{ duration: testFlag('nofade') ? 0 : 0.15 }} {...swipe}>
               {tab === 'calendar' ? (
                 <CalendarScreen
                   onOpenPatient={(id) => openOverlay({ kind: 'patient-detail', patientId: id })}

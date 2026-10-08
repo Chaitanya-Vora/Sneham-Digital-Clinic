@@ -16,7 +16,10 @@
     </style>
 
 
+    <!-- TEST: the launch picture used to be set as this theme's default view background
+         (android:background). Android's own popups (paste / autofill) can pick that up and
+         draw the white splash image with the Capacitor logo where the popup should be. The
+         launch screen itself is drawn by the system on Android 12+ and does not use it. -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
-        <item name="android:background">@drawable/splash</item>
     </style>
 </resources>

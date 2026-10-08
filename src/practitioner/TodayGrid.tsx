@@ -23,7 +23,7 @@ import {
   DotsThreeVertical,
   Bell,
 } from '@phosphor-icons/react'
-import { todayISO, toISO, formatDayLabel, firstAvailableMorningSlot, isPastISO, isTodayISO, followUpPresetDate, FOLLOW_UP_PRESETS, type FollowUpPreset } from '../core/day'
+import { todayISO, toISO, formatDayLabel, firstAvailableMorningSlot, isPastISO, isTodayISO, followUpPresetDate, customFollowUpPreset, FOLLOW_UP_PRESETS, MAX_FOLLOW_UP_DAYS, type FollowUpPreset } from '../core/day'
 import { restockRemindersDue } from '../core/restockReminders'
 import { useClinic } from '../core/store'
 import type { Appointment, TimeBlock } from '../core/types'
@@ -847,6 +847,13 @@ function EndConsultSheet({ open, apptId, onClose, onConfirm }: { open: boolean; 
 }
 
 export function FollowUpSheet({ open, patientName, onClose, onSelect }: { open: boolean; patientName: string; onClose: () => void; onSelect: (preset: FollowUpPreset) => void }) {
+  // "Custom": she types the number of days (10, 20 …) instead of picking a preset.
+  const [custom, setCustom] = useState(false)
+  const [days, setDays] = useState('')
+  useEffect(() => { if (!open) { setCustom(false); setDays('') } }, [open])
+  const n = Number(days)
+  const valid = Number.isInteger(n) && n >= 1 && n <= MAX_FOLLOW_UP_DAYS
+  const confirmCustom = () => { if (valid) onSelect(customFollowUpPreset(n)) }
   return (
     <BottomSheet open={open} onClose={onClose}>
       <div className="space-y-3">
@@ -860,6 +867,40 @@ export function FollowUpSheet({ open, patientName, onClose, onSelect }: { open: 
               <span className="text-faint">&rsaquo;</span>
             </Pressable>
           ))}
+          {!custom ? (
+            <Pressable as="div" hap="tick" scale={0.98} onClick={() => setCustom(true)} className="flex cursor-pointer items-center gap-3 rounded-[16px] border border-dashed border-border bg-surface px-4 py-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-[12px] bg-tint text-brand"><CalendarPlus size={20} /></div>
+              <div className="flex-1 text-[14px] font-semibold text-ink">Custom — after a number of days</div>
+              <span className="text-faint">&rsaquo;</span>
+            </Pressable>
+          ) : (
+            <div className="rounded-[16px] border border-border bg-surface px-4 py-3">
+              <div className="text-[13px] font-semibold text-ink">Follow-up after</div>
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={MAX_FOLLOW_UP_DAYS}
+                  autoFocus
+                  value={days}
+                  onChange={(e) => setDays(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') confirmCustom() }}
+                  placeholder="10"
+                  aria-label="Number of days until the follow-up"
+                  className="w-24 rounded-[12px] border border-border bg-screen px-3 py-2 text-[15px] font-semibold text-ink outline-none focus:border-green-border"
+                  data-selectable="true"
+                />
+                <span className="text-[14px] text-body">days</span>
+              </div>
+              <div className="mt-2 text-[12.5px] text-muted">
+                {valid ? `That is ${formatDayLabel(followUpPresetDate(customFollowUpPreset(n)))}` : `Enter 1 to ${MAX_FOLLOW_UP_DAYS} days`}
+              </div>
+              <Pressable hap="success" disabled={!valid} onClick={confirmCustom} className={`mt-3 w-full rounded-pill py-2.5 text-center text-[14px] font-semibold text-screen ${valid ? 'bg-brand' : 'bg-brand/40'}`}>
+                Schedule follow-up
+              </Pressable>
+            </div>
+          )}
         </div>
         <Pressable hap="tick" onClick={onClose} className="w-full rounded-pill border border-border bg-surface py-2.5 text-center text-[14px] font-semibold text-body">Skip for now</Pressable>
       </div>

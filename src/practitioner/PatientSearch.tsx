@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { formatDayLabel, toISO, todayISO, addDaysISO, firstAvailableMorningSlot } from '../core/day'
+import { formatDayLabel, toISO, todayISO, addDaysISO, fromISO, firstAvailableMorningSlot, MAX_FOLLOW_UP_DAYS } from '../core/day'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   CaretLeft,
@@ -269,6 +269,7 @@ export function PatientDetailScreen({
   const [billing, setBilling] = useState<{ appointmentId?: string; existingInvoice?: Invoice } | null>(null)
   // null = showing the preset list; a date string = the "Custom" picker is open
   const [customDate, setCustomDate] = useState<string | null>(null)
+  const [customDays, setCustomDays] = useState('7') // the same custom date, as a number of days from today
   const [actionsOpen, setActionsOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [exporting, setExporting] = useState(false)
@@ -350,6 +351,7 @@ export function PatientDetailScreen({
       // Don't auto-book — hand the doctor a date picker defaulted to a week out.
       haptic('tick')
       setCustomDate(toISO(new Date(Date.now() + 7 * 86400000)))
+      setCustomDays('7')
       return
     }
     const daysMap: Record<string, number> = { 'In 1 week': 7, 'In 2 weeks': 14, 'In 1 month': 30 }
@@ -775,12 +777,38 @@ export function PatientDetailScreen({
             <div className="font-display text-[17px] font-bold text-ink">Pick a date</div>
             <div className="mt-0.5 text-[12.5px] text-muted">Follow-up for {patient.name}.</div>
             <div className="mt-3">
-              <Label>Date</Label>
+              <Label>After how many days?</Label>
+              <div className="mt-1.5 flex items-center gap-2">
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={MAX_FOLLOW_UP_DAYS}
+                  value={customDays}
+                  onChange={(e) => {
+                    setCustomDays(e.target.value)
+                    const n = Number(e.target.value)
+                    if (Number.isInteger(n) && n >= 1 && n <= MAX_FOLLOW_UP_DAYS) setCustomDate(addDaysISO(todayISO(), n))
+                  }}
+                  placeholder="10"
+                  aria-label="Number of days until the follow-up"
+                  className="w-24 rounded-[14px] border border-border bg-surface px-3.5 py-2.5 text-[15px] font-semibold text-ink outline-none focus:border-green-border"
+                  data-selectable="true"
+                />
+                <span className="text-[14px] text-body">days</span>
+              </div>
+            </div>
+            <div className="mt-3">
+              <Label>Or pick the date</Label>
               <input
                 type="date"
                 value={customDate}
                 min={todayISO()}
-                onChange={(e) => setCustomDate(e.target.value)}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setCustomDate(v)
+                  if (v) setCustomDays(String(Math.round((fromISO(v).getTime() - fromISO(todayISO()).getTime()) / 86400000)))
+                }}
                 className="mt-1.5 w-full rounded-[14px] border border-border bg-surface px-3.5 py-2.5 text-[13px] text-body outline-none focus:border-green-border"
                 data-selectable="true"
               />

@@ -1005,7 +1005,7 @@ function QuickInvestigationScreen({ patientId, onBack }: { patientId: string; on
         <div>
           <Label>Selected{selected.length > 0 ? ` (${selected.length})` : ''}</Label>
           {selected.length === 0 ? (
-            <p className="mt-2 text-[12.5px] text-faint">Nothing added yet — search above to add tests.</p>
+            <p className="mt-2 text-[12.5px] text-faint">Nothing added yet — search above to add tests. Not in the list? Type its name and add it as your own test.</p>
           ) : (
             <div className="mt-2 flex flex-wrap gap-2">
               {selected.map((test) => (

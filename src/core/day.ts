@@ -19,16 +19,39 @@ export function toISO(d: Date): ISODate {
   return `${y}-${m}-${day}`
 }
 
-export type FollowUpPreset = '1 week' | '2 weeks' | '1 month'
+/** A follow-up offered by name: one of the three quick choices below, or "N days"
+ *  when the doctor types her own number (see `customFollowUpPreset`). */
+export type FollowUpPreset = string
 export const FOLLOW_UP_PRESETS: FollowUpPreset[] = ['1 week', '2 weeks', '1 month']
+const NAMED_PRESET_DAYS: Record<string, number> = { '1 week': 7, '2 weeks': 14, '1 month': 30 }
+
+/** The furthest out a typed follow-up can be — a year is already beyond any sensible plan. */
+export const MAX_FOLLOW_UP_DAYS = 365
+
+/** Whole days in the allowed range 1…365; anything unusable becomes 1. */
+export function clampFollowUpDays(n: number): number {
+  return Math.min(MAX_FOLLOW_UP_DAYS, Math.max(1, Math.round(n) || 1))
+}
+
+/** "10 days" — the preset for a number of days the doctor typed ("FU after 10 or 20 days"). */
+export function customFollowUpPreset(days: number): FollowUpPreset {
+  const n = clampFollowUpDays(days)
+  return n === 1 ? '1 day' : `${n} days`
+}
+
+function followUpPresetDays(preset: FollowUpPreset): number {
+  const named = NAMED_PRESET_DAYS[preset]
+  if (named) return named
+  const typed = /^(\d+)\s*days?$/i.exec(preset.trim())
+  return typed ? clampFollowUpDays(Number(typed[1])) : 7
+}
 
 /** Shared with every "schedule a follow-up" entry point (Today tab, patient
  *  profile, case sheet, follow-up review) so "2 weeks" means the same date
  *  everywhere, computed once instead of four slightly-driftable copies. */
 export function followUpPresetDate(preset: FollowUpPreset, from: Date = new Date()): ISODate {
-  const days = { '1 week': 7, '2 weeks': 14, '1 month': 30 }[preset]
   const dt = new Date(from)
-  dt.setDate(dt.getDate() + days)
+  dt.setDate(dt.getDate() + followUpPresetDays(preset))
   return toISO(dt)
 }
 

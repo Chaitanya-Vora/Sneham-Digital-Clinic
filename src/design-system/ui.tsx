@@ -364,7 +364,13 @@ export function BottomSheet({
   // that didn't dismiss it) fixes that without touching drag itself — the
   // next real drag re-asserts its own transform from framer-motion's own
   // tracked value, not from this DOM string, so the gesture still works.
-  const clearRestingTransform = () => {
+  //
+  // The exit animation fires this same callback once the sheet has slid fully
+  // out. Resetting the transform then would snap the closed sheet back on
+  // screen for a frame before it unmounts (a flash after tapping outside), so
+  // the exit target is skipped.
+  const clearRestingTransform = (def: unknown) => {
+    if (typeof def === 'object' && def !== null && (def as { y?: unknown }).y === '100%') return
     if (sheetRef.current) sheetRef.current.style.transform = 'none'
   }
   return (

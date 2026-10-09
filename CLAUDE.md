@@ -226,3 +226,14 @@ Open item: on the Android apps, long-pressing a login field can show a blank whi
 
 Web follow-up (2026-10-08, after 1.5.1): the phone "bigger finger" sizes (Button md `py-3`, Stepper `h-11`, attachment buttons `h-11`, 11px text floor) had leaked onto the laptop web console. They now apply only below the `lg` breakpoint (`lg:py-2.5`, `lg:h-auto`, `lg:h-10`, `lg:text-[10.5px]`), and the 12 tiny labels in `src/web/WebApp.tsx` / `WebCalendar.tsx` are back to their 1.4.0 sizes. Rule: anything added for touch must not change the desktop layout — use `lg:` to restore it, and compare old vs new on the web before shipping.
 
+
+## 1.5.2 — smoothness + Android white box (2026-10-09)
+
+Found with the in-app diagnostics (Profile → App version → Diagnostics; frame sampler `sampleFrames`, long-frame log at 50ms) on the owner's phone, then re-tested on the phone after each change.
+
+- **White box / paste (Android apps):** the launch theme `AppTheme.NoActionBarLaunch` (`android/app/src/main/res/values/styles.xml`) no longer sets the splash picture as `android:background`; the WebView's native long-press (paste) and autofill popups were picking it up as a blank box with the logo. Applies to both APKs (shared styles). The patient app has not been tried on a phone with this yet.
+- **Tab switches:** the practitioner tab screen is built from `useDeferredValue(tab)` (`PractitionerApp.tsx`), so the tap itself never waits for the next screen to build.
+- **Search → patient peek:** result rows are `memo`'d `SearchRow`s with a stable `onPick` (`PatientSearch.tsx`); opening/closing the peek no longer re-renders every row (108 → 0).
+- **Closed bottom sheet flashed back for a frame:** `BottomSheet.onAnimationComplete` (`design-system/ui.tsx`) also fires for the exit animation and reset the transform to `none`; it now skips the `y: '100%'` exit target. Any `onAnimationComplete` that touches the transform must check which animation finished.
+- Test tools stay in the code but only show in builds whose version contains "test" (`AppInfo.tsx`): switches for blur / screen fade / lighter search (`diagnostics.ts` `testFlag`), all OFF by default and not offered in releases.
+- Testing animations in the Browser pane: the pane is a hidden document so `requestAnimationFrame` never runs; stub `requestAnimationFrame` + `performance.now` with a manual stepper in a throwaway page to step frames.
